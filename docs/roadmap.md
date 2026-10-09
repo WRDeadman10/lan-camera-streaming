@@ -56,19 +56,18 @@ Tasks:
 
 **Exit criteria:** Invalid secrets and unauthorized signaling are rejected; abandoned rooms are cleaned; the UI never displays Live without a usable remote track.
 
-## Phase 3.5 — Python Computer Vision Inference Pipeline (Dual Transports)
+## Phase 3.5 — External Receiver Protocol Specification & Signaling Support
 
-**Objective:** Enable OpenCV, PyTorch, and YOLO models to ingest live camera frames with lowest practical latency and zero stale frame queuing.
+**Objective:** Support external WebRTC receivers (such as independent Python `aiortc` applications) connecting to the signaling server and browser camera sender.
 
 Tasks:
-- Create abstract `BaseVideoTransport` and `VideoFrame` data classes.
-- Implement `MjpegVideoTransport` (HTTP multipart stream).
-- Implement `WebRtcVideoTransport` (`aiortc` + `python-socketio` peer connection).
-- Implement `InferencePipeline` with fresh-frame prioritization and stale frame drop threshold.
-- Implement `MetricsCollector` measuring FPS, latency, dropped frames, CPU, memory, and bandwidth.
-- Provide unified CLI runner `run_inference.py`.
+- Add canonical participant role support (`camera-sender`, `webrtc-receiver`).
+- Support bidirectional SDP offer/answer flows on the browser sender.
+- Document the versioned external receiver signaling contract in `docs/architecture.md`.
+- Preserve the optional HTTP MJPEG stream endpoint (`/stream/:roomId`) as an alternative integration.
+- Verify room isolation, rate-limiting, and lifecycle cleanup via Node.js automated tests.
 
-**Exit criteria:** Automated tests pass for pipeline and fresh-frame drop policy. Python can ingest video via either `--transport mjpeg` or `--transport webrtc`.
+**Exit criteria:** Node.js automated tests pass for external receiver signaling and MJPEG streaming without Python installed on the host.
 
 ## Phase 4 — LAN quality and diagnostics
 

@@ -117,59 +117,44 @@ For strictly offline or tunnel-free LAN environments:
 
 ---
 
-## Python Computer Vision & Inference Pipeline (Dual Transports)
+## External Client Integration (Python, OpenCV, YOLO)
 
-The application provides a unified, transport-agnostic Python pipeline (`python_inference`) that delivers standard OpenCV-compatible BGR numpy frames directly into **OpenCV**, **PyTorch**, or **YOLO** inference loops.
+This Node.js application serves as the **camera capture source and WebRTC signaling server**. External clients (such as a separate Python project using `aiortc` or `cv2.VideoCapture`) can consume the live camera feed using either of two supported integration methods:
 
-### Key Features
-- **Dual Transports**:
-  1. **WebRTC (`aiortc`)**: Direct peer-to-peer transport over LAN or through TURN relay with **sub-100ms ultra-low latency**.
-  2. **HTTP MJPEG**: Standard multipart HTTP stream for universal OpenCV `cv2.VideoCapture` compatibility.
-- **Fresh-Frame Policy**: Enforces a single-item queue (`maxsize=1`). When inference is slower than stream capture, stale buffered frames are automatically discarded rather than queued up.
-- **Configurable Frame-Age Drop**: Frames older than `max_frame_age_ms` (default 250ms) are skipped to prevent lagging behind real-time.
-- **Real-Time Telemetry**: Automatically tracks and logs FPS, inference latency, frame age, CPU %, RAM MB, dropped frames, and bandwidth.
+### Method 1: Direct WebRTC via Socket.IO Signaling (Recommended for Lowest Latency)
 
-### Running with the Unified CLI Runner
+External applications (like Python `aiortc`) connect as an authorized receiver:
+1. Connect via Socket.IO client to `https://<your-host-or-zrok-url>`.
+2. Emit `room:join` with:
+   ```json
+   {
+     "roomId": "<roomId>",
+     "role": "webrtc-receiver",
+     "pin": "123456"
+   }
+   ```
+3. Exchange standard WebRTC SDP offer/answer (`webrtc:offer`, `webrtc:answer`) and ICE candidates (`webrtc:ice-candidate`).
+4. WebRTC establishes a direct, ultra-low latency peer-to-peer media track.
+5. Full event payload schemas and lifecycle transitions are specified in [`docs/architecture.md`](docs/architecture.md#4-external-webrtc-receiver-signaling-contract-version-10).
 
-Install Python dependencies:
-```bash
-pip install opencv-python aiortc "python-socketio[asyncio-client]" av psutil
+### Method 2: HTTP MJPEG Streaming Endpoint (Universal Fallback)
+
+Whenever a sender is active, the Node.js server also provides an authenticated HTTP multipart video stream:
+```text
+http://<host>:3000/stream/<roomId>?pin=<accessPin>
 ```
-
-#### Option A: WebRTC Transport (Lowest Latency)
-```bash
-python run_inference.py --transport webrtc --url http://localhost:3000 --room <roomId> --pin 123456
-```
-
-#### Option B: MJPEG Transport (Standard HTTP)
-```bash
-python run_inference.py --transport mjpeg --url http://localhost:3000/stream/<roomId>?pin=123456
-```
-
-### Direct Python Code Example
-
+Any external tool or script can read this stream directly with standard OpenCV:
 ```python
-from python_inference.pipeline import InferencePipeline
-from python_inference.transports.webrtc_transport import WebRtcVideoTransport
-from python_inference.transports.mjpeg_transport import MjpegVideoTransport
+import cv2
 
-# 1. Choose transport:
-# For WebRTC:
-transport = WebRtcVideoTransport(signaling_url="http://localhost:3000", room_id="room-abc", access_pin="123456")
-# Or for MJPEG:
-# transport = MjpegVideoTransport("http://localhost:3000/stream/room-abc?pin=123456")
-
-# 2. Attach your custom model:
-pipeline = InferencePipeline(transport=transport, model_fn=lambda frame: yolo_model(frame))
-pipeline.start()
-
-while True:
-    output = pipeline.process_next_frame()
-    if output and not output["dropped"]:
-        frame = output["frame"]       # numpy ndarray (BGR)
-        result = output["result"]     # model inference output
-        metrics = output["metrics"]   # real-time stats
-        print(f"FPS: {metrics['fps']}, Latency: {metrics['frame_age_ms']}ms, CPU: {metrics['cpu_percent']}%")
+cap = cv2.VideoCapture("http://localhost:3000/stream/room-abc?pin=123456")
+while cap.isOpened():
+    ret, frame = cap.read()
+    if ret:
+        # frame is ready for YOLO / PyTorch / OpenCV inference
+        cv2.imshow("Stream", frame)
+        if cv2.waitKey(1) == ord('q'):
+            break
 ```
 
 ---

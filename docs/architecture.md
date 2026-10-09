@@ -7,30 +7,34 @@ The Windows PC hosts the application. Browsers use it for the sender/viewer UI a
 ```mermaid
 flowchart TB
     Host[Windows PC\nNode.js + Express + Socket.IO]
-    Tunnel[Optional HTTPS tunnel\nngrok OR zrok]
-    Sender[Sender browser\ngetUserMedia + WebRTC / MJPEG]
-    Viewer[Viewer browser\nWebRTC video element]
-    PyInference[Python Inference Engine\nOpenCV / YOLO / PyTorch]
+    Tunnel[Optional HTTPS tunnel\nzrok OR ngrok]
+    Sender[Browser Camera Sender\ngetUserMedia + WebRTC / MJPEG]
+    BrowserViewer[Browser Viewer\nWebRTC video element]
+    ExtReceiver[External Receiver / Python Inference\naiortc WebRTC OR HTTP MJPEG]
     Turn[Optional TURN relay]
 
     Sender <-->|HTTPS / Socket.IO signaling| Tunnel
-    Viewer <-->|HTTPS / Socket.IO signaling| Tunnel
+    BrowserViewer <-->|HTTPS / Socket.IO signaling| Tunnel
+    ExtReceiver <-->|HTTPS / Socket.IO signaling| Tunnel
     Tunnel <--> Host
-    Sender <-->|Preferred: direct WebRTC media over LAN| Viewer
-    Sender -.->|Fallback media path if ICE selects relay| Turn
-    Turn -.-> Viewer
 
-    %% Python Inference Pathways
-    Sender -->|HTTP MJPEG frames via Server| Host
-    Host -->|HTTP /stream/:roomId| PyInference
-    Sender <-->|Direct WebRTC aiortc via Socket.IO| PyInference
+    Sender <-->|Direct WebRTC media over LAN| BrowserViewer
+    Sender <-->|Direct WebRTC media over LAN| ExtReceiver
+    Sender -.->|Fallback media path if ICE selects relay| Turn
+    Turn -.-> ExtReceiver
+
+    %% Optional MJPEG stream
+    Sender -->|JPEG frames via Socket.IO| Host
+    Host -->|HTTP /stream/:roomId| ExtReceiver
 ```
 
-The application provides two interchangeable ingestion transports for Python computer vision and machine learning (OpenCV, PyTorch, YOLO):
-1. **Direct WebRTC via `aiortc`**: Sub-100ms ultra-low latency direct peer-to-peer transport over LAN or through TURN relay.
-2. **HTTP MJPEG Stream**: Standard multipart/x-mixed-replace stream over HTTP for maximum client compatibility with standard `cv2.VideoCapture`.
+This Node.js repository hosts the browser camera capture interface, authentication, room management, Socket.IO signaling server, and optional MJPEG streaming endpoint.
 
-Both transports feed into a unified `InferencePipeline` that prioritizes fresh frames and drops stale buffered frames.
+Any external receiving application (such as an external Python `aiortc` client running OpenCV, PyTorch, or YOLO in a separate project) connects via:
+1. **WebRTC (`aiortc`)**: Negotiates directly through Socket.IO signaling to receive the camera media track peer-to-peer.
+2. **HTTP MJPEG**: Reads standard multipart/x-mixed-replace stream from `/stream/:roomId?pin=...`.
+
+Video frames never route through the Node.js signaling channel.
 
 ## 2. Components and responsibilities
 
@@ -93,37 +97,132 @@ TURN is not required for the first same-LAN proof of concept. Add it if testing 
 
 The public tunnel should expose only the intended app routes. The MVP has no unauthenticated admin dashboard.
 
-## 4. Proposed signaling protocol
+## 4. External WebRTC Receiver Signaling Contract (Version 1.0)
 
-Exact payload schemas should be defined in code and validated on both sides. These are conceptual event names for implementation consistency:
+This contract defines the exact Socket.IO event protocol for any external client (such as an external Python `aiortc` client in another project) connecting to this Node.js signaling server.
 
-| Event | Direction | Purpose |
-|---|---|---|
-| `room:create` | Sender → server | Request a room and receive a non-guessable room ID plus pairing secret |
-| `room:join` | Viewer → server | Join with a valid room ID and secret/PIN |
-| `room:joined` | Server → client | Confirm room membership and provide the authorized peer ID |
-| `peer:ready` | Server → peer | Notify the other participant that signaling can begin |
-| `webrtc:offer` | Offerer → server → recipient | Relay SDP offer to the other authorized peer |
-| `webrtc:answer` | Answerer → server → recipient | Relay SDP answer to the other authorized peer |
-| `webrtc:ice-candidate` | Either peer → server → recipient | Relay one ICE candidate at a time |
-| `stream:state` | Sender → server → viewer | Publish explicit states such as starting/live/stopped |
-| `room:leave` | Client → server | Leave the room and notify the other peer |
-| `room:error` | Server → client | Return a safe, actionable error code/message |
+### 4.1 Connection & Authentication
+- **Transport**: Socket.IO client (v4.x compatible over WebSocket/Polling).
+- **Endpoint**: Base server URL (e.g., `http://<host>:3000` or `https://<zrok-subdomain>.share.zrok.io`).
+- **Namespace**: Default (`/`).
+- **Authorization**: Required `pin` (matching server `ACCESS_PIN`, minimum 4 characters).
+- **Room ID Format**: `^[a-zA-Z0-9_-]{3,32}$`.
 
-The server should associate each socket with its authenticated room membership, rate-limit room creation/join attempts, reject oversized or malformed payloads, and never trust a client-supplied recipient without checking membership.
+### 4.2 Participant Roles
+The server enforces a 1-sender and 1-receiver model per room. Canonical role identifiers:
+- `camera-sender` (or `sender`): captures and publishes camera stream.
+- `webrtc-receiver` (or `viewer`): receives the remote camera stream.
 
-## 5. Connection sequence
+### 4.3 Supported Socket.IO Events
 
-1. The sender loads the app over HTTPS and creates or joins a room.
-2. The server registers the sender socket and returns the room details.
-3. The viewer joins using the room ID and pairing secret/PIN.
-4. The server authorizes the viewer and notifies both participants that they are ready.
-5. The chosen offerer creates an `RTCPeerConnection`, adds its media track if it is the sender, creates an SDP offer, and sends it through Socket.IO.
-6. The other peer applies the offer, creates an SDP answer, and returns it through Socket.IO.
-7. Both peers exchange ICE candidates through Socket.IO.
-8. ICE selects a viable path. When possible, the video media flows directly between browsers; otherwise a configured relay may be used.
-9. The viewer transitions to Live when a remote track is rendered and the connection is usable—not merely when an offer or answer is exchanged.
-10. On Stop/Leave/disconnect, close peer connections, stop capture tracks on the sender, update the UI, and clean up server room state.
+#### 1. `room:join` (Client → Server)
+Requests room registration and authentication.
+```json
+{
+  "roomId": "room-abc123",
+  "role": "webrtc-receiver",
+  "pin": "123456"
+}
+```
+**Server Ack Callback Response**:
+```json
+{
+  "success": true,
+  "roomId": "room-abc123",
+  "role": "viewer",
+  "hasPeer": true,
+  "peerSocketId": "socket_xyz"
+}
+```
+If failed:
+```json
+{
+  "success": false,
+  "error": "Invalid access PIN"
+}
+```
+
+#### 2. `peer:joined` (Server → Peer)
+Emitted to the other peer when an authorized participant joins the room:
+```json
+{
+  "role": "viewer",
+  "peerId": "socket_abc"
+}
+```
+
+#### 3. `webrtc:offer` (Bidirectional: Peer ↔ Server ↔ Peer)
+Relays standard SDP offer payload to the peer in the room:
+```json
+{
+  "sdp": "v=0\r\no=- 1234567 2 IN IP4 127.0.0.1...",
+  "type": "offer"
+}
+```
+
+#### 4. `webrtc:answer` (Bidirectional: Peer ↔ Server ↔ Peer)
+Relays standard SDP answer payload to the peer in the room:
+```json
+{
+  "sdp": "v=0\r\no=- 7654321 2 IN IP4 127.0.0.1...",
+  "type": "answer"
+}
+```
+
+#### 5. `webrtc:ice-candidate` (Bidirectional: Peer ↔ Server ↔ Peer)
+Relays an ICE candidate:
+```json
+{
+  "candidate": "candidate:1 1 UDP 2130706431 ...",
+  "sdpMid": "0",
+  "sdpMLineIndex": 0
+}
+```
+
+#### 6. `stream:state` (Sender → Server → Receiver)
+Notifies of explicit stream lifecycle changes:
+```json
+{
+  "state": "live" | "stopped"
+}
+```
+
+#### 7. `peer:left` (Server → Peer)
+Notifies when the counterpart leaves or disconnects:
+```json
+{
+  "role": "sender" | "viewer"
+}
+```
+
+#### 8. `room:leave` (Client → Server)
+Explicit departure from the room. Triggers cleanup and notifies peer.
+
+#### 9. `room:error` (Server → Client)
+Returns safe error notification if an unauthorized or malformed event is sent:
+```json
+{
+  "message": "Unauthorized: Not in a room."
+}
+```
+
+### 4.4 External Receiver Connection Sequence
+1. External client establishes Socket.IO connection to `https://<host-or-zrok-url>`.
+2. Emits `room:join` with `{ roomId, role: "webrtc-receiver", pin }`.
+3. Acknowledged with `hasPeer: true` (or awaits `peer:joined` when sender joins).
+4. Sender creates SDP offer and transmits `webrtc:offer` through Socket.IO.
+5. Receiver sets remote description, generates SDP answer, and emits `webrtc:answer`.
+6. Both peers exchange `webrtc:ice-candidate` events through Socket.IO.
+7. WebRTC establishes direct P2P media path (or TURN relay).
+8. Remote video track is consumed by the receiver.
+
+### 4.5 Optional HTTP MJPEG Ingestion
+As an alternative to WebRTC, external applications can read:
+```text
+GET /stream/:roomId?pin=<accessPin>
+```
+Response format: `multipart/x-mixed-replace; boundary=--frame`.
+Each part is a complete standard JPEG image.
 
 ## 6. HTTPS and LAN topology
 

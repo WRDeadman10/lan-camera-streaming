@@ -2,44 +2,40 @@
 
 ## Current status
 
-**Status:** Full MVP implementation and Dual-Transport Python Vision Pipeline complete, documented, and verified.
+**Status:** Node.js Pure Architecture Corrected and Verified.
 - Backend server bootstrap, configuration validation, `/health`, `/api/config`, `/stream/:roomId`, and `/snapshot/:roomId`.
-- In-memory RoomManager enforcing 1-to-1 rooms, PIN authentication, room ID validation, and stale room cleanup.
-- Socket.IO signaling relays with payload validation, rate-limiting on repeated auth failures, room isolation, and MJPEG frame streaming.
-- Responsive HTML5/CSS UI for landing page, sender, and viewer with one-click direct Python stream links.
-- `python_inference` package with clean `BaseVideoTransport` abstraction and two adapters:
-  1. `MjpegVideoTransport`: standard HTTP multipart streaming using OpenCV / standard library.
-  2. `WebRtcVideoTransport`: ultra-low latency direct peer-to-peer WebRTC via `aiortc` and `python-socketio`.
-- `InferencePipeline` enforcing strict fresh-frame policy: queue size = 1 with automatic stale-frame eviction and `max_frame_age_ms` threshold.
-- `MetricsCollector` tracking real-time FPS, inference FPS, latency, frame age, CPU %, memory MB, and network bitrate.
-- Unified CLI runner: `python run_inference.py --transport [mjpeg|webrtc]`.
-- All Node.js automated tests passing (9/9) and Python unit tests passing (2/2).
+- In-memory RoomManager enforcing 1-to-1 rooms, PIN authentication, room ID validation, and stale room cleanup. Supports canonical participant roles `camera-sender` and `webrtc-receiver`.
+- Socket.IO signaling relays with payload validation, rate-limiting on repeated auth failures, and room isolation.
+- Bidirectional SDP offer/answer support on browser camera sender for external receiver compatibility.
+- Fully documented, versioned External WebRTC Receiver Signaling Contract in `docs/architecture.md`.
+- Removed all embedded Python receiver/inference files to preserve strict Node.js project purity.
+- Preserved optional HTTP MJPEG streaming endpoint for external tools (`/stream/:roomId?pin=...`).
+- All 10 automated Node.js tests passing (`npm test`). Host has zero Python dependencies.
 
 ## Read before implementation
 
 1. `AGENTS.md` — agent behavior, code style and file rules.
-2. `docs/architecture.md` — component boundaries, network flows and signaling protocol.
+2. `docs/architecture.md` — component boundaries, network flows, and external receiver signaling contract.
 3. `docs/roadmap.md` — phased delivery plan and exit criteria.
 4. `docs/decisions.md` — accepted decisions and unresolved questions.
 5. `docs/tasks.md` — implementation backlog and checkboxes.
-6. `docs/project-overview.md` — goals, scope and MVP definition.
+6. `docs/project-overview.md` — goals, scope, and MVP definition.
 
 ## Agreed architecture
 
 - Host: Windows PC running Node.js + Express.
 - Signaling: Socket.IO over HTTP/HTTPS.
-- Camera capture: browser `getUserMedia()` after explicit user action.
-- Media transport: Pure WebRTC peer-to-peer for browser viewers + Dual transport for Python inference (WebRTC `aiortc` or HTTP multipart MJPEG).
+- Camera capture: Browser `getUserMedia()` after explicit user action.
+- Browser media transport: Pure WebRTC peer-to-peer between sender and receiver (Server never touches WebRTC video frames).
+- External Receiver Integration: Documented Socket.IO signaling contract for independent external clients (e.g., Python `aiortc` in a separate repo) + optional HTTP MJPEG endpoint.
 - Security: Access PIN authentication, payload size limit (100KB), brute-force rate-limiting, room isolation.
-- HTTPS: Documented for localhost, ngrok/zrok public tunnel, or mkcert trusted LAN certificates.
+- HTTPS / Tunnel: zrok or ngrok for secure public ingress; direct WebRTC media path with optional TURN fallback.
 
 ## Immediate next task
 
-Perform comparative benchmark on target devices (iPhone/Android -> Windows PC over LAN and zrok tunnel) measuring latency, FPS, and CPU across both transports using `python run_inference.py`.
+Validate the browser camera sender and signaling server using a live zrok tunnel endpoint and perform integration testing with an external WebRTC receiver.
 
 ## Commands run & results
 
-- `npm test`: 9/9 tests passed (server config, health endpoint, room capacity, signaling relays, auth rate limiting, MJPEG streaming).
-- `python tests/test_python_inference.py`: 2/2 tests passed (metrics collection, fresh-frame drop policy).
+- `npm test`: 10/10 tests passed (server config, health endpoint, room capacity, canonical roles, signaling relays, auth rate limiting, MJPEG streaming).
 - Server start: `npm start` (listening on port 3000).
-- Python inference runner: `python run_inference.py --transport mjpeg` and `python run_inference.py --transport webrtc`.

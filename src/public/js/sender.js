@@ -237,8 +237,59 @@ function setupSocketListeners() {
     await initiateWebRtcConnection();
   });
 
+  socket.on('webrtc:offer', async (data) => {
+    logDiagnostic('Received SDP offer from external receiver. Creating answer...');
+    if (!webrtcPeer) {
+      const iceServers = await fetchIceServers();
+      webrtcPeer = new WebRtcPeer({
+        iceServers,
+        onIceCandidate: (candidate) => {
+          socket.emit('webrtc:ice-candidate', {
+            candidate: candidate.candidate,
+            sdpMid: candidate.sdpMid,
+            sdpMLineIndex: candidate.sdpMLineIndex
+          });
+        },
+        onConnectionStateChange: (state) => {
+          logDiagnostic(`WebRTC Connection State: ${state}`);
+          if (state === 'connected') {
+            updateStatus('live', 'Live Streaming');
+            socket.emit('stream:state', { state: 'live' });
+            startStatsPolling();
+          } else if (state === 'disconnected') {
+            updateStatus('waiting', 'Receiver Disconnected');
+            stopStatsPolling();
+          } else if (state === 'failed') {
+            updateStatus('error', 'P2P Connection Failed');
+            stopStatsPolling();
+          }
+        },
+        onIceConnectionStateChange: (state) => {
+          logDiagnostic(`ICE Connection State: ${state}`);
+        }
+      });
+      webrtcPeer.createPeerConnection();
+      if (cameraManager.currentStream) {
+        cameraManager.currentStream.getTracks().forEach((track) => {
+          webrtcPeer.addTrack(track, cameraManager.currentStream);
+        });
+      }
+    }
+
+    try {
+      const answer = await webrtcPeer.handleOffer(data);
+      socket.emit('webrtc:answer', {
+        sdp: answer.sdp,
+        type: answer.type
+      });
+      logDiagnostic('Sent SDP answer to external receiver.');
+    } catch (err) {
+      logDiagnostic(`Error answering external offer: ${err.message}`);
+    }
+  });
+
   socket.on('webrtc:answer', async (data) => {
-    logDiagnostic('Received SDP answer from viewer.');
+    logDiagnostic('Received SDP answer from receiver.');
     if (webrtcPeer) {
       await webrtcPeer.handleAnswer(data);
     }

@@ -35,8 +35,16 @@ export class RoomManager {
       return { success: false, error: 'Invalid Room ID. Must be 3-32 alphanumeric characters.' };
     }
 
-    if (role !== 'sender' && role !== 'viewer') {
-      return { success: false, error: 'Invalid role. Must be "sender" or "viewer".' };
+    // Support canonical roles: 'camera-sender' / 'sender', 'webrtc-receiver' / 'viewer'
+    let normalizedRole = role;
+    if (role === 'camera-sender') {
+      normalizedRole = 'sender';
+    } else if (role === 'webrtc-receiver') {
+      normalizedRole = 'viewer';
+    }
+
+    if (normalizedRole !== 'sender' && normalizedRole !== 'viewer') {
+      return { success: false, error: 'Invalid role. Must be "camera-sender" ("sender") or "webrtc-receiver" ("viewer").' };
     }
 
     // Check if socket is already in a room
@@ -55,27 +63,27 @@ export class RoomManager {
       this.rooms.set(roomId, room);
     }
 
-    if (role === 'sender') {
+    if (normalizedRole === 'sender') {
       if (room.senderSocketId && room.senderSocketId !== socketId) {
         return { success: false, error: 'Room already has an active sender.' };
       }
       room.senderSocketId = socketId;
     } else {
       if (room.viewerSocketId && room.viewerSocketId !== socketId) {
-        return { success: false, error: 'Room already has an active viewer.' };
+        return { success: false, error: 'Room already has an active viewer/receiver.' };
       }
       room.viewerSocketId = socketId;
     }
 
     room.lastActiveAt = Date.now();
-    this.socketToRoom.set(socketId, { roomId, role });
+    this.socketToRoom.set(socketId, { roomId, role: normalizedRole });
 
     return {
       success: true,
       roomId,
-      role,
-      hasPeer: Boolean(role === 'sender' ? room.viewerSocketId : room.senderSocketId),
-      peerSocketId: role === 'sender' ? room.viewerSocketId : room.senderSocketId
+      role: normalizedRole,
+      hasPeer: Boolean(normalizedRole === 'sender' ? room.viewerSocketId : room.senderSocketId),
+      peerSocketId: normalizedRole === 'sender' ? room.viewerSocketId : room.senderSocketId
     };
   }
 

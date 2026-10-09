@@ -127,3 +127,17 @@ test('Socket.IO signaling relays offer, answer, and ICE candidates between peers
     await new Promise((resolve) => httpServer.close(resolve));
   }
 });
+
+test('RoomManager and Signaling support external receiver with canonical roles camera-sender and webrtc-receiver', async () => {
+  const rm = new RoomManager('pass123');
+  const senderJoin = rm.createOrJoinRoom('canonical-room', 'camera-sender', 'sockA', 'pass123');
+  assert.equal(senderJoin.success, true);
+  assert.equal(senderJoin.role, 'sender');
+
+  const receiverJoin = rm.createOrJoinRoom('canonical-room', 'webrtc-receiver', 'sockB', 'pass123');
+  assert.equal(receiverJoin.success, true);
+  assert.equal(receiverJoin.role, 'viewer');
+  assert.equal(receiverJoin.hasPeer, true);
+  assert.equal(receiverJoin.peerSocketId, 'sockA');
+  assert.equal(rm.getPeerSocketId('sockA'), 'sockB');
+});

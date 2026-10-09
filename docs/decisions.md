@@ -102,21 +102,23 @@ This document records current decisions and unresolved items. A decision may be 
 
 **Consequences:** Sender client uploads JPEG frames via Socket.IO/binary buffers when active; the server distributes them to authorized HTTP consumers. WebRTC remains the primary low-latency browser-to-browser transport.
 
-## ADR-011 — Clean Transport-Adapter Interface and Fresh-Frame Policy for Python Inference
+## ADR-011 — Separate External Receiver Implementation from Node.js Core
 
 **Status:** Accepted
 
-**Decision:** Implement an abstract `BaseVideoTransport` interface with two interchangeable adapters:
-1. `MjpegVideoTransport`: standard HTTP multipart streaming.
-2. `WebRtcVideoTransport`: pure P2P WebRTC receiver via `aiortc` connecting to Node.js Socket.IO signaling.
+**Decision:** The Node.js repository will not contain Python source code or embedded inference implementations. Instead, this repository owns:
+1. Browser camera capture interface.
+2. Socket.IO signaling server.
+3. Access-controlled room management (1-sender, 1-receiver model).
+4. WebRTC session negotiation and ICE routing.
+5. Optional HTTP MJPEG stream endpoint.
+6. Formal specification of the external receiver signaling contract.
 
-Enforce a strict fresh-frame policy across both adapters:
-- Transport worker threads use a single-item queue (`maxsize=1`). When a new frame arrives before inference consumes the previous one, the stale frame is evicted and counted as dropped.
-- `InferencePipeline` evaluates frame age against a configurable threshold (`max_frame_age_ms`, default 250ms) to ensure slow models never process stale historical frames.
+The Python `aiortc` receiver and computer vision/YOLO pipeline are maintained in an external, independent repository.
 
-**Reasoning:** Real-time object detection (YOLO, PyTorch) requires latest state rather than historic frames. WebRTC offers lowest latency (<100ms), while MJPEG provides ubiquitous baseline compatibility.
+**Reasoning:** Maintains clean architectural boundaries, zero Python dependency on the Node.js host, and allows the external receiver to evolve independently.
 
-**Consequences:** Inference models never experience unbounded buffering delays, and consumers can switch transports with a single CLI flag `--transport [mjpeg|webrtc]`.
+**Consequences:** Integration with Python is established through the versioned signaling contract documented in `docs/architecture.md`.
 
 ## Open decisions to revisit after the first working stream
 

@@ -41,12 +41,12 @@ For the first milestone, support one sender and one viewer. Multi-camera and mul
 | Area | Choice | Responsibility |
 |---|---|---|
 | Runtime | Node.js | Runs the server on Windows |
-| HTTP server | Express | Serves the web pages and static assets |
+| HTTP server | Express | Serves the web pages, static assets, and optional MJPEG stream |
 | Signaling | Socket.IO | Room membership and WebRTC offer/answer/ICE exchange |
-| Camera capture | Browser `getUserMedia()` | Requests permission and returns a local media stream |
-| Browser media transport | WebRTC | Carries live video between sender and browser viewer |
-| Python inference transports | `aiortc` (WebRTC) & HTTP MJPEG | Delivers BGR frames to OpenCV, YOLO, and PyTorch pipelines |
-| UI | HTML, CSS, browser JavaScript | Sender, viewer, room and connection status interfaces |
+| Camera capture | Browser `getUserMedia()` | Requests permission and captures local camera stream |
+| Browser media transport | WebRTC | Direct peer-to-peer live video between sender and receiver |
+| External integration | Socket.IO WebRTC & HTTP MJPEG | Versioned contract for external clients (e.g. Python OpenCV / YOLO) |
+| UI | HTML, CSS, browser JavaScript | Responsive sender and viewer interfaces |
 | HTTPS / Tunnel | zrok or ngrok | Provides browser-trusted HTTPS entry point to the local web server |
 | Media fallback | TURN server, if later required | Relays media when direct ICE connectivity cannot be established |
 
