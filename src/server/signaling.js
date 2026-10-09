@@ -17,12 +17,24 @@ export function setupSignaling(httpServer, config, logger) {
     maxHttpBufferSize: 1e5 // 100 KB max payload limit to reject large malformed payloads
   });
 
+  const failedAttempts = new Map(); // socketId -> { count: number, blockedUntil: number }
+
   io.on('connection', (socket) => {
     logger.debug(`Socket connected: ${socket.id}`);
 
     // Join room event
     socket.on('room:join', (payload, callback) => {
       try {
+        const now = Date.now();
+        const record = failedAttempts.get(socket.id);
+        if (record && record.blockedUntil > now) {
+          const waitSecs = Math.ceil((record.blockedUntil - now) / 1000);
+          const err = `Too many failed attempts. Please wait ${waitSecs} seconds before retrying.`;
+          logger.warn(`Rate limited socket ${socket.id}`);
+          if (typeof callback === 'function') callback({ success: false, error: err });
+          return;
+        }
+
         if (!payload || typeof payload !== 'object') {
           const err = 'Invalid payload format.';
           if (typeof callback === 'function') callback({ success: false, error: err });
@@ -33,10 +45,17 @@ export function setupSignaling(httpServer, config, logger) {
         const result = roomManager.createOrJoinRoom(roomId, role, socket.id, pin);
 
         if (!result.success) {
+          const count = (record ? record.count : 0) + 1;
+          const blockedUntil = count >= 5 ? now + 30000 : 0; // block for 30s after 5 failures
+          failedAttempts.set(socket.id, { count, blockedUntil });
+
           logger.warn(`Join room failed: ${result.error} (socket: ${socket.id}, room: ${roomId})`);
           if (typeof callback === 'function') callback(result);
           return;
         }
+
+        // Reset failures on success
+        failedAttempts.delete(socket.id);
 
         socket.join(roomId);
         logger.info(`Socket ${socket.id} joined room "${roomId}" as ${role}`);
@@ -160,6 +179,7 @@ export function setupSignaling(httpServer, config, logger) {
     // Disconnect handler
     socket.on('disconnect', (reason) => {
       logger.debug(`Socket disconnected: ${socket.id} (${reason})`);
+      failedAttempts.delete(socket.id);
       const leaveResult = roomManager.leave(socket.id);
       if (leaveResult) {
         socket.leave(leaveResult.roomId);

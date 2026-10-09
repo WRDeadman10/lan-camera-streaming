@@ -46,7 +46,7 @@ Use these checkboxes as the implementation source of truth. Move completed work 
 - [x] Enforce sender/viewer role and room capacity on the server.
 - [x] Verify every signaling event is authorized for the current room membership.
 - [x] Validate input types and limit signaling payload size.
-- [ ] Rate-limit room creation and join attempts.
+- [x] Rate-limit room creation and join attempts.
 - [x] Add inactive-room expiry and disconnected-socket cleanup.
 - [x] Redact pairing secrets and sensitive connection payloads from logs.
 - [x] Test invalid room IDs, wrong secrets, unauthorized recipients, and duplicate role joins.
