@@ -92,6 +92,16 @@ This document records current decisions and unresolved items. A decision may be 
 
 **Consequences:** Separate signaling/media logic from DOM rendering. Revisit only if the UI or state complexity grows enough to justify a framework.
 
+## ADR-010 — Provide direct HTTP MJPEG and snapshot endpoints for Python inference
+
+**Status:** Accepted
+
+**Decision:** Implement `/stream/:roomId?pin=...` (multipart/x-mixed-replace MJPEG) and `/snapshot/:roomId?pin=...` (single frame JPEG) on the server, paired with canvas frame capture on the sender.
+
+**Reasoning:** Python machine learning and computer vision frameworks (such as OpenCV `cv2.VideoCapture`, PyTorch, YOLO, and requests) natively consume HTTP MJPEG URLs out of the box without requiring complex C WebRTC bindings or SDP signaling exchanges in Python.
+
+**Consequences:** Sender client uploads JPEG frames via Socket.IO/binary buffers when active; the server distributes them to authorized HTTP consumers. WebRTC remains the primary low-latency browser-to-browser transport.
+
 ## Open decisions to revisit after the first working stream
 
 - Whether TypeScript should replace plain JavaScript for stricter types.

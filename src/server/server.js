@@ -43,6 +43,56 @@ export function createServer(config, logger) {
     });
   });
 
+  // MJPEG Video stream endpoint for Python / OpenCV / inference
+  // Usage in Python: cap = cv2.VideoCapture("http://<host>:3000/stream/<roomId>?pin=123456")
+  app.get('/stream/:roomId', (req, res) => {
+    const { roomId } = req.params;
+    const pin = req.query.pin;
+
+    if (!pin || pin !== config.accessPin) {
+      logger.warn(`Unauthorized MJPEG stream request for room "${roomId}"`);
+      res.status(401).send('Unauthorized: Invalid or missing access PIN (?pin=...)');
+      return;
+    }
+
+    if (!config.mjpegStreamer) {
+      res.status(503).send('Streamer service unavailable');
+      return;
+    }
+
+    logger.info(`New MJPEG subscriber connected for room "${roomId}" (remote IP: ${req.ip})`);
+    config.mjpegStreamer.addSubscriber(roomId, res);
+  });
+
+  // Single JPEG frame snapshot endpoint
+  app.get('/snapshot/:roomId', (req, res) => {
+    const { roomId } = req.params;
+    const pin = req.query.pin;
+
+    if (!pin || pin !== config.accessPin) {
+      res.status(401).send('Unauthorized: Invalid or missing access PIN (?pin=...)');
+      return;
+    }
+
+    if (!config.mjpegStreamer) {
+      res.status(503).send('Streamer service unavailable');
+      return;
+    }
+
+    const frame = config.mjpegStreamer.latestFrames.get(roomId);
+    if (!frame) {
+      res.status(404).send('No frame available yet for this room');
+      return;
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'image/jpeg',
+      'Content-Length': frame.length,
+      'Cache-Control': 'no-cache'
+    });
+    res.end(frame);
+  });
+
   // Static files directory
   const publicDir = path.resolve(__dirname, '../public');
   app.use(express.static(publicDir));

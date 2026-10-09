@@ -13,6 +13,9 @@ let webrtcPeer = null;
 let socket = null;
 let currentRoomId = null;
 let statsInterval = null;
+let mjpegInterval = null;
+const mjpegCanvas = document.createElement('canvas');
+const mjpegContext = mjpegCanvas.getContext('2d');
 
 // DOM Elements
 const accessPinInput = document.getElementById('accessPin');
@@ -24,6 +27,21 @@ const btnStop = document.getElementById('btnStop');
 const btnToggleFacing = document.getElementById('btnToggleFacing');
 const localVideo = document.getElementById('localVideo');
 const videoOverlay = document.getElementById('videoOverlay');
+const pythonLinkCard = document.getElementById('pythonLinkCard');
+const pythonStreamUrl = document.getElementById('pythonStreamUrl');
+const btnCopyPythonUrl = document.getElementById('btnCopyPythonUrl');
+
+if (btnCopyPythonUrl) {
+  btnCopyPythonUrl.addEventListener('click', () => {
+    if (pythonStreamUrl && pythonStreamUrl.value) {
+      navigator.clipboard.writeText(pythonStreamUrl.value);
+      btnCopyPythonUrl.textContent = 'Copied!';
+      setTimeout(() => {
+        btnCopyPythonUrl.textContent = 'Copy';
+      }, 2000);
+    }
+  });
+}
 
 function generateRandomRoomId() {
   const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
@@ -135,12 +153,26 @@ async function startSession() {
     }
 
     logDiagnostic(`Joined room "${roomId}" as sender.`);
+
+    // Display Direct Python Stream Link
+    const streamUrl = `${window.location.origin}/stream/${roomId}?pin=${encodeURIComponent(pin)}`;
+    if (pythonStreamUrl) {
+      pythonStreamUrl.value = streamUrl;
+    }
+    if (pythonLinkCard) {
+      pythonLinkCard.style.display = 'block';
+    }
+    logDiagnostic(`Python stream available at: ${streamUrl}`);
+
+    // Start sending MJPEG frames for Python consumers
+    startMjpegFrameLoop();
+
     if (response.hasPeer) {
       updateStatus('connecting', 'Viewer present. Connecting WebRTC...');
       await initiateWebRtcConnection();
     } else {
-      updateStatus('waiting', 'Waiting for Viewer...');
-      logDiagnostic('Waiting for viewer to join room.');
+      updateStatus('waiting', 'Waiting for Viewer / Python...');
+      logDiagnostic('Waiting for viewer or Python consumer to connect.');
     }
   });
 }
@@ -259,9 +291,49 @@ function stopStatsPolling() {
   }
 }
 
+function startMjpegFrameLoop() {
+  stopMjpegFrameLoop();
+  // Capture frame every 66ms (~15 FPS) for Python inference stream
+  mjpegInterval = setInterval(() => {
+    if (!socket || !localVideo || !cameraManager.currentStream || localVideo.readyState < 2) {
+      return;
+    }
+
+    const videoWidth = localVideo.videoWidth || 640;
+    const videoHeight = localVideo.videoHeight || 480;
+
+    // Resize canvas if dimensions changed
+    if (mjpegCanvas.width !== videoWidth || mjpegCanvas.height !== videoHeight) {
+      mjpegCanvas.width = videoWidth;
+      mjpegCanvas.height = videoHeight;
+    }
+
+    mjpegContext.drawImage(localVideo, 0, 0, videoWidth, videoHeight);
+    mjpegCanvas.toBlob((blob) => {
+      if (blob && socket) {
+        blob.arrayBuffer().then((buffer) => {
+          socket.emit('mjpeg:frame', buffer);
+        }).catch(() => {});
+      }
+    }, 'image/jpeg', 0.7);
+  }, 66);
+}
+
+function stopMjpegFrameLoop() {
+  if (mjpegInterval) {
+    clearInterval(mjpegInterval);
+    mjpegInterval = null;
+  }
+}
+
 function stopSession() {
   logDiagnostic('Stopping stream and releasing camera...');
   stopStatsPolling();
+  stopMjpegFrameLoop();
+
+  if (pythonLinkCard) {
+    pythonLinkCard.style.display = 'none';
+  }
 
   if (socket) {
     socket.emit('stream:state', { state: 'stopped' });

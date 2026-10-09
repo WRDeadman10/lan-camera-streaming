@@ -115,8 +115,49 @@ For strictly offline or tunnel-free LAN environments:
 
 ---
 
+## Direct Python Stream for Machine Learning & Inference
+
+When streaming is started, a direct **Python Inference Stream URL** is provided directly on the `/sender` and `/viewer` pages:
+
+```text
+http://<host>:3000/stream/<roomId>?pin=<accessPin>
+```
+
+### Python / OpenCV Example
+
+```python
+import cv2
+
+# Direct stream URL from your sender or viewer page:
+stream_url = "http://localhost:3000/stream/room-abc123?pin=123456"
+
+cap = cv2.VideoCapture(stream_url)
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        continue
+
+    # Feed 'frame' (numpy array BGR) directly into YOLO, PyTorch, MediaPipe, etc.
+    # results = model(frame)
+
+    cv2.imshow("Python Inference", frame)
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
+```
+
+You can also run the bundled test script:
+```bash
+python examples/python_inference_client.py "http://localhost:3000/stream/<your-room-id>?pin=123456"
+```
+
+---
+
 ## Security Best Practices
 
 - Change `ACCESS_PIN` in your `.env` file before exposing the server.
-- The server does **not** store or record video feeds.
+- The server does **not** store or record video feeds to disk.
 - Signaling messages are strictly room-isolated and rate-limited.

@@ -7,9 +7,13 @@ import { loadConfig } from './config.js';
 import { Logger } from './logger.js';
 import { createServer } from './server.js';
 import { setupSignaling } from './signaling.js';
+import { MjpegStreamer } from './mjpeg-streamer.js';
 
 const config = loadConfig();
 const logger = new Logger(config.logLevel);
+
+const mjpegStreamer = new MjpegStreamer();
+config.mjpegStreamer = mjpegStreamer;
 
 const { httpServer } = createServer(config, logger);
 const { io, roomManager } = setupSignaling(httpServer, config, logger);

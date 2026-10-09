@@ -21,6 +21,21 @@ const btnFullscreen = document.getElementById('btnFullscreen');
 const remoteVideo = document.getElementById('remoteVideo');
 const videoOverlay = document.getElementById('videoOverlay');
 const videoWrapper = document.getElementById('videoWrapper');
+const pythonLinkCard = document.getElementById('pythonLinkCard');
+const pythonStreamUrl = document.getElementById('pythonStreamUrl');
+const btnCopyPythonUrl = document.getElementById('btnCopyPythonUrl');
+
+if (btnCopyPythonUrl) {
+  btnCopyPythonUrl.addEventListener('click', () => {
+    if (pythonStreamUrl && pythonStreamUrl.value) {
+      navigator.clipboard.writeText(pythonStreamUrl.value);
+      btnCopyPythonUrl.textContent = 'Copied!';
+      setTimeout(() => {
+        btnCopyPythonUrl.textContent = 'Copy';
+      }, 2000);
+    }
+  });
+}
 
 // Support Room ID prefill from URL query param ?room=xyz
 const urlParams = new URLSearchParams(window.location.search);
@@ -80,6 +95,15 @@ async function joinRoom() {
     currentRoomId = roomId;
     btnLeave.disabled = false;
     logDiagnostic(`Joined room "${roomId}" successfully.`);
+
+    // Display Direct Python Stream Link
+    const streamUrl = `${window.location.origin}/stream/${roomId}?pin=${encodeURIComponent(pin)}`;
+    if (pythonStreamUrl) {
+      pythonStreamUrl.value = streamUrl;
+    }
+    if (pythonLinkCard) {
+      pythonLinkCard.style.display = 'block';
+    }
 
     if (response.hasPeer) {
       updateStatus('connecting', 'Sender present. Awaiting offer...');
@@ -249,6 +273,10 @@ function leaveRoom() {
   }
   videoOverlay.textContent = 'Enter Room ID and click "Join Room" to view stream';
   videoOverlay.style.display = 'block';
+
+  if (pythonLinkCard) {
+    pythonLinkCard.style.display = 'none';
+  }
 
   btnJoin.disabled = false;
   btnLeave.disabled = true;

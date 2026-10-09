@@ -149,6 +149,32 @@ export function setupSignaling(httpServer, config, logger) {
       }
     });
 
+    // MJPEG Frame upload from sender for Python/HTTP inference
+    socket.on('mjpeg:frame', (data) => {
+      const membership = roomManager.getMembership(socket.id);
+      if (!membership || membership.role !== 'sender') {
+        return;
+      }
+
+      if (!config.mjpegStreamer) {
+        return;
+      }
+
+      // data can be a binary Buffer / ArrayBuffer or binary base64
+      let buffer = null;
+      if (Buffer.isBuffer(data)) {
+        buffer = data;
+      } else if (data instanceof ArrayBuffer) {
+        buffer = Buffer.from(data);
+      } else if (typeof data === 'string' && data.startsWith('data:image/jpeg;base64,')) {
+        buffer = Buffer.from(data.slice(23), 'base64');
+      }
+
+      if (buffer) {
+        config.mjpegStreamer.broadcastFrame(membership.roomId, buffer);
+      }
+    });
+
     // Stream state announcement
     socket.on('stream:state', (payload) => {
       const membership = roomManager.getMembership(socket.id);
