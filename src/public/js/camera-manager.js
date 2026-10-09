@@ -33,7 +33,7 @@ export class CameraManager {
     }
   }
 
-  async startCapture({ deviceId, facingMode, width = 1280, height = 720, frameRate = 30 } = {}) {
+  async startCapture({ deviceId, facingMode, width = 'max', height = 'max', frameRate = 30 } = {}) {
     if (!CameraManager.isSecureContext()) {
       throw new Error('Camera access requires a secure context (HTTPS or localhost).');
     }
@@ -52,11 +52,20 @@ export class CameraManager {
       this.facingMode = facingMode;
     }
 
-    const videoConstraints = {
-      width: { ideal: width },
-      height: { ideal: height },
-      frameRate: { ideal: frameRate }
-    };
+    let videoConstraints;
+    if (width === 'max' || width === 'full' || height === 'max' || height === 'full') {
+      videoConstraints = {
+        width: { ideal: 4096 },
+        height: { ideal: 2160 },
+        frameRate: { ideal: frameRate }
+      };
+    } else {
+      videoConstraints = {
+        width: { ideal: width },
+        height: { ideal: height },
+        frameRate: { ideal: frameRate }
+      };
+    }
 
     if (this.selectedDeviceId) {
       videoConstraints.deviceId = { exact: this.selectedDeviceId };

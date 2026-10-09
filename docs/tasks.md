@@ -76,14 +76,17 @@ Use these checkboxes as the implementation source of truth. Move completed work 
 - [ ] Test phone-to-Windows, laptop-to-Windows, permission denial, Stop, tab closure, refresh, and Wi-Fi disconnect.
 - [x] Document any networks where direct WebRTC does not connect (same-LAN Wi-Fi routers without NAT loopback / AP isolation).
 
-## P4.5 — Experimental zrok-Tunneled Video Mode
+## P4.5 — Experimental zrok-Tunneled Video Mode & Tunnel Lifecycle
 
 - [x] Implement `TunnelRelay` service for server-side frame rate/size bounding and backpressure frame dropping.
 - [x] Add media mode selector (`webrtc` vs `tunnel-relay`) across room manager, sender, and viewer.
 - [x] Implement canvas downscaling and binary JPEG transmission (`tunnel:frame`) in `sender.js`.
 - [x] Implement binary frame canvas rendering with drop-queue management in `viewer.js`.
 - [x] Add real-time throughput diagnostics (frames sent/received, dropped frames, encoding latency, MB/hr estimates).
-- [x] Add PowerShell startup scripts for Windows zrok workflow (`scripts/start-server.ps1`, `scripts/start-zrok.ps1`).
+- [x] Support full native camera sensor resolution (4K / 1080p) across sender capture and tunnel relay.
+- [x] Bind public zrok tunnel explicitly to reserved namespace name `public:lan` (`lan.shares.zrok.io`).
+- [x] Fix terminal ASCII QR code generation to encode the exact active sender URL (`https://lan.shares.zrok.io/sender`).
+- [x] Implement pre-flight and graceful teardown share deallocation in `start.ps1` (`zrok2 delete share public:lan`) to release bound endpoints from zrok web dashboard.
 - [x] Add automated unit and integration tests covering binary frame relay and room mode isolation.
 
 ## P5 — Conditional / post-MVP

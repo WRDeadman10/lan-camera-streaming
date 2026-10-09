@@ -39,6 +39,7 @@ const tunnelResolutionSelect = document.getElementById('tunnelResolution');
 const tunnelFpsSelect = document.getElementById('tunnelFps');
 const tunnelQualitySelect = document.getElementById('tunnelQuality');
 const cameraSelect = document.getElementById('cameraSelect');
+const cameraResolutionSelect = document.getElementById('cameraResolution');
 const btnStart = document.getElementById('btnStart');
 const btnStop = document.getElementById('btnStop');
 const btnToggleFacing = document.getElementById('btnToggleFacing');
@@ -141,24 +142,49 @@ async function startSession() {
   let stream = null;
   try {
     const selectedDeviceId = cameraSelect.value || null;
+    const resChoice = cameraResolutionSelect ? cameraResolutionSelect.value : 'max';
+    let targetWidth = 'max';
+    let targetHeight = 'max';
+    if (resChoice === '1080p') {
+      targetWidth = 1920;
+      targetHeight = 1080;
+    } else if (resChoice === '720p') {
+      targetWidth = 1280;
+      targetHeight = 720;
+    } else if (resChoice === '480p') {
+      targetWidth = 854;
+      targetHeight = 480;
+    }
+
+    logDiagnostic(`Requesting camera capture (mode: ${resChoice})...`, 'INFO');
     stream = await cameraManager.startCapture({
       deviceId: selectedDeviceId,
-      width: 1280,
-      height: 720,
+      width: targetWidth,
+      height: targetHeight,
       frameRate: 30
     });
 
     localVideo.srcObject = stream;
     videoOverlay.style.display = 'none';
     await localVideo.play().catch(() => {});
-    logDiagnostic('Camera capture started.');
+
+    const videoTrack = stream.getVideoTracks()[0];
+    if (videoTrack) {
+      const settings = videoTrack.getSettings ? videoTrack.getSettings() : {};
+      const actualWidth = settings.width || localVideo.videoWidth || 0;
+      const actualHeight = settings.height || localVideo.videoHeight || 0;
+      const actualFps = Math.round(settings.frameRate || 30);
+      logDiagnostic(`Camera capture active: ${actualWidth}x${actualHeight} @ ${actualFps} FPS (${videoTrack.label || 'Default Camera'}).`, 'INFO');
+    } else {
+      logDiagnostic('Camera capture started.', 'INFO');
+    }
 
     // Once permission is granted, populate detailed device labels if available
     await populateCameraDevices();
   } catch (err) {
     updateStatus('error', 'Camera Error');
     showError(err.message);
-    logDiagnostic(`Camera capture failed: ${err.message}`);
+    logDiagnostic(`Camera capture failed: ${err.message}`, 'ERROR');
     btnStart.disabled = false;
     return;
   }
@@ -489,7 +515,16 @@ function startTunnelFrameLoop() {
   tunnelEncodeTimes = [];
 
   const resVal = tunnelResolutionSelect ? tunnelResolutionSelect.value : '640x360';
-  const [targetWidth, targetHeight] = resVal.split('x').map((n) => parseInt(n, 10));
+  let targetWidth = 640;
+  let targetHeight = 360;
+  if (resVal === 'native') {
+    targetWidth = localVideo.videoWidth || 1280;
+    targetHeight = localVideo.videoHeight || 720;
+  } else {
+    const parts = resVal.split('x').map((n) => parseInt(n, 10));
+    targetWidth = parts[0] || 640;
+    targetHeight = parts[1] || 360;
+  }
   const targetFps = parseInt(tunnelFpsSelect ? tunnelFpsSelect.value : '10', 10);
   const targetQuality = parseFloat(tunnelQualitySelect ? tunnelQualitySelect.value : '0.6');
   const intervalMs = Math.floor(1000 / targetFps);

@@ -109,26 +109,56 @@ if (-not $isHealthy) {
     }
 }
 
-# 5. Launch zrok public share in background
-Write-Host ""
-Write-Host "Starting zrok public share for $targetUrl..." -ForegroundColor Cyan
+# 5. Pre-flight cleanup of any stale shares
+Write-Host "Checking for stale zrok shares..." -ForegroundColor Cyan
+cmd /c "`"$zrokBinary`" delete share public:lan 2>&1" | Out-Null
 
-$zrokShareProcess = Start-Process -FilePath $zrokBinary -ArgumentList "share public $targetUrl --backend-mode proxy --headless" -PassThru -NoNewWindow
-
-# Poll for the active share URL to register in zrok controller (up to 15 seconds)
-$activeShareUrl = $null
-$attempts = 0
-while ($attempts -lt 15 -and -not $activeShareUrl) {
-    Start-Sleep -Seconds 1
-    $attempts++
-    $overviewOut = cmd /c "`"$zrokBinary`" overview 2>&1"
-    $overviewStr = $overviewOut -join "`n"
-    if ($overviewStr -match "([a-z0-9]{10,16}\.shares\.zrok\.io)") {
-        $activeShareUrl = "https://" + $matches[1]
+$overviewOut = cmd /c "`"$zrokBinary`" overview 2>&1"
+$overviewLines = $overviewOut -split "`n"
+foreach ($line in $overviewLines) {
+    if ($line -match "│\s+([a-z0-9]{10,16})\s+│\s+public\s+│\s+proxy\s+│\s+http://127\.0\.0\.1:$port") {
+        $staleToken = $matches[1]
+        Write-Host "Cleaning up stale share token '$staleToken'..." -ForegroundColor Yellow
+        cmd /c "`"$zrokBinary`" delete share $staleToken 2>&1" | Out-Null
     }
 }
 
-# 6. Display QR Code and URLs for Phone Access
+# 6. Launch zrok public share with reserved name
+Write-Host ""
+Write-Host "Starting zrok public share for $targetUrl..." -ForegroundColor Cyan
+
+$activeShareUrl = $null
+$activeShareToken = $null
+$useReserved = $true
+
+$zrokShareProcess = Start-Process -FilePath $zrokBinary -ArgumentList "share public $targetUrl -n public:lan --backend-mode proxy --headless" -PassThru -NoNewWindow
+Start-Sleep -Seconds 2
+
+if ($zrokShareProcess.HasExited) {
+    Write-Warning "Could not bind to reserved name 'public:lan'. Starting dynamic public share..."
+    $useReserved = $false
+    $zrokShareProcess = Start-Process -FilePath $zrokBinary -ArgumentList "share public $targetUrl --backend-mode proxy --headless" -PassThru -NoNewWindow
+    
+    # Poll overview for the newly created dynamic share token targeting our port
+    $attempts = 0
+    while ($attempts -lt 15 -and -not $activeShareUrl) {
+        Start-Sleep -Seconds 1
+        $attempts++
+        $ov = cmd /c "`"$zrokBinary`" overview 2>&1"
+        $ovLines = $ov -split "`n"
+        foreach ($l in $ovLines) {
+            if ($l -match "│\s+([a-z0-9]{10,16})\s+│\s+public\s+│\s+proxy\s+│\s+http://127\.0\.0\.1:$port") {
+                $activeShareToken = $matches[1]
+                $activeShareUrl = "https://$activeShareToken.shares.zrok.io"
+                break
+            }
+        }
+    }
+} else {
+    $activeShareUrl = "https://lan.shares.zrok.io"
+}
+
+# 7. Display QR Code and URLs for Phone Access
 Write-Host ""
 Write-Host "=================================================" -ForegroundColor Cyan
 Write-Host " SCAN TO CONNECT ON PHONE" -ForegroundColor Green
@@ -137,7 +167,7 @@ Write-Host "=================================================" -ForegroundColor 
 $displayUrl = if ($activeShareUrl) { $activeShareUrl } else { "http://localhost:$port" }
 $senderDisplayUrl = "$displayUrl/sender"
 
-Write-Host "Active Stream URL: $displayUrl" -ForegroundColor Yellow
+Write-Host "Public Stream URL: $displayUrl" -ForegroundColor Yellow
 Write-Host "Sender URL:        $senderDisplayUrl" -ForegroundColor Cyan
 Write-Host ""
 
@@ -160,12 +190,30 @@ try {
     Write-Host ""
     Write-Host "Shutting down..." -ForegroundColor Yellow
     if ($zrokShareProcess -and -not $zrokShareProcess.HasExited) {
-        Write-Host "Stopping zrok share (PID: $($zrokShareProcess.Id))..." -ForegroundColor Cyan
+        Write-Host "Stopping zrok share process (PID: $($zrokShareProcess.Id))..." -ForegroundColor Cyan
         Stop-Process -Id $zrokShareProcess.Id -Force -ErrorAction SilentlyContinue
     }
+
+    Write-Host "Releasing share endpoints from zrok cloud controller..." -ForegroundColor Cyan
+    cmd /c "`"$zrokBinary`" delete share public:lan 2>&1" | Out-Null
+    if ($activeShareToken) {
+        cmd /c "`"$zrokBinary`" delete share $activeShareToken 2>&1" | Out-Null
+    }
+
+    # Also clean any share targeting our port
+    $ovAfter = cmd /c "`"$zrokBinary`" overview 2>&1"
+    $ovAfterLines = $ovAfter -split "`n"
+    foreach ($line in $ovAfterLines) {
+        if ($line -match "│\s+([a-z0-9]{10,16})\s+│\s+public\s+│\s+proxy\s+│\s+http://127\.0\.0\.1:$port") {
+            $remToken = $matches[1]
+            cmd /c "`"$zrokBinary`" delete share $remToken 2>&1" | Out-Null
+        }
+    }
+
     if ($serverProcess -and -not $serverProcess.HasExited) {
         Write-Host "Stopping background Node.js server (PID: $($serverProcess.Id))..." -ForegroundColor Cyan
         Stop-Process -Id $serverProcess.Id -Force -ErrorAction SilentlyContinue
     }
-    Write-Host "Shutdown complete." -ForegroundColor Green
+    Write-Host "Shutdown complete. Endpoints released." -ForegroundColor Green
 }
+
