@@ -33,13 +33,14 @@
 - Mode A (WebRTC): Low-latency direct peer-to-peer media. Signaling carried by Socket.IO over zrok.
 - Mode B (Experimental zrok Tunnel): Camera frames downscaled to canvas, sent as raw binary JPEG buffers via Socket.IO over zrok tunnel, relayed by Windows server to authorized viewer. Evaluates performance against zrok's 5 GB daily free quota.
 - Security: Access PIN authentication, payload size bounds (600KB), brute-force rate-limiting, room isolation, and media mode agreement.
+- Access & Pairing: Persistent reserved domain `lan.shares.zrok.io`, ASCII QR codes displayed in terminal upon launch, and in-browser QR codes on index and sender pages for phone camera scanning.
 
 ## Immediate next task
 
-Perform live cross-network verification using `scripts/start-zrok.ps1` with real mobile and laptop devices, comparing Mode A (WebRTC) and Mode B (zrok Tunnel Relay) for throughput and latency.
+Perform live cross-network verification using `powershell -File start.ps1` with real mobile and laptop devices, comparing Mode A (WebRTC) and Mode B (zrok Tunnel Relay) for throughput and latency.
 
 ## Commands run & results
 
 - `npm test`: 13/13 tests passed (TunnelRelay validation, backpressure dropping, Socket.IO binary relay, room capacity, canonical roles, signaling relays, auth rate limiting, MJPEG streaming).
-- All-in-one start: `powershell -File start.ps1` (launches Node server in background and zrok share in foreground).
+- All-in-one start: `powershell -File start.ps1` (launches Node server, displays terminal QR code for phone scan, and runs zrok tunnel).
 - Separate start options: `npm start` (server) and `powershell -File scripts/start-zrok.ps1` (zrok tunnel).

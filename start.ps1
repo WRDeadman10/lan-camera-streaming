@@ -109,17 +109,71 @@ if (-not $isHealthy) {
     }
 }
 
-# 5. Launch zrok tunnel in foreground and ensure cleanup on exit
+# 5. Check / Ensure reserved name 'lan' in zrok namespace
+$reservedUrl = $null
+try {
+    $overviewOut = cmd /c "`"$zrokBinary`" overview 2>&1"
+    $overviewStr = $overviewOut -join "`n"
+    if ($overviewStr -notmatch "lan\.shares\.zrok\.io") {
+        Write-Host "Creating permanent reserved name 'lan' in zrok..." -ForegroundColor Cyan
+        cmd /c "`"$zrokBinary`" create name lan"
+    } else {
+        Write-Host "Reserved domain 'lan.shares.zrok.io' is active." -ForegroundColor Green
+    }
+    $reservedUrl = "https://lan.shares.zrok.io"
+} catch {
+    Write-Warning "Could not verify reserved name 'lan': $_"
+}
+
+# 6. Display QR Code for Phone Access
 Write-Host ""
-Write-Host "Starting zrok public HTTPS share for $targetUrl..." -ForegroundColor Cyan
-Write-Host "Press Ctrl+C to stop both the tunnel and server." -ForegroundColor Yellow
+Write-Host "=================================================" -ForegroundColor Cyan
+Write-Host " SCAN TO CONNECT ON PHONE" -ForegroundColor Green
+Write-Host "=================================================" -ForegroundColor Cyan
+
+# Spawn zrok public share in background so we can read its output
+$zrokShareProcess = Start-Process -FilePath $zrokBinary -ArgumentList "share public $targetUrl --backend-mode proxy --headless" -PassThru -NoNewWindow
+
+# Wait briefly for share to register
+Start-Sleep -Seconds 3
+
+# Discover generated share URL from zrok overview
+$activeShareUrl = $null
+$overviewOut = cmd /c "`"$zrokBinary`" overview 2>&1"
+$overviewStr = $overviewOut -join "`n"
+if ($overviewStr -match "([a-z0-9]{10,16}\.shares\.zrok\.io)") {
+    $activeShareUrl = "https://" + $matches[1]
+}
+
+$displayUrl = if ($activeShareUrl) { $activeShareUrl } elseif ($reservedUrl) { $reservedUrl } else { "http://localhost:$port" }
+$senderDisplayUrl = "$displayUrl/sender"
+
+Write-Host "Public Stream URL: $displayUrl" -ForegroundColor Yellow
+Write-Host "Sender URL:        $senderDisplayUrl" -ForegroundColor Cyan
+Write-Host ""
+
+# Generate ASCII QR Code in terminal using node qrcode-terminal
+try {
+    $qrNodeCmd = "import('qrcode-terminal').then(q => q.default.generate('$senderDisplayUrl', { small: true }))"
+    node -e $qrNodeCmd
+} catch {
+    Write-Warning "Could not render terminal QR code."
+}
+
+Write-Host ""
+Write-Host "Press Ctrl+C to terminate both zrok tunnel and server." -ForegroundColor Yellow
 Write-Host ""
 
 try {
-    & "$zrokBinary" share public $targetUrl --backend-mode proxy --headless
+    # Keep process active until user terminates
+    Wait-Process -Id $zrokShareProcess.Id
 } finally {
     Write-Host ""
     Write-Host "Shutting down..." -ForegroundColor Yellow
+    if ($zrokShareProcess -and -not $zrokShareProcess.HasExited) {
+        Write-Host "Stopping zrok share (PID: $($zrokShareProcess.Id))..." -ForegroundColor Cyan
+        Stop-Process -Id $zrokShareProcess.Id -Force -ErrorAction SilentlyContinue
+    }
     if ($serverProcess -and -not $serverProcess.HasExited) {
         Write-Host "Stopping background Node.js server (PID: $($serverProcess.Id))..." -ForegroundColor Cyan
         Stop-Process -Id $serverProcess.Id -Force -ErrorAction SilentlyContinue

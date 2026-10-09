@@ -42,6 +42,9 @@ const btnStop = document.getElementById('btnStop');
 const btnToggleFacing = document.getElementById('btnToggleFacing');
 const localVideo = document.getElementById('localVideo');
 const videoOverlay = document.getElementById('videoOverlay');
+const shareQrCard = document.getElementById('shareQrCard');
+const viewerQrImg = document.getElementById('viewerQrImg');
+const viewerQrLink = document.getElementById('viewerQrLink');
 const pythonLinkCard = document.getElementById('pythonLinkCard');
 const pythonStreamUrl = document.getElementById('pythonStreamUrl');
 const btnCopyPythonUrl = document.getElementById('btnCopyPythonUrl');
@@ -177,6 +180,24 @@ async function startSession() {
     }
 
     logDiagnostic(`Joined room "${roomId}" as sender [mode: ${response.mediaMode}].`);
+
+    // Display Share QR Code for Viewer
+    const viewerUrl = `${window.location.origin}/viewer?room=${encodeURIComponent(roomId)}`;
+    if (viewerQrLink) {
+      viewerQrLink.href = viewerUrl;
+      viewerQrLink.textContent = viewerUrl;
+    }
+    if (shareQrCard) {
+      shareQrCard.style.display = 'block';
+    }
+    fetch(`/api/qr?text=${encodeURIComponent(viewerUrl)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (viewerQrImg && data.dataUrl) {
+          viewerQrImg.src = data.dataUrl;
+        }
+      })
+      .catch(() => {});
 
     // Display Direct Python Stream Link
     const streamUrl = `${window.location.origin}/stream/${roomId}?pin=${encodeURIComponent(pin)}`;
@@ -498,6 +519,9 @@ function stopSession() {
 
   if (pythonLinkCard) {
     pythonLinkCard.style.display = 'none';
+  }
+  if (shareQrCard) {
+    shareQrCard.style.display = 'none';
   }
 
   if (socket) {

@@ -7,6 +7,7 @@ import express from 'express';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import QRCode from 'qrcode';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -41,6 +42,25 @@ export function createServer(config, logger) {
     res.status(200).json({
       iceServers: config.iceServers
     });
+  });
+
+  // QR Code generation endpoint
+  app.get('/api/qr', async (req, res) => {
+    try {
+      const text = req.query.text;
+      if (!text || typeof text !== 'string') {
+        res.status(400).send('Missing "text" query parameter');
+        return;
+      }
+      const dataUrl = await QRCode.toDataURL(text, {
+        margin: 1,
+        width: 250,
+        color: { dark: '#000000', light: '#ffffff' }
+      });
+      res.status(200).json({ dataUrl });
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to generate QR code' });
+    }
   });
 
   // MJPEG Video stream endpoint for Python / OpenCV / inference
