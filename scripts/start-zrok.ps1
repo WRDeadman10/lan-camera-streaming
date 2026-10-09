@@ -55,12 +55,13 @@ if (-not $zrokBinary) {
 
 # Auto-enable zrok environment if token is provided and environment is not enabled
 if ($zrokToken) {
-    $statusOut = & "$zrokBinary" status 2>&1 | Out-String
-    if ($statusOut -match "Account Token\s+\|\s+<<SET>>") {
+    $statusOut = cmd /c "`"$zrokBinary`" status 2>&1"
+    $statusStr = $statusOut -join "`n"
+    if ($statusStr -match "Account Token" -and $statusStr -match "<<SET>>") {
         Write-Host "zrok environment is already enabled." -ForegroundColor Green
     } else {
         Write-Host "Enabling zrok environment with configured ZROK_TOKEN..." -ForegroundColor Cyan
-        & "$zrokBinary" enable $zrokToken --headless
+        cmd /c "`"$zrokBinary`" enable $zrokToken --headless"
     }
 }
 
