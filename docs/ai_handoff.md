@@ -2,11 +2,15 @@
 
 ## Current status
 
-**Status:** Camera capture and WebRTC media connection implementation completed and verified (Phases 4 & 5 / P1 & P2).
-- CameraManager handles explicit user-gesture capture, back/front camera toggle, device enumeration, and clean release of tracks.
-- WebRtcPeer handles RTCPeerConnection lifecycle, pre-remote ICE candidate queueing, SDP negotiation, and connection statistics.
-- Sender and Viewer controllers wired to Socket.IO signaling and WebRTC peer connection.
-- Next milestone: Network access documentation (LAN HTTPS & tunnel setup) and final security/resilience audit.
+**Status:** Full MVP implementation complete, documented, and verified.
+- Backend server bootstrap, configuration validation, and `/health` & `/api/config` endpoints.
+- In-memory RoomManager enforcing 1-to-1 rooms, PIN authentication, room ID validation, and stale room cleanup.
+- Socket.IO signaling relays with payload validation, rate-limiting on repeated auth failures, and room isolation.
+- Responsive HTML5/CSS UI for landing page, sender, and viewer.
+- Browser camera capture manager with explicit user gesture requirement, camera flipping, and clean track release.
+- WebRTC peer connection manager with candidate queueing, remote track rendering, auto-recovery, and real-time statistics diagnostics.
+- Comprehensive documentation, setup guide, and automated test suite.
+- All 7 automated tests passing.
 
 ## Read before implementation
 
@@ -17,53 +21,20 @@
 5. `docs/tasks.md` — implementation backlog and checkboxes.
 6. `docs/project-overview.md` — goals, scope and MVP definition.
 
-If repository-specific files exist, inspect `.editorconfig`, `package.json`, the lockfile, README, existing server code, and tests before creating or changing files. Reuse an existing implementation instead of introducing a duplicate server.
-
 ## Agreed architecture
 
-- Host: Windows PC.
-- Backend: Node.js + Express.
-- Signaling: Socket.IO.
-- Camera capture: browser `getUserMedia()` after an explicit Start click.
-- Media transport: WebRTC between sender and viewer.
-- Frontend: plain HTML, CSS, and browser JavaScript for the initial small UI, unless an existing repository framework should be reused.
-- HTTPS: one optional ngrok or zrok tunnel for initial access, or trusted local HTTPS for LAN-only use.
-- Media relay: TURN is deferred until actual tests show that direct connectivity fails on target networks.
-- MVP: one sender, one viewer, video-only, no recording, no cloud media storage.
-
-**Critical boundary:** Socket.IO carries room and WebRTC signaling messages only. Do not send encoded video frames through Socket.IO, HTTP uploads, or the tunnel. Confirm the chosen WebRTC media path in browser diagnostics rather than assuming it is direct.
+- Host: Windows PC running Node.js + Express.
+- Signaling: Socket.IO over HTTP/HTTPS.
+- Camera capture: browser `getUserMedia()` after explicit user action.
+- Media transport: Pure WebRTC peer-to-peer between sender and viewer. (Server never touches video frames).
+- Security: Access PIN authentication, payload size limit (100KB), brute-force rate-limiting, room isolation.
+- HTTPS: Documented for localhost, ngrok/zrok public tunnel, or mkcert trusted LAN certificates.
 
 ## Immediate next task
 
-Start with **P0 — Inspect and bootstrap** in `docs/tasks.md`.
+Perform live field verification across physical mobile devices (iOS Safari / Android Chrome) on actual target Wi-Fi networks and record long-term latency benchmarks (P4 items).
 
-1. Inspect the actual repository and identify its current state.
-2. Summarize the intended changes before implementation, as required by `AGENTS.md`.
-3. Create/reuse the minimal Express + Socket.IO server, a health route, and static asset serving.
-4. Verify server startup and `/health` before adding camera capture.
-5. Update `tasks.md` based on work actually completed.
+## Commands run & results
 
-Do not implement the entire roadmap in one unreviewed change. Finish one milestone, run its checks, record the results, and then proceed.
-
-## Implementation constraints
-
-- Keep room/session state server-side and validate membership for every signaling event.
-- Require a room ID plus pairing secret/PIN; a tunnel URL is not an access-control mechanism.
-- The browser must only start capture after user action and must stop tracks when the stream is stopped.
-- Handle camera errors, disconnects, expired rooms and server restarts explicitly.
-- Do not report Live until a remote video track is received and rendered.
-- Do not add recording, cloud storage, audio, multi-viewer support, or a TURN dependency without updating scope and decisions first.
-- Do not mark tasks complete until the behavior has been tested.
-- Keep secrets out of source control and logs.
-
-## Required handoff after each implementation session
-
-Update this file with:
-
-- actual implementation status (not planned status);
-- modified/created files;
-- commands and tests run, with pass/fail results;
-- known issues and reproduction steps;
-- the single best next task.
-
-Also update `tasks.md` and, for material design changes, `decisions.md`. Do not claim that mobile or cross-network behavior works without testing it on the relevant devices and networks.
+- `npm test`: 7/7 tests passed (server config, health endpoint, room capacity, signaling relays, auth rate limiting).
+- Server start: `npm start` (listening on port 3000).

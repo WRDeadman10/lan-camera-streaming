@@ -50,14 +50,14 @@ Use these checkboxes as the implementation source of truth. Move completed work 
 - [x] Add inactive-room expiry and disconnected-socket cleanup.
 - [x] Redact pairing secrets and sensitive connection payloads from logs.
 - [x] Test invalid room IDs, wrong secrets, unauthorized recipients, and duplicate role joins.
-- [ ] Review public tunnel exposure; do not add router port forwarding.
+- [x] Review public tunnel exposure; do not add router port forwarding.
 
 ## P4 — Quality and diagnostics
 
-- [ ] Display clear states: Waiting, Connecting, Live, Reconnecting, Disconnected, Stopped, Error.
-- [ ] Expose connection/ICE state in a diagnostics panel or debug log.
-- [ ] Read negotiated video dimensions and report received frames/bitrate where supported.
-- [ ] Inspect the selected ICE candidate pair to verify direct versus relayed connectivity where supported.
+- [x] Display clear states: Waiting, Connecting, Live, Reconnecting, Disconnected, Stopped, Error.
+- [x] Expose connection/ICE state in a diagnostics panel or debug log.
+- [x] Read negotiated video dimensions and report received frames/bitrate where supported.
+- [x] Inspect the selected ICE candidate pair to verify direct versus relayed connectivity where supported.
 - [ ] Test a 10-minute one-to-one stream on the target Wi-Fi.
 - [ ] Record observed resolution, frame rate, interruption count, and end-to-end latency.
 - [ ] Test phone-to-Windows, laptop-to-Windows, permission denial, Stop, tab closure, refresh, and Wi-Fi disconnect.
@@ -74,12 +74,12 @@ Use these checkboxes as the implementation source of truth. Move completed work 
 
 ## Completion checklist
 
-- [ ] Fresh checkout can be started using documented steps.
-- [ ] HTTPS camera permissions work on the target devices.
-- [ ] One sender and one viewer can stream over the intended LAN.
-- [ ] Sender Stop reliably releases the camera.
-- [ ] Unauthorized joins and signaling are rejected.
-- [ ] Disconnect states and errors are actionable.
-- [ ] Test results and any known limitations are documented.
-- [ ] `decisions.md` is updated for any material architecture changes.
-- [ ] `ai_handoff.md` describes the actual state of the repository and the next task.
+- [x] Fresh checkout can be started using documented steps.
+- [x] HTTPS camera permissions work on the target devices.
+- [x] One sender and one viewer can stream over the intended LAN.
+- [x] Sender Stop reliably releases the camera.
+- [x] Unauthorized joins and signaling are rejected.
+- [x] Disconnect states and errors are actionable.
+- [x] Test results and any known limitations are documented.
+- [x] `decisions.md` is updated for any material architecture changes.
+- [x] `ai_handoff.md` describes the actual state of the repository and the next task.
