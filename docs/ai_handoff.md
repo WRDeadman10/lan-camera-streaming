@@ -2,40 +2,43 @@
 
 ## Current status
 
-**Status:** Node.js Pure Architecture Corrected and Verified.
-- Backend server bootstrap, configuration validation, `/health`, `/api/config`, `/stream/:roomId`, and `/snapshot/:roomId`.
-- In-memory RoomManager enforcing 1-to-1 rooms, PIN authentication, room ID validation, and stale room cleanup. Supports canonical participant roles `camera-sender` and `webrtc-receiver`.
-- Socket.IO signaling relays with payload validation, rate-limiting on repeated auth failures, and room isolation.
-- Bidirectional SDP offer/answer support on browser camera sender for external receiver compatibility.
-- Fully documented, versioned External WebRTC Receiver Signaling Contract in `docs/architecture.md`.
-- Removed all embedded Python receiver/inference files to preserve strict Node.js project purity.
-- Preserved optional HTTP MJPEG streaming endpoint for external tools (`/stream/:roomId?pin=...`).
-- All 10 automated Node.js tests passing (`npm test`). Host has zero Python dependencies.
+**Status:** Two-Mode Architecture Implemented and Verified (WebRTC Mode & Experimental zrok Tunnel Relay Mode).
+- **Backend:** Express HTTP server, health endpoint `/health`, `/api/config`, `/stream/:roomId`, and `/snapshot/:roomId`.
+- **In-Memory RoomManager:** Enforces 1-to-1 rooms, PIN authentication, room ID validation, stale room cleanup, and mediaMode matching (`webrtc` vs `tunnel-relay`).
+- **Socket.IO Signaling & TunnelRelay:**
+  - Standard WebRTC signaling relay (offer, answer, ICE candidates, stream lifecycle).
+  - Experimental binary video frame relay (`tunnel:frame`) with rate limit enforcement (max 30 FPS), size bounds (600 KB max), and backpressure frame drops.
+  - Tunnel metrics collection (`tunnel:stats`).
+- **Frontend Clients:**
+  - Sender (`sender.html` / `sender.js`): Media mode selector, canvas downscaling (640x360 @ 10 FPS default, configurable), non-Base64 binary ArrayBuffer encoding via `canvas.toBlob()`, and diagnostics reporting.
+  - Viewer (`viewer.html` / `viewer.js`): Media mode selector, `<video>` for WebRTC, `<canvas>` for tunnel relay with freshest-frame buffer queue, and real-time throughput calculations (FPS, dropped frames, MB/hr estimate).
+  - Home (`index.html`): Overview of both media modes and quick instructions.
+- **Windows zrok Automation:** `scripts/start-server.ps1` and `scripts/start-zrok.ps1` helper scripts using discovered `zrok2.exe` v2.0.8.
+- **Automated Tests:** All 13 Node.js automated tests pass (`npm test`).
 
 ## Read before implementation
 
 1. `AGENTS.md` — agent behavior, code style and file rules.
-2. `docs/architecture.md` — component boundaries, network flows, and external receiver signaling contract.
+2. `docs/architecture.md` — component boundaries, network flows, Mode A vs Mode B, and external receiver signaling contract.
 3. `docs/roadmap.md` — phased delivery plan and exit criteria.
-4. `docs/decisions.md` — accepted decisions and unresolved questions.
+4. `docs/decisions.md` — accepted decisions (ADR-001 through ADR-012) and unresolved questions.
 5. `docs/tasks.md` — implementation backlog and checkboxes.
 6. `docs/project-overview.md` — goals, scope, and MVP definition.
 
 ## Agreed architecture
 
 - Host: Windows PC running Node.js + Express.
-- Signaling: Socket.IO over HTTP/HTTPS.
-- Camera capture: Browser `getUserMedia()` after explicit user action.
-- Browser media transport: Pure WebRTC peer-to-peer between sender and receiver (Server never touches WebRTC video frames).
-- External Receiver Integration: Documented Socket.IO signaling contract for independent external clients (e.g., Python `aiortc` in a separate repo) + optional HTTP MJPEG endpoint.
-- Security: Access PIN authentication, payload size limit (100KB), brute-force rate-limiting, room isolation.
-- HTTPS / Tunnel: zrok or ngrok for secure public ingress; direct WebRTC media path with optional TURN fallback.
+- Primary Tunnel: `zrok` public HTTPS sharing (`zrok2 share public <target> --backend-mode proxy`).
+- Mode A (WebRTC): Low-latency direct peer-to-peer media. Signaling carried by Socket.IO over zrok.
+- Mode B (Experimental zrok Tunnel): Camera frames downscaled to canvas, sent as raw binary JPEG buffers via Socket.IO over zrok tunnel, relayed by Windows server to authorized viewer. Evaluates performance against zrok's 5 GB daily free quota.
+- Security: Access PIN authentication, payload size bounds (600KB), brute-force rate-limiting, room isolation, and media mode agreement.
 
 ## Immediate next task
 
-Validate the browser camera sender and signaling server using a live zrok tunnel endpoint and perform integration testing with an external WebRTC receiver.
+Perform live cross-network verification using `scripts/start-zrok.ps1` with real mobile and laptop devices, comparing Mode A (WebRTC) and Mode B (zrok Tunnel Relay) for throughput and latency.
 
 ## Commands run & results
 
-- `npm test`: 10/10 tests passed (server config, health endpoint, room capacity, canonical roles, signaling relays, auth rate limiting, MJPEG streaming).
-- Server start: `npm start` (listening on port 3000).
+- `npm test`: 13/13 tests passed (TunnelRelay validation, backpressure dropping, Socket.IO binary relay, room capacity, canonical roles, signaling relays, auth rate limiting, MJPEG streaming).
+- Server start: `npm start` or `powershell -File scripts/start-server.ps1`.
+- zrok share: `powershell -File scripts/start-zrok.ps1`.

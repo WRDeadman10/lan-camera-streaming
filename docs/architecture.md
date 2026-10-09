@@ -7,9 +7,9 @@ The Windows PC hosts the application. Browsers use it for the sender/viewer UI a
 ```mermaid
 flowchart TB
     Host[Windows PC\nNode.js + Express + Socket.IO]
-    Tunnel[Optional HTTPS tunnel\nzrok OR ngrok]
-    Sender[Browser Camera Sender\ngetUserMedia + WebRTC / MJPEG]
-    BrowserViewer[Browser Viewer\nWebRTC video element]
+    Tunnel[Public HTTPS tunnel\nzrok proxy]
+    Sender[Browser Camera Sender\ngetUserMedia + WebRTC / Canvas JPEG]
+    BrowserViewer[Browser Viewer\nWebRTC video element / Canvas renderer]
     ExtReceiver[External Receiver / Python Inference\naiortc WebRTC OR HTTP MJPEG]
     Turn[Optional TURN relay]
 
@@ -18,23 +18,27 @@ flowchart TB
     ExtReceiver <-->|HTTPS / Socket.IO signaling| Tunnel
     Tunnel <--> Host
 
-    Sender <-->|Direct WebRTC media over LAN| BrowserViewer
-    Sender <-->|Direct WebRTC media over LAN| ExtReceiver
-    Sender -.->|Fallback media path if ICE selects relay| Turn
+    %% Mode A: WebRTC Direct Media
+    Sender <-->|Mode A: Direct WebRTC P2P Media| BrowserViewer
+    Sender <-->|Mode A: Direct WebRTC P2P Media| ExtReceiver
+    Sender -.->|Mode A: Fallback if direct ICE fails| Turn
     Turn -.-> ExtReceiver
 
-    %% Optional MJPEG stream
-    Sender -->|JPEG frames via Socket.IO| Host
+    %% Mode B: Experimental Tunneled Binary Video Relay
+    Sender -->|Mode B: Binary JPEG via Socket.IO| Host
+    Host -->|Mode B: Relayed Binary JPEG via Socket.IO| BrowserViewer
+
+    %% Alternative MJPEG stream
     Host -->|HTTP /stream/:roomId| ExtReceiver
 ```
 
-This Node.js repository hosts the browser camera capture interface, authentication, room management, Socket.IO signaling server, and optional MJPEG streaming endpoint.
+This Node.js repository provides two distinct, selectable media transport modes:
+1. **Mode A: WebRTC Mode (Direct/ICE Media)**: Camera video travels directly peer-to-peer between browsers or via TURN relay. The Windows server and zrok tunnel carry signaling only.
+2. **Mode B: Experimental zrok-Tunneled Video Mode (Application Relay)**: Camera frames are downscaled via Canvas, binary JPEG encoded, and deliberately routed through the Windows Node.js server to the authorized viewer to test throughput and latency against the zrok free transfer allowance (5 GB daily).
 
 Any external receiving application (such as an external Python `aiortc` client running OpenCV, PyTorch, or YOLO in a separate project) connects via:
 1. **WebRTC (`aiortc`)**: Negotiates directly through Socket.IO signaling to receive the camera media track peer-to-peer.
 2. **HTTP MJPEG**: Reads standard multipart/x-mixed-replace stream from `/stream/:roomId?pin=...`.
-
-Video frames never route through the Node.js signaling channel.
 
 ## 2. Components and responsibilities
 
@@ -66,25 +70,23 @@ Video frames never route through the Node.js signaling channel.
 - Shows meaningful states such as Waiting for sender, Connecting, Live, Reconnecting, and Disconnected.
 - Closes its peer connection and removes listeners when leaving a room.
 
-### 2.4 Socket.IO signaling
+### 2.4 Socket.IO signaling & Experimental Tunnel Relay
 
-Socket.IO is a signaling/control channel, not a media transport. It exchanges:
+Socket.IO acts as:
+1. **Control & Signaling Channel**: Exchanges room join requests, peer notifications, SDP offer/answer, ICE candidates, and lifecycle state.
+2. **Experimental Tunnel Relay (Mode B)**: In `tunnel-relay` mode, accepts raw binary JPEG buffers (`tunnel:frame`), validates magic bytes and frame sizes (<=600KB), drops stale frames under backpressure when incoming rate exceeds max FPS, routes directly to the authorized viewer in the room, and records throughput statistics.
 
-- room creation and join requests;
-- peer-ready and stream-state events;
-- WebRTC SDP offers and answers;
-- ICE candidates;
-- leave and failure events.
+Validate every event on the server. A client must not be allowed to send signaling or video payloads to peers outside its authorized room.
 
-Validate every event on the server. A client must not be allowed to send signaling payloads to peers outside its authorized room.
+### 2.5 zrok Tunnel Provider
 
-### 2.5 Optional tunnel
-
-ngrok or zrok forwards HTTPS/WebSocket requests to the local Node.js server. It makes the UI/signaling reachable through a secure browser origin, but the presence of a tunnel does not mean media flows through it. Verify the selected WebRTC candidate pair during testing rather than assuming the media path.
+`zrok` publishes the local Express application over a secure public HTTPS URL (`https://<hash>.share.zrok.io`).
+- In **Mode A**, zrok carries the initial web page delivery and Socket.IO signaling. WebRTC media flows directly peer-to-peer or via TURN.
+- In **Mode B**, zrok proxies all web traffic, Socket.IO connections, and binary video frame relays, enabling direct experimentation against zrok's free daily quota (5 GB).
 
 ### 2.6 Optional TURN server
 
-TURN is not required for the first same-LAN proof of concept. Add it if testing shows that direct connectivity fails on target networks. Use short-lived TURN credentials or another suitable credential mechanism; do not ship a public TURN server with static shared credentials.
+TURN is not required for same-LAN WebRTC streaming. Add it if testing shows that direct connectivity fails on restrictive networks. Mode B (tunneled relay) serves as an alternative application-level relay through the Windows server.
 
 ## 3. Proposed routes and pages
 

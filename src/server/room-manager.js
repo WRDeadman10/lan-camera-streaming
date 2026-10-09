@@ -26,7 +26,7 @@ export class RoomManager {
     return /^[a-zA-Z0-9_-]{3,32}$/.test(trimmed);
   }
 
-  createOrJoinRoom(roomId, role, socketId, pin) {
+  createOrJoinRoom(roomId, role, socketId, pin, mediaMode = 'webrtc') {
     if (!this.validatePin(pin)) {
       return { success: false, error: 'Invalid access PIN' };
     }
@@ -47,6 +47,9 @@ export class RoomManager {
       return { success: false, error: 'Invalid role. Must be "camera-sender" ("sender") or "webrtc-receiver" ("viewer").' };
     }
 
+    // Validate mediaMode
+    const normalizedMode = mediaMode === 'tunnel-relay' ? 'tunnel-relay' : 'webrtc';
+
     // Check if socket is already in a room
     if (this.socketToRoom.has(socketId)) {
       this.leave(socketId);
@@ -57,10 +60,19 @@ export class RoomManager {
       room = {
         senderSocketId: null,
         viewerSocketId: null,
+        mediaMode: normalizedMode,
         createdAt: Date.now(),
         lastActiveAt: Date.now()
       };
       this.rooms.set(roomId, room);
+    } else {
+      // Validate that mediaMode matches room's established mode
+      if (room.mediaMode !== normalizedMode) {
+        return {
+          success: false,
+          error: `Media mode mismatch. This room is configured for "${room.mediaMode}" mode.`
+        };
+      }
     }
 
     if (normalizedRole === 'sender') {
@@ -76,12 +88,13 @@ export class RoomManager {
     }
 
     room.lastActiveAt = Date.now();
-    this.socketToRoom.set(socketId, { roomId, role: normalizedRole });
+    this.socketToRoom.set(socketId, { roomId, role: normalizedRole, mediaMode: room.mediaMode });
 
     return {
       success: true,
       roomId,
       role: normalizedRole,
+      mediaMode: room.mediaMode,
       hasPeer: Boolean(normalizedRole === 'sender' ? room.viewerSocketId : room.senderSocketId),
       peerSocketId: normalizedRole === 'sender' ? room.viewerSocketId : room.senderSocketId
     };

@@ -20,12 +20,14 @@ For the first milestone, support one sender and one viewer. Multi-camera and mul
 
 - Run the signaling/web application on a Windows PC.
 - Let modern mobile and desktop browsers capture a camera after an explicit user action.
-- Transport real-time video using WebRTC rather than forwarding video frames through ordinary HTTP requests or Socket.IO messages.
-- Use Socket.IO for room coordination and WebRTC signaling.
-- Work well on the same Wi-Fi/LAN, preferring a direct peer-to-peer media path.
-- Support a tunnel such as ngrok or zrok as an optional way to expose the HTTPS web application during development.
+- Provide two selectable media transport modes:
+  - **Mode A (WebRTC Mode)**: Direct peer-to-peer live video with low latency over LAN or TURN relay.
+  - **Mode B (Experimental zrok Tunnel Relay)**: Canvas capture and binary JPEG frames routed deliberately through the Windows server to measure latency and test against zrok's free daily transfer allowance (5 GB).
+- Use Socket.IO for room coordination, WebRTC signaling, and binary frame relay.
+- Support zrok as the primary public HTTPS tunnel provider for convenient, secure mobile browser access.
 - Make stream state visible: waiting, connecting, live, disconnected, and stopped.
-- Avoid recording, storing, or uploading video to a cloud service in the MVP.
+- Provide real-time diagnostics: frame rates, dropped frames, encoding latency, and data transfer rates.
+- Avoid recording, storing, or uploading video to a cloud service.
 
 ## 4. Non-goals for the MVP
 
@@ -42,15 +44,14 @@ For the first milestone, support one sender and one viewer. Multi-camera and mul
 |---|---|---|
 | Runtime | Node.js | Runs the server on Windows |
 | HTTP server | Express | Serves the web pages, static assets, and optional MJPEG stream |
-| Signaling | Socket.IO | Room membership and WebRTC offer/answer/ICE exchange |
+| Signaling & Relay | Socket.IO | Room membership, WebRTC signaling, and binary tunnel frame relay |
 | Camera capture | Browser `getUserMedia()` | Requests permission and captures local camera stream |
-| Browser media transport | WebRTC | Direct peer-to-peer live video between sender and receiver |
+| Standard media transport | WebRTC | Direct peer-to-peer live video between sender and receiver (Mode A) |
+| Experimental media transport | Binary Canvas JPEG | Relays binary frames through Windows server over WebSocket (Mode B) |
 | External integration | Socket.IO WebRTC & HTTP MJPEG | Versioned contract for external clients (e.g. Python OpenCV / YOLO) |
-| UI | HTML, CSS, browser JavaScript | Responsive sender and viewer interfaces |
-| HTTPS / Tunnel | zrok or ngrok | Provides browser-trusted HTTPS entry point to the local web server |
+| UI | HTML, CSS, browser JavaScript | Responsive sender and viewer interfaces with diagnostics panel |
+| HTTPS / Tunnel | zrok (primary) | Provides public HTTPS tunnel with 5 GB/day free transfer |
 | Media fallback | TURN server, if later required | Relays media when direct ICE connectivity cannot be established |
-
-Use one tunnel provider at a time. The tunnel is for serving the site and signaling, not the normal video path.
 
 ## 6. Network and privacy model
 

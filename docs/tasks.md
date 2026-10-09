@@ -72,6 +72,16 @@ Use these checkboxes as the implementation source of truth. Move completed work 
 - [ ] Test phone-to-Windows, laptop-to-Windows, permission denial, Stop, tab closure, refresh, and Wi-Fi disconnect.
 - [ ] Document any networks where direct WebRTC does not connect.
 
+## P4.5 — Experimental zrok-Tunneled Video Mode
+
+- [x] Implement `TunnelRelay` service for server-side frame rate/size bounding and backpressure frame dropping.
+- [x] Add media mode selector (`webrtc` vs `tunnel-relay`) across room manager, sender, and viewer.
+- [x] Implement canvas downscaling and binary JPEG transmission (`tunnel:frame`) in `sender.js`.
+- [x] Implement binary frame canvas rendering with drop-queue management in `viewer.js`.
+- [x] Add real-time throughput diagnostics (frames sent/received, dropped frames, encoding latency, MB/hr estimates).
+- [x] Add PowerShell startup scripts for Windows zrok workflow (`scripts/start-server.ps1`, `scripts/start-zrok.ps1`).
+- [x] Add automated unit and integration tests covering binary frame relay and room mode isolation.
+
 ## P5 — Conditional / post-MVP
 
 - [ ] Add TURN only if testing demonstrates a requirement for relayed connectivity.

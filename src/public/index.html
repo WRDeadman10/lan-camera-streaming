@@ -17,7 +17,7 @@
       <div class="card">
         <h2>Choose Your Role</h2>
         <p style="margin-bottom: 20px; color: var(--text-muted);">
-          Stream a camera from a phone or laptop, or watch a stream from another device on the same local network.
+          Stream a camera from a phone or laptop, or watch a stream from another device on the same local network or via public zrok tunnel.
         </p>
 
         <div class="button-group" style="margin-bottom: 24px;">
@@ -31,13 +31,31 @@
       </div>
 
       <div class="card">
+        <h2>Supported Media Modes</h2>
+        <div style="display: grid; gap: 16px; margin-bottom: 16px;">
+          <div style="padding: 14px; background-color: #0b1120; border-radius: 6px; border: 1px solid var(--border);">
+            <strong style="color: #60a5fa;">Mode A: WebRTC (Direct/ICE Media)</strong>
+            <p style="font-size: 0.9rem; color: var(--text-muted); margin-top: 4px;">
+              Lowest latency. Video travels directly peer-to-peer over LAN or via TURN relay. Server & zrok tunnel carry signaling only.
+            </p>
+          </div>
+          <div style="padding: 14px; background-color: #0b1120; border-radius: 6px; border: 1px solid var(--border);">
+            <strong style="color: #facc15;">Mode B: Experimental (Video through zrok Tunnel)</strong>
+            <p style="font-size: 0.9rem; color: var(--text-muted); margin-top: 4px;">
+              Canvas capture & binary JPEG frames routed deliberately through Windows Node.js server. Tested against zrok free daily quota.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
         <h2>Quick Instructions</h2>
         <ol style="margin-left: 20px; color: var(--text-muted); font-size: 0.95rem; line-height: 1.8;">
-          <li>Ensure both devices are on the same local Wi-Fi or connected via a secure HTTPS tunnel.</li>
-          <li>On the camera device, click <strong>Start Streaming</strong>, enter the access PIN, and generate or enter a Room ID.</li>
+          <li>Ensure both devices are on the same local Wi-Fi or connected via the secure zrok HTTPS tunnel.</li>
+          <li>On the camera device, click <strong>Start Streaming</strong>, choose the Media Mode, enter PIN, and generate or enter Room ID.</li>
           <li>Grant browser camera permission when prompted.</li>
-          <li>On the receiving device, click <strong>Watch Stream</strong>, enter the same Room ID and access PIN.</li>
-          <li>Direct WebRTC media connects peer-to-peer without server media relay.</li>
+          <li>On the receiving device, click <strong>Watch Stream</strong>, select the same Media Mode, enter Room ID and PIN.</li>
+          <li>Monitor real-time throughput, dropped frames, and connection diagnostics in the status panel.</li>
         </ol>
       </div>
     </main>

@@ -34,6 +34,47 @@
         </div>
 
         <div class="form-group">
+          <label for="mediaMode">Media Transport Mode</label>
+          <select id="mediaMode">
+            <option value="webrtc" selected>WebRTC — Direct/ICE media (Low Latency P2P)</option>
+            <option value="tunnel-relay">Experimental — Video through zrok (Application Relay)</option>
+          </select>
+        </div>
+
+        <div id="tunnelConfigPanel" style="display: none; padding: 12px; margin-bottom: 16px; background-color: #0b1120; border-radius: 6px; border: 1px dashed var(--border);">
+          <div style="font-size: 0.85rem; font-weight: 600; color: #facc15; margin-bottom: 8px;">Experimental Tunnel Settings</div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
+            <div>
+              <label for="tunnelResolution" style="font-size: 0.75rem;">Resolution</label>
+              <select id="tunnelResolution" style="font-size: 0.85rem; padding: 6px;">
+                <option value="640x360" selected>640 × 360</option>
+                <option value="480x270">480 × 270</option>
+                <option value="854x480">854 × 480</option>
+                <option value="1280x720">1280 × 720</option>
+              </select>
+            </div>
+            <div>
+              <label for="tunnelFps" style="font-size: 0.75rem;">Frame Rate</label>
+              <select id="tunnelFps" style="font-size: 0.85rem; padding: 6px;">
+                <option value="10" selected>10 FPS</option>
+                <option value="15">15 FPS</option>
+                <option value="20">20 FPS</option>
+                <option value="30">30 FPS</option>
+              </select>
+            </div>
+            <div>
+              <label for="tunnelQuality" style="font-size: 0.75rem;">JPEG Quality</label>
+              <select id="tunnelQuality" style="font-size: 0.85rem; padding: 6px;">
+                <option value="0.5">0.5 (Low)</option>
+                <option value="0.6" selected>0.6 (Default)</option>
+                <option value="0.75">0.75 (Medium)</option>
+                <option value="0.85">0.85 (High)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
           <label for="cameraSelect">Select Camera</label>
           <select id="cameraSelect">
             <option value="">Default (Environment/Back camera)</option>

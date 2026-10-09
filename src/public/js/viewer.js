@@ -10,20 +10,33 @@ import { WebRtcPeer } from './webrtc-peer.js';
 let webrtcPeer = null;
 let socket = null;
 let currentRoomId = null;
+let currentMediaMode = 'webrtc';
 let statsInterval = null;
+
+// Tunnel rendering state
+let tunnelIsRendering = false;
+let tunnelNextFrameBlob = null;
+let tunnelStartTime = 0;
+let tunnelFramesReceived = 0;
+let tunnelFramesDropped = 0;
+let tunnelBytesReceived = 0;
 
 // DOM Elements
 const accessPinInput = document.getElementById('accessPin');
 const roomIdInput = document.getElementById('roomId');
+const mediaModeSelect = document.getElementById('mediaMode');
 const btnJoin = document.getElementById('btnJoin');
 const btnLeave = document.getElementById('btnLeave');
 const btnFullscreen = document.getElementById('btnFullscreen');
 const remoteVideo = document.getElementById('remoteVideo');
+const remoteCanvas = document.getElementById('remoteCanvas');
 const videoOverlay = document.getElementById('videoOverlay');
 const videoWrapper = document.getElementById('videoWrapper');
 const pythonLinkCard = document.getElementById('pythonLinkCard');
 const pythonStreamUrl = document.getElementById('pythonStreamUrl');
 const btnCopyPythonUrl = document.getElementById('btnCopyPythonUrl');
+
+const canvasContext = remoteCanvas ? remoteCanvas.getContext('2d') : null;
 
 if (btnCopyPythonUrl) {
   btnCopyPythonUrl.addEventListener('click', () => {
@@ -74,15 +87,16 @@ async function joinRoom() {
   }
 
   btnJoin.disabled = true;
+  currentMediaMode = mediaModeSelect ? mediaModeSelect.value : 'webrtc';
   updateStatus('connecting', 'Connecting to server...');
-  logDiagnostic(`Connecting to signaling server for room "${roomId}"...`);
+  logDiagnostic(`Connecting to signaling server for room "${roomId}" [mode: ${currentMediaMode}]...`);
 
   if (!socket) {
     socket = io();
     setupSocketListeners();
   }
 
-  socket.emit('room:join', { roomId, role: 'viewer', pin }, async (response) => {
+  socket.emit('room:join', { roomId, role: 'viewer', pin, mediaMode: currentMediaMode }, async (response) => {
     if (!response || !response.success) {
       const errMsg = response ? response.error : 'Failed to join room';
       showError(errMsg);
@@ -94,7 +108,17 @@ async function joinRoom() {
 
     currentRoomId = roomId;
     btnLeave.disabled = false;
-    logDiagnostic(`Joined room "${roomId}" successfully.`);
+    logDiagnostic(`Joined room "${roomId}" successfully [mode: ${response.mediaMode}].`);
+
+    // Switch visible video/canvas element according to mode
+    if (currentMediaMode === 'tunnel-relay') {
+      if (remoteVideo) remoteVideo.style.display = 'none';
+      if (remoteCanvas) remoteCanvas.style.display = 'block';
+      startTunnelViewerStats();
+    } else {
+      if (remoteVideo) remoteVideo.style.display = 'block';
+      if (remoteCanvas) remoteCanvas.style.display = 'none';
+    }
 
     // Display Direct Python Stream Link
     const streamUrl = `${window.location.origin}/stream/${roomId}?pin=${encodeURIComponent(pin)}`;
@@ -105,23 +129,65 @@ async function joinRoom() {
       pythonLinkCard.style.display = 'block';
     }
 
-    if (response.hasPeer) {
-      updateStatus('connecting', 'Sender present. Awaiting offer...');
-      logDiagnostic('Sender is present in room, waiting for WebRTC offer.');
+    if (currentMediaMode === 'tunnel-relay') {
+      if (response.hasPeer) {
+        updateStatus('waiting', 'Sender present. Awaiting tunnel frames...');
+        logDiagnostic('Sender is present in room, waiting for binary tunnel video frames.');
+      } else {
+        updateStatus('waiting', 'Waiting for Sender (Tunnel Mode)...');
+        logDiagnostic('Room joined. Waiting for sender to connect.');
+      }
     } else {
-      updateStatus('waiting', 'Waiting for Sender...');
-      logDiagnostic('Room joined. Waiting for sender to connect.');
+      if (response.hasPeer) {
+        updateStatus('connecting', 'Sender present. Awaiting offer...');
+        logDiagnostic('Sender is present in room, waiting for WebRTC offer.');
+      } else {
+        updateStatus('waiting', 'Waiting for Sender...');
+        logDiagnostic('Room joined. Waiting for sender to connect.');
+      }
     }
   });
 }
 
 function setupSocketListeners() {
   socket.on('peer:joined', (data) => {
-    logDiagnostic(`Sender joined (${data.peerId}). Awaiting stream...`);
-    updateStatus('connecting', 'Sender connected. Waiting for offer...');
+    logDiagnostic(`Sender joined (${data.peerId}) [mode: ${data.mediaMode || currentMediaMode}].`);
+    if (currentMediaMode === 'tunnel-relay') {
+      updateStatus('waiting', 'Sender connected. Awaiting tunnel frames...');
+    } else {
+      updateStatus('connecting', 'Sender connected. Waiting for WebRTC offer...');
+    }
+  });
+
+  // Experimental zrok-tunneled binary video frame reception
+  socket.on('tunnel:frame', (buffer) => {
+    if (currentMediaMode !== 'tunnel-relay') {
+      return;
+    }
+
+    if (tunnelStartTime === 0) {
+      tunnelStartTime = Date.now();
+      updateStatus('live', 'Live (zrok Tunnel Relay)');
+      if (videoOverlay) videoOverlay.style.display = 'none';
+    }
+
+    tunnelFramesReceived += 1;
+    tunnelBytesReceived += buffer.byteLength || (buffer.length || 0);
+
+    // Drop stale frame if rendering is currently busy
+    if (tunnelIsRendering) {
+      tunnelFramesDropped += 1;
+      tunnelNextFrameBlob = buffer; // replace with freshest frame
+      return;
+    }
+
+    renderBinaryFrame(buffer);
   });
 
   socket.on('webrtc:offer', async (data) => {
+    if (currentMediaMode === 'tunnel-relay') {
+      return; // Ignore WebRTC offers when in tunnel-relay mode
+    }
     logDiagnostic('Received WebRTC offer from sender. Creating answer...');
     updateStatus('connecting', 'Negotiating connection...');
 
@@ -248,6 +314,57 @@ function startStatsPolling() {
   }, 4000);
 }
 
+function startTunnelViewerStats() {
+  stopStatsPolling();
+  statsInterval = setInterval(() => {
+    if (tunnelStartTime === 0) {
+      return;
+    }
+    const elapsedSecs = Math.max(1, Math.round((Date.now() - tunnelStartTime) / 1000));
+    const avgFps = (tunnelFramesReceived / elapsedSecs).toFixed(1);
+    const mbRecv = (tunnelBytesReceived / (1024 * 1024)).toFixed(2);
+    const estMbPerHour = ((tunnelBytesReceived / elapsedSecs) * 3600 / (1024 * 1024)).toFixed(1);
+
+    logDiagnostic(
+      `[Tunnel Stats] Elapsed: ${elapsedSecs}s | Recv: ${tunnelFramesReceived} frames (${avgFps} FPS) | ` +
+      `Dropped: ${tunnelFramesDropped} | Data: ${mbRecv} MB (Est: ${estMbPerHour} MB/hr)`
+    );
+  }, 4000);
+}
+
+function renderBinaryFrame(buffer) {
+  tunnelIsRendering = true;
+  const blob = new Blob([buffer], { type: 'image/jpeg' });
+  const objectUrl = URL.createObjectURL(blob);
+  const img = new Image();
+
+  img.onload = () => {
+    if (remoteCanvas && canvasContext) {
+      if (remoteCanvas.width !== img.width || remoteCanvas.height !== img.height) {
+        remoteCanvas.width = img.width;
+        remoteCanvas.height = img.height;
+      }
+      canvasContext.drawImage(img, 0, 0, img.width, img.height);
+    }
+    URL.revokeObjectURL(objectUrl);
+    tunnelIsRendering = false;
+
+    // Drain queued freshest frame if any
+    if (tunnelNextFrameBlob) {
+      const nextBuf = tunnelNextFrameBlob;
+      tunnelNextFrameBlob = null;
+      renderBinaryFrame(nextBuf);
+    }
+  };
+
+  img.onerror = () => {
+    URL.revokeObjectURL(objectUrl);
+    tunnelIsRendering = false;
+  };
+
+  img.src = objectUrl;
+}
+
 function stopStatsPolling() {
   if (statsInterval) {
     clearInterval(statsInterval);
@@ -271,6 +388,17 @@ function leaveRoom() {
   if (remoteVideo.srcObject) {
     remoteVideo.srcObject = null;
   }
+  if (remoteCanvas && canvasContext) {
+    canvasContext.clearRect(0, 0, remoteCanvas.width, remoteCanvas.height);
+  }
+
+  tunnelStartTime = 0;
+  tunnelFramesReceived = 0;
+  tunnelFramesDropped = 0;
+  tunnelBytesReceived = 0;
+  tunnelNextFrameBlob = null;
+  tunnelIsRendering = false;
+
   videoOverlay.textContent = 'Enter Room ID and click "Join Room" to view stream';
   videoOverlay.style.display = 'block';
 

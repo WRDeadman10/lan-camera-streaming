@@ -82,6 +82,20 @@ Tasks:
 
 **Exit criteria:** A recorded test report exists. The 720p/30 FPS and provisional latency goals are assessed on real hardware. Any network limitations are documented.
 
+## Phase 4.5 — Experimental zrok-Tunneled Video Mode & Tunnel Workflow
+
+**Objective:** Measure and test intentional application-level video relaying through the Windows Node.js server and zrok public share.
+
+Tasks:
+- Implement TunnelRelay service with maximum frame size limits (600KB), FPS enforcement (max 30), and backpressure frame dropping.
+- Support media mode selection (`webrtc` vs `tunnel-relay`) across room manager, sender, and viewer.
+- Add canvas downscaling, JPEG blob generation, and binary ArrayBuffer transport on the sender.
+- Add binary frame reception and canvas rendering with freshest-frame buffer queue on the viewer.
+- Add real-time throughput metrics (FPS, dropped frames, MB sent/received, estimated MB/hour).
+- Provide Windows PowerShell helper scripts (`scripts/start-server.ps1`, `scripts/start-zrok.ps1`).
+
+**Exit criteria:** Automated tests pass for binary relay and room isolation; sender and viewer can run in tunnel-relay mode without Base64 encoding.
+
 ## Phase 5 — Optional cross-network access and TURN
 
 **Objective:** Support networks where direct WebRTC connectivity does not work.

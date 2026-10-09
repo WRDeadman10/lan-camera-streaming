@@ -12,15 +12,30 @@ const cameraManager = new CameraManager();
 let webrtcPeer = null;
 let socket = null;
 let currentRoomId = null;
+let currentMediaMode = 'webrtc';
 let statsInterval = null;
 let mjpegInterval = null;
+let tunnelInterval = null;
+let tunnelIsEncoding = false;
+let tunnelStartTime = 0;
+let tunnelFramesSent = 0;
+let tunnelBytesSent = 0;
+let tunnelEncodeTimes = [];
+
 const mjpegCanvas = document.createElement('canvas');
 const mjpegContext = mjpegCanvas.getContext('2d');
+const tunnelCanvas = document.createElement('canvas');
+const tunnelContext = tunnelCanvas.getContext('2d');
 
 // DOM Elements
 const accessPinInput = document.getElementById('accessPin');
 const roomIdInput = document.getElementById('roomId');
 const btnGenRoom = document.getElementById('btnGenRoom');
+const mediaModeSelect = document.getElementById('mediaMode');
+const tunnelConfigPanel = document.getElementById('tunnelConfigPanel');
+const tunnelResolutionSelect = document.getElementById('tunnelResolution');
+const tunnelFpsSelect = document.getElementById('tunnelFps');
+const tunnelQualitySelect = document.getElementById('tunnelQuality');
 const cameraSelect = document.getElementById('cameraSelect');
 const btnStart = document.getElementById('btnStart');
 const btnStop = document.getElementById('btnStop');
@@ -30,6 +45,14 @@ const videoOverlay = document.getElementById('videoOverlay');
 const pythonLinkCard = document.getElementById('pythonLinkCard');
 const pythonStreamUrl = document.getElementById('pythonStreamUrl');
 const btnCopyPythonUrl = document.getElementById('btnCopyPythonUrl');
+
+if (mediaModeSelect) {
+  mediaModeSelect.addEventListener('change', () => {
+    if (tunnelConfigPanel) {
+      tunnelConfigPanel.style.display = mediaModeSelect.value === 'tunnel-relay' ? 'block' : 'none';
+    }
+  });
+}
 
 if (btnCopyPythonUrl) {
   btnCopyPythonUrl.addEventListener('click', () => {
@@ -132,6 +155,7 @@ async function startSession() {
   }
 
   currentRoomId = roomId;
+  currentMediaMode = mediaModeSelect ? mediaModeSelect.value : 'webrtc';
   btnStop.disabled = false;
 
   // Initialize Socket.IO connection
@@ -140,10 +164,10 @@ async function startSession() {
     setupSocketListeners();
   }
 
-  logDiagnostic(`Joining room "${roomId}" as sender...`);
+  logDiagnostic(`Joining room "${roomId}" as sender [mode: ${currentMediaMode}]...`);
   updateStatus('connecting', 'Joining Room...');
 
-  socket.emit('room:join', { roomId, role: 'sender', pin }, async (response) => {
+  socket.emit('room:join', { roomId, role: 'sender', pin, mediaMode: currentMediaMode }, async (response) => {
     if (!response || !response.success) {
       const errMsg = response ? response.error : 'Connection to room failed';
       showError(errMsg);
@@ -152,7 +176,7 @@ async function startSession() {
       return;
     }
 
-    logDiagnostic(`Joined room "${roomId}" as sender.`);
+    logDiagnostic(`Joined room "${roomId}" as sender [mode: ${response.mediaMode}].`);
 
     // Display Direct Python Stream Link
     const streamUrl = `${window.location.origin}/stream/${roomId}?pin=${encodeURIComponent(pin)}`;
@@ -167,12 +191,23 @@ async function startSession() {
     // Start sending MJPEG frames for Python consumers
     startMjpegFrameLoop();
 
-    if (response.hasPeer) {
-      updateStatus('connecting', 'Viewer present. Connecting WebRTC...');
-      await initiateWebRtcConnection();
+    if (currentMediaMode === 'tunnel-relay') {
+      logDiagnostic('Operating in Mode B: Experimental zrok-tunneled binary video.');
+      if (response.hasPeer) {
+        updateStatus('live', 'Live (zrok Tunnel Relay)');
+        startTunnelFrameLoop();
+      } else {
+        updateStatus('waiting', 'Waiting for Viewer (Tunnel Mode)...');
+        logDiagnostic('Waiting for viewer to connect in tunnel mode.');
+      }
     } else {
-      updateStatus('waiting', 'Waiting for Viewer / Python...');
-      logDiagnostic('Waiting for viewer or Python consumer to connect.');
+      if (response.hasPeer) {
+        updateStatus('connecting', 'Viewer present. Connecting WebRTC...');
+        await initiateWebRtcConnection();
+      } else {
+        updateStatus('waiting', 'Waiting for Viewer / Python...');
+        logDiagnostic('Waiting for viewer or Python consumer to connect.');
+      }
     }
   });
 }
@@ -232,9 +267,14 @@ async function initiateWebRtcConnection() {
 
 function setupSocketListeners() {
   socket.on('peer:joined', async (data) => {
-    logDiagnostic(`Viewer joined (${data.peerId}). Negotiating stream...`);
-    updateStatus('connecting', 'Viewer Joined. Connecting...');
-    await initiateWebRtcConnection();
+    logDiagnostic(`Viewer joined (${data.peerId}) [mode: ${data.mediaMode || currentMediaMode}].`);
+    if (currentMediaMode === 'tunnel-relay') {
+      updateStatus('live', 'Live (zrok Tunnel Relay)');
+      startTunnelFrameLoop();
+    } else {
+      updateStatus('connecting', 'Viewer Joined. Connecting WebRTC...');
+      await initiateWebRtcConnection();
+    }
   });
 
   socket.on('webrtc:offer', async (data) => {
@@ -377,10 +417,84 @@ function stopMjpegFrameLoop() {
   }
 }
 
+function startTunnelFrameLoop() {
+  stopTunnelFrameLoop();
+
+  tunnelStartTime = Date.now();
+  tunnelFramesSent = 0;
+  tunnelBytesSent = 0;
+  tunnelEncodeTimes = [];
+
+  const resVal = tunnelResolutionSelect ? tunnelResolutionSelect.value : '640x360';
+  const [targetWidth, targetHeight] = resVal.split('x').map((n) => parseInt(n, 10));
+  const targetFps = parseInt(tunnelFpsSelect ? tunnelFpsSelect.value : '10', 10);
+  const targetQuality = parseFloat(tunnelQualitySelect ? tunnelQualitySelect.value : '0.6');
+  const intervalMs = Math.floor(1000 / targetFps);
+
+  tunnelCanvas.width = targetWidth;
+  tunnelCanvas.height = targetHeight;
+
+  logDiagnostic(`Starting experimental tunnel relay loop: ${targetWidth}x${targetHeight} @ ${targetFps} FPS (Q=${targetQuality})`);
+
+  tunnelInterval = setInterval(() => {
+    if (!socket || !localVideo || !cameraManager.currentStream || localVideo.readyState < 2 || tunnelIsEncoding) {
+      return;
+    }
+
+    tunnelIsEncoding = true;
+    const encodeStart = performance.now();
+
+    tunnelContext.drawImage(localVideo, 0, 0, targetWidth, targetHeight);
+    tunnelCanvas.toBlob((blob) => {
+      const encodeDuration = performance.now() - encodeStart;
+      tunnelEncodeTimes.push(encodeDuration);
+      if (tunnelEncodeTimes.length > 30) tunnelEncodeTimes.shift();
+
+      if (blob && socket) {
+        blob.arrayBuffer().then((buffer) => {
+          socket.emit('tunnel:frame', buffer);
+          tunnelFramesSent += 1;
+          tunnelBytesSent += buffer.byteLength;
+          tunnelIsEncoding = false;
+        }).catch(() => {
+          tunnelIsEncoding = false;
+        });
+      } else {
+        tunnelIsEncoding = false;
+      }
+    }, 'image/jpeg', targetQuality);
+  }, intervalMs);
+
+  // Poll diagnostics for tunnel mode
+  statsInterval = setInterval(() => {
+    const elapsedSecs = Math.max(1, Math.round((Date.now() - tunnelStartTime) / 1000));
+    const avgFps = (tunnelFramesSent / elapsedSecs).toFixed(1);
+    const avgEncodeMs = tunnelEncodeTimes.length > 0
+      ? (tunnelEncodeTimes.reduce((a, b) => a + b, 0) / tunnelEncodeTimes.length).toFixed(1)
+      : '0.0';
+    const mbSent = (tunnelBytesSent / (1024 * 1024)).toFixed(2);
+    const estMbPerHour = ((tunnelBytesSent / elapsedSecs) * 3600 / (1024 * 1024)).toFixed(1);
+
+    logDiagnostic(
+      `[Tunnel Stats] Elapsed: ${elapsedSecs}s | Sent: ${tunnelFramesSent} frames (${avgFps} FPS) | ` +
+      `Data: ${mbSent} MB (Est: ${estMbPerHour} MB/hr) | Encode: ${avgEncodeMs}ms`
+    );
+  }, 4000);
+}
+
+function stopTunnelFrameLoop() {
+  if (tunnelInterval) {
+    clearInterval(tunnelInterval);
+    tunnelInterval = null;
+  }
+  tunnelIsEncoding = false;
+}
+
 function stopSession() {
   logDiagnostic('Stopping stream and releasing camera...');
   stopStatsPolling();
   stopMjpegFrameLoop();
+  stopTunnelFrameLoop();
 
   if (pythonLinkCard) {
     pythonLinkCard.style.display = 'none';

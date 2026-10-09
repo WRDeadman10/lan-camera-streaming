@@ -5,16 +5,18 @@
 
 import { Server } from 'socket.io';
 import { RoomManager } from './room-manager.js';
+import { TunnelRelay } from './tunnel-relay.js';
 
 export function setupSignaling(httpServer, config, logger) {
   const roomManager = new RoomManager(config.accessPin);
+  const tunnelRelay = new TunnelRelay({ maxFrameSizeBytes: 600000, maxFps: 30 });
 
   const io = new Server(httpServer, {
     cors: {
       origin: config.corsOrigin === '*' ? true : config.corsOrigin,
       methods: ['GET', 'POST']
     },
-    maxHttpBufferSize: 1e5 // 100 KB max payload limit to reject large malformed payloads
+    maxHttpBufferSize: 1e6 // 1 MB limit to accommodate binary JPEG frames (<=500KB)
   });
 
   const failedAttempts = new Map(); // socketId -> { count: number, blockedUntil: number }
@@ -41,8 +43,8 @@ export function setupSignaling(httpServer, config, logger) {
           return;
         }
 
-        const { roomId, role, pin } = payload;
-        const result = roomManager.createOrJoinRoom(roomId, role, socket.id, pin);
+        const { roomId, role, pin, mediaMode } = payload;
+        const result = roomManager.createOrJoinRoom(roomId, role, socket.id, pin, mediaMode);
 
         if (!result.success) {
           const count = (record ? record.count : 0) + 1;
@@ -58,7 +60,7 @@ export function setupSignaling(httpServer, config, logger) {
         failedAttempts.delete(socket.id);
 
         socket.join(roomId);
-        logger.info(`Socket ${socket.id} joined room "${roomId}" as ${role}`);
+        logger.info(`Socket ${socket.id} joined room "${roomId}" as ${role} [mode: ${result.mediaMode}]`);
 
         if (typeof callback === 'function') {
           callback(result);
@@ -68,6 +70,7 @@ export function setupSignaling(httpServer, config, logger) {
         if (result.hasPeer && result.peerSocketId) {
           io.to(result.peerSocketId).emit('peer:joined', {
             role,
+            mediaMode: result.mediaMode,
             peerId: socket.id
           });
         }
@@ -149,6 +152,46 @@ export function setupSignaling(httpServer, config, logger) {
       }
     });
 
+    // Experimental zrok-tunneled binary video frame relay
+    socket.on('tunnel:frame', (data) => {
+      const membership = roomManager.getMembership(socket.id);
+      if (!membership || membership.role !== 'sender') {
+        return;
+      }
+
+      const peerSocketId = roomManager.getPeerSocketId(socket.id);
+      if (!peerSocketId) {
+        return; // No viewer connected to receive frame
+      }
+
+      const result = tunnelRelay.processIncomingFrame(membership.roomId, data);
+      if (!result.valid) {
+        logger.warn(`Rejected invalid tunnel frame from sender ${socket.id}: ${result.reason}`);
+        return;
+      }
+
+      if (result.dropped) {
+        // Drop stale frame under backpressure
+        return;
+      }
+
+      // Forward raw binary buffer directly to authorized viewer
+      io.to(peerSocketId).emit('tunnel:frame', result.buffer);
+    });
+
+    // Request tunnel relay stats
+    socket.on('tunnel:stats', (callback) => {
+      const membership = roomManager.getMembership(socket.id);
+      if (!membership) {
+        if (typeof callback === 'function') callback({ success: false, error: 'Unauthorized' });
+        return;
+      }
+      const stats = tunnelRelay.getRoomStats(membership.roomId);
+      if (typeof callback === 'function') {
+        callback({ success: true, stats });
+      }
+    });
+
     // MJPEG Frame upload from sender for Python/HTTP inference
     socket.on('mjpeg:frame', (data) => {
       const membership = roomManager.getMembership(socket.id);
@@ -198,6 +241,8 @@ export function setupSignaling(httpServer, config, logger) {
           io.to(leaveResult.peerSocketId).emit('peer:left', {
             role: leaveResult.role
           });
+        } else {
+          tunnelRelay.cleanRoom(leaveResult.roomId);
         }
       }
     });
@@ -214,6 +259,8 @@ export function setupSignaling(httpServer, config, logger) {
           io.to(leaveResult.peerSocketId).emit('peer:left', {
             role: leaveResult.role
           });
+        } else {
+          tunnelRelay.cleanRoom(leaveResult.roomId);
         }
       }
     });

@@ -30,6 +30,14 @@
           <input type="text" id="roomId" placeholder="Enter Room ID provided by sender">
         </div>
 
+        <div class="form-group">
+          <label for="mediaMode">Media Transport Mode</label>
+          <select id="mediaMode">
+            <option value="webrtc" selected>WebRTC — Direct/ICE media (Low Latency P2P)</option>
+            <option value="tunnel-relay">Experimental — Video through zrok (Application Relay)</option>
+          </select>
+        </div>
+
         <div class="button-group" style="margin-top: 20px;">
           <button type="button" id="btnJoin" class="btn btn-primary">Join Room</button>
           <button type="button" id="btnLeave" class="btn btn-danger" disabled>Leave Room</button>
@@ -58,7 +66,8 @@
         </div>
 
         <div class="video-container" id="videoWrapper">
-          <video id="remoteVideo" autoplay playsinline></video>
+          <video id="remoteVideo" autoplay playsinline style="display: block;"></video>
+          <canvas id="remoteCanvas" style="display: none; width: 100%; height: 100%; object-fit: contain;"></canvas>
           <div id="videoOverlay" class="video-overlay-msg">Enter Room ID and click "Join Room" to view stream</div>
         </div>
 
