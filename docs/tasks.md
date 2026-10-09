@@ -67,10 +67,14 @@ Use these checkboxes as the implementation source of truth. Move completed work 
 - [x] Expose connection/ICE state in a diagnostics panel or debug log.
 - [x] Read negotiated video dimensions and report received frames/bitrate where supported.
 - [x] Inspect the selected ICE candidate pair to verify direct versus relayed connectivity where supported.
+- [x] Implement structured real-time diagnostic logging with copy and clear buttons on both sender and viewer.
+- [x] Add early ICE candidate queueing (`pendingRemoteCandidates`) to eliminate candidate drop race condition during async server config fetch.
+- [x] Parse and log all candidate types (HOST, SRFLX, RELAY, mDNS), protocols, and addresses on both clients.
+- [x] Document and diagnose same-LAN WebRTC failure causes between Android and Windows (mDNS isolation, lack of router NAT hairpinning, and Windows firewall).
 - [ ] Test a 10-minute one-to-one stream on the target Wi-Fi.
 - [ ] Record observed resolution, frame rate, interruption count, and end-to-end latency.
 - [ ] Test phone-to-Windows, laptop-to-Windows, permission denial, Stop, tab closure, refresh, and Wi-Fi disconnect.
-- [ ] Document any networks where direct WebRTC does not connect.
+- [x] Document any networks where direct WebRTC does not connect (same-LAN Wi-Fi routers without NAT loopback / AP isolation).
 
 ## P4.5 — Experimental zrok-Tunneled Video Mode
 

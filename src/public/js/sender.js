@@ -4,7 +4,7 @@
  * and WebRTC peer connection to viewer.
  */
 
-import { showError, clearError, showInfo, clearInfo, updateStatus, logDiagnostic } from './ui-utils.js';
+import { showError, clearError, showInfo, clearInfo, updateStatus, logDiagnostic, parseCandidateSummary, setupDiagnosticsControls } from './ui-utils.js';
 import { CameraManager } from './camera-manager.js';
 import { WebRtcPeer } from './webrtc-peer.js';
 
@@ -21,6 +21,8 @@ let tunnelStartTime = 0;
 let tunnelFramesSent = 0;
 let tunnelBytesSent = 0;
 let tunnelEncodeTimes = [];
+let cachedIceServers = null;
+let pendingRemoteCandidates = [];
 
 const mjpegCanvas = document.createElement('canvas');
 const mjpegContext = mjpegCanvas.getContext('2d');
@@ -100,14 +102,18 @@ async function populateCameraDevices() {
 }
 
 async function fetchIceServers() {
+  if (cachedIceServers) {
+    return cachedIceServers;
+  }
   try {
     const res = await fetch('/api/config');
     if (res.ok) {
       const data = await res.json();
-      return data.iceServers;
+      cachedIceServers = data.iceServers;
+      return cachedIceServers;
     }
   } catch (err) {
-    logDiagnostic(`Failed to load ICE servers config: ${err.message}`);
+    logDiagnostic(`Failed to load ICE servers config: ${err.message}`, 'WARN');
   }
   return undefined;
 }
@@ -233,25 +239,39 @@ async function startSession() {
   });
 }
 
-async function initiateWebRtcConnection() {
-  logDiagnostic('Creating WebRTC peer connection and SDP offer...');
-  const iceServers = await fetchIceServers();
-
+function createSenderPeer(iceServers) {
   if (webrtcPeer) {
     webrtcPeer.close();
+    webrtcPeer = null;
   }
+
+  logDiagnostic('[P2P] Initializing RTCPeerConnection for sender...', 'INFO');
 
   webrtcPeer = new WebRtcPeer({
     iceServers,
     onIceCandidate: (candidate) => {
-      socket.emit('webrtc:ice-candidate', {
-        candidate: candidate.candidate,
-        sdpMid: candidate.sdpMid,
-        sdpMLineIndex: candidate.sdpMLineIndex
-      });
+      if (candidate) {
+        logDiagnostic(`[ICE] Local candidate gathered: ${parseCandidateSummary(candidate)}`, 'INFO');
+        socket.emit('webrtc:ice-candidate', {
+          candidate: candidate.candidate,
+          sdpMid: candidate.sdpMid,
+          sdpMLineIndex: candidate.sdpMLineIndex
+        });
+      } else {
+        logDiagnostic('[ICE] Local candidate gathering finished (null end-of-candidates).', 'INFO');
+      }
+    },
+    onIceCandidateError: (event) => {
+      logDiagnostic(`[ICE] Candidate error (${event.errorCode}): ${event.errorText || 'STUN/TURN query error'} at ${event.url || 'host'}`, 'WARN');
+    },
+    onIceGatheringStateChange: (state) => {
+      logDiagnostic(`[ICE] Gathering state changed to: ${state}`, 'INFO');
+    },
+    onSignalingStateChange: (state) => {
+      logDiagnostic(`[SDP] Signaling state changed to: ${state}`, 'INFO');
     },
     onConnectionStateChange: (state) => {
-      logDiagnostic(`WebRTC Connection State: ${state}`);
+      logDiagnostic(`[P2P] Peer connection state: ${state}`, 'INFO');
       if (state === 'connected') {
         updateStatus('live', 'Live Streaming');
         socket.emit('stream:state', { state: 'live' });
@@ -265,7 +285,17 @@ async function initiateWebRtcConnection() {
       }
     },
     onIceConnectionStateChange: (state) => {
-      logDiagnostic(`ICE Connection State: ${state}`);
+      logDiagnostic(`[ICE] ICE Connection State: ${state}`, 'INFO');
+      if (state === 'connected' || state === 'completed') {
+        logDiagnostic('[ICE] ✓ WebRTC media connection established successfully!', 'INFO');
+      } else if (state === 'failed') {
+        logDiagnostic('[ICE] ❌ ICE connection failed! Direct P2P media could not connect.', 'ERROR');
+        logDiagnostic('[DIAGNOSIS] Why does WebRTC fail between Android & Windows on the same Wi-Fi?', 'WARN');
+        logDiagnostic('1. Wi-Fi client isolation or Windows Firewall blocking inbound peer UDP packets.', 'WARN');
+        logDiagnostic('2. Router lacks NAT Loopback / Hairpinning to loop STUN srflx UDP packets on same LAN.', 'WARN');
+        logDiagnostic('3. Android mDNS host candidate (.local) could not be resolved across local network.', 'WARN');
+        logDiagnostic('💡 FIX: Switch Media Transport Mode to "Experimental — Video through zrok" (Mode B) in the dropdown above, which routes frames reliably through the server WebSocket!', 'INFO');
+      }
     }
   });
 
@@ -274,21 +304,58 @@ async function initiateWebRtcConnection() {
   // Add captured tracks
   if (cameraManager.currentStream) {
     cameraManager.currentStream.getTracks().forEach((track) => {
+      logDiagnostic(`[MEDIA] Added local ${track.kind} track to peer (${track.label || 'camera'}).`, 'INFO');
       webrtcPeer.addTrack(track, cameraManager.currentStream);
     });
   }
 
-  const offer = await webrtcPeer.createOffer();
-  socket.emit('webrtc:offer', {
-    sdp: offer.sdp,
-    type: offer.type
-  });
-  logDiagnostic('Sent SDP offer to viewer.');
+  // Flush any remote candidates that arrived before peer was ready
+  if (pendingRemoteCandidates.length > 0) {
+    logDiagnostic(`[ICE] Flushing ${pendingRemoteCandidates.length} queued remote candidate(s)...`, 'INFO');
+    while (pendingRemoteCandidates.length > 0) {
+      const cand = pendingRemoteCandidates.shift();
+      webrtcPeer.addIceCandidate(cand);
+    }
+  }
+
+  return webrtcPeer;
+}
+
+async function initiateWebRtcConnection() {
+  logDiagnostic('[SDP] Creating WebRTC peer connection and SDP offer...', 'INFO');
+  const iceServers = await fetchIceServers();
+  createSenderPeer(iceServers);
+
+  try {
+    const offer = await webrtcPeer.createOffer();
+    logDiagnostic('[SDP] Local SDP offer created. Emitting to viewer via Socket.IO...', 'INFO');
+    socket.emit('webrtc:offer', {
+      sdp: offer.sdp,
+      type: offer.type
+    });
+    logDiagnostic('[SDP] Sent SDP offer to viewer.', 'INFO');
+  } catch (err) {
+    logDiagnostic(`[SDP] Error creating offer: ${err.message}`, 'ERROR');
+  }
 }
 
 function setupSocketListeners() {
+  socket.on('connect', () => {
+    logDiagnostic(`[SOCKET] Connected to signaling server (ID: ${socket.id})`, 'INFO');
+  });
+
+  socket.on('disconnect', (reason) => {
+    logDiagnostic(`[SOCKET] Disconnected from signaling server (${reason})`, 'WARN');
+    updateStatus('disconnected', 'Server Disconnected');
+    stopStatsPolling();
+  });
+
+  socket.on('connect_error', (err) => {
+    logDiagnostic(`[SOCKET] Connection error: ${err.message}`, 'ERROR');
+  });
+
   socket.on('peer:joined', async (data) => {
-    logDiagnostic(`Viewer joined (${data.peerId}) [mode: ${data.mediaMode || currentMediaMode}].`);
+    logDiagnostic(`[ROOM] Viewer joined (${data.peerId}) [mode: ${data.mediaMode || currentMediaMode}].`, 'INFO');
     if (currentMediaMode === 'tunnel-relay') {
       updateStatus('live', 'Live (zrok Tunnel Relay)');
       startTunnelFrameLoop();
@@ -299,43 +366,9 @@ function setupSocketListeners() {
   });
 
   socket.on('webrtc:offer', async (data) => {
-    logDiagnostic('Received SDP offer from external receiver. Creating answer...');
-    if (!webrtcPeer) {
-      const iceServers = await fetchIceServers();
-      webrtcPeer = new WebRtcPeer({
-        iceServers,
-        onIceCandidate: (candidate) => {
-          socket.emit('webrtc:ice-candidate', {
-            candidate: candidate.candidate,
-            sdpMid: candidate.sdpMid,
-            sdpMLineIndex: candidate.sdpMLineIndex
-          });
-        },
-        onConnectionStateChange: (state) => {
-          logDiagnostic(`WebRTC Connection State: ${state}`);
-          if (state === 'connected') {
-            updateStatus('live', 'Live Streaming');
-            socket.emit('stream:state', { state: 'live' });
-            startStatsPolling();
-          } else if (state === 'disconnected') {
-            updateStatus('waiting', 'Receiver Disconnected');
-            stopStatsPolling();
-          } else if (state === 'failed') {
-            updateStatus('error', 'P2P Connection Failed');
-            stopStatsPolling();
-          }
-        },
-        onIceConnectionStateChange: (state) => {
-          logDiagnostic(`ICE Connection State: ${state}`);
-        }
-      });
-      webrtcPeer.createPeerConnection();
-      if (cameraManager.currentStream) {
-        cameraManager.currentStream.getTracks().forEach((track) => {
-          webrtcPeer.addTrack(track, cameraManager.currentStream);
-        });
-      }
-    }
+    logDiagnostic('[SDP] Received SDP offer from external receiver. Creating answer...', 'INFO');
+    const iceServers = await fetchIceServers();
+    createSenderPeer(iceServers);
 
     try {
       const answer = await webrtcPeer.handleOffer(data);
@@ -343,29 +376,41 @@ function setupSocketListeners() {
         sdp: answer.sdp,
         type: answer.type
       });
-      logDiagnostic('Sent SDP answer to external receiver.');
+      logDiagnostic('[SDP] Sent SDP answer to external receiver.', 'INFO');
     } catch (err) {
-      logDiagnostic(`Error answering external offer: ${err.message}`);
+      logDiagnostic(`[SDP] Error answering external offer: ${err.message}`, 'ERROR');
     }
   });
 
   socket.on('webrtc:answer', async (data) => {
-    logDiagnostic('Received SDP answer from receiver.');
+    logDiagnostic('[SDP] Received SDP answer from receiver. Setting remote description...', 'INFO');
     if (webrtcPeer) {
-      await webrtcPeer.handleAnswer(data);
+      try {
+        await webrtcPeer.handleAnswer(data);
+        logDiagnostic('[SDP] Remote description set successfully.', 'INFO');
+      } catch (err) {
+        logDiagnostic(`[SDP] Error setting remote answer: ${err.message}`, 'ERROR');
+      }
+    } else {
+      logDiagnostic('[SDP] Warning: received answer but no peer connection active.', 'WARN');
     }
   });
 
   socket.on('webrtc:ice-candidate', async (data) => {
+    logDiagnostic(`[ICE] Received remote candidate: ${parseCandidateSummary(data.candidate)}`, 'INFO');
     if (webrtcPeer) {
       await webrtcPeer.addIceCandidate(data);
+    } else {
+      logDiagnostic(`[ICE] Queued remote candidate (peer initializing): ${parseCandidateSummary(data.candidate)}`, 'INFO');
+      pendingRemoteCandidates.push(data);
     }
   });
 
   socket.on('peer:left', () => {
-    logDiagnostic('Viewer left the room.');
+    logDiagnostic('[ROOM] Viewer left the room.', 'INFO');
     updateStatus('waiting', 'Viewer Left. Waiting...');
     stopStatsPolling();
+    pendingRemoteCandidates = [];
     if (webrtcPeer) {
       webrtcPeer.close();
       webrtcPeer = null;
@@ -374,13 +419,7 @@ function setupSocketListeners() {
 
   socket.on('room:error', (data) => {
     showError(data.message);
-    logDiagnostic(`Signaling error: ${data.message}`);
-  });
-
-  socket.on('disconnect', () => {
-    logDiagnostic('Disconnected from signaling server.');
-    updateStatus('disconnected', 'Server Disconnected');
-    stopStatsPolling();
+    logDiagnostic(`[ROOM] Signaling error: ${data.message}`, 'ERROR');
   });
 }
 
@@ -390,10 +429,13 @@ function startStatsPolling() {
     if (webrtcPeer) {
       const stats = await webrtcPeer.getStatsReport();
       if (stats && stats.rtt) {
-        logDiagnostic(`WebRTC Stats: RTT=${stats.rtt}, Local=${stats.localCandidateType}, Remote=${stats.remoteCandidateType}`);
+        const pairInfo = `${stats.localCandidateType || '?'} (${stats.localAddress || '?'}) <-> ${stats.remoteCandidateType || '?'} (${stats.remoteAddress || '?'})`;
+        const fps = stats.framesPerSecond !== null && stats.framesPerSecond !== undefined ? `${stats.framesPerSecond} FPS` : 'active';
+        const res = stats.frameWidth ? ` (${stats.frameWidth}x${stats.frameHeight})` : '';
+        logDiagnostic(`[STATS] Pair: ${pairInfo} | RTT: ${stats.rtt} | Outbound: ${fps}${res}`, 'INFO');
       }
     }
-  }, 5000);
+  }, 4000);
 }
 
 function stopStatsPolling() {
@@ -542,6 +584,7 @@ function stopSession() {
 
   btnStart.disabled = false;
   btnStop.disabled = true;
+  pendingRemoteCandidates = [];
   updateStatus('stopped', 'Stopped');
   logDiagnostic('Capture and session stopped.');
 }
@@ -564,6 +607,8 @@ window.addEventListener('beforeunload', () => {
 });
 
 // Initialize default state
+setupDiagnosticsControls('btnCopyLogs', 'btnClearLogs', 'diagnosticsLog');
 roomIdInput.value = generateRandomRoomId();
 populateCameraDevices();
+fetchIceServers().catch(() => {});
 logDiagnostic('Sender client ready. Click "Start Streaming" to begin.');

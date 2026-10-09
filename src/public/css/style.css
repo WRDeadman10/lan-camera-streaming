@@ -239,13 +239,17 @@ video {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 12px;
-  font-family: monospace;
-  font-size: 0.8rem;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
   color: #a5b4fc;
-  max-height: 180px;
+  height: 220px;
+  max-height: 320px;
   overflow-y: auto;
   white-space: pre-wrap;
-  margin-top: 16px;
+  word-break: break-all;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .footer {

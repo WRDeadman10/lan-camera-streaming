@@ -249,15 +249,21 @@ Each part is a complete standard JPEG image.
 
 ## 8. Observability and diagnostics
 
-Show or log enough information to diagnose failures without exposing secrets:
-
-- server health and Socket.IO connected/disconnected state;
-- room/peer state and safe error codes;
-- camera permission or device errors;
-- `RTCPeerConnection.connectionState` and `iceConnectionState`;
-- negotiated frame dimensions and frame rate where available;
-- WebRTC statistics needed to inspect packets, frames, bitrate, packet loss, and selected candidate pair;
-- whether the media path is direct or relayed, when this can be determined from WebRTC stats.
+Both sender and viewer clients incorporate a live on-screen diagnostics panel with clipboard copy and clear controls:
+- Server health and Socket.IO connected/disconnected state with socket ID;
+- Room join state, canonical participant roles, and agreed media transport mode (`webrtc` vs `tunnel-relay`);
+- Real-time ICE lifecycle events:
+  - Local candidate gathering with human-readable type breakdown (`HOST`, `SRFLX`, `RELAY`), protocol, and IP/mDNS status;
+  - Remote candidate arrival logging and early queueing (`pendingRemoteCandidates`);
+  - ICE gathering state transitions (`new` → `gathering` → `complete`);
+  - Signaling state transitions (`stable` → `have-local-offer` → etc.);
+  - Candidate error events (`onicecandidateerror`) detailing errorCode and STUN/TURN host;
+  - `RTCPeerConnection.connectionState` and `iceConnectionState`;
+- WebRTC active stats polling:
+  - Active nominated candidate pair: local candidate type/address vs remote candidate type/address, and RTT (round-trip time in milliseconds);
+  - Inbound/outbound frame rate (FPS), dimensions (width x height), and bytes transferred;
+- Mode B (Tunnel Relay) diagnostics:
+  - Frames sent/received, dropped frames count, average FPS, encode latency in ms, and data consumption rate (MB and projected MB/hr).
 
 Never report `Live` simply because a room was joined. Confirm that a remote track is received and rendered.
 
@@ -286,9 +292,14 @@ Adjust the layout if the repository already has established conventions; do not 
 
 ## 10. Failure handling
 
-- Camera denied/not available: show a clear message and leave the sender stopped.
-- Room invalid/expired/full: reject the join with an actionable message.
-- Peer leaves: clear the remote video and show Disconnected; allow an explicit retry.
-- ICE fails: attempt a bounded recovery/reconnect flow and provide a useful diagnostic. If TURN is not configured, say that relayed connectivity is unavailable rather than silently implying universal internet support.
-- Server restarts: all in-memory rooms are lost in the MVP; both peers must create/join a new room.
-- Tunnel URL changes: clients must reopen the current URL; document this development limitation.
+- **Camera denied/not available**: show a clear message and leave the sender stopped.
+- **Room invalid/expired/full**: reject the join with an actionable message.
+- **Peer leaves**: clear the remote video and show Disconnected; allow an explicit retry.
+- **ICE fails on Same-LAN with zrok**:
+  - *Diagnosis*: Same Wi-Fi connections via public tunnel (e.g. Android + Windows) often fail direct WebRTC when:
+    1. Android Chrome obfuscates host candidates with mDNS (`<uuid>.local`), which Windows cannot resolve if multicast UDP 5353 is blocked by router AP isolation or Windows Firewall.
+    2. STUN server-reflexive (`srflx`) fallback fails because both devices share the router's public WAN IP, and consumer routers lack NAT Loopback / Hairpinning for UDP.
+    3. Windows Defender Firewall classifies the Wi-Fi network as "Public" and blocks unsolicited incoming UDP packets.
+  - *Mitigation*: Client displays a clear on-screen diagnosis and directs the user to **Mode B (Experimental zrok Tunnel Relay)**, which transmits frames through the authenticated server WebSocket and operates reliably on any network topology.
+- **Server restarts**: all in-memory rooms are lost in the MVP; both peers must create/join a new room.
+- **Tunnel URL changes**: clients must reopen the current URL; document this development limitation.

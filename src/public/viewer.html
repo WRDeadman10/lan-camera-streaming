@@ -72,7 +72,13 @@
         </div>
 
         <div style="margin-top: 16px;">
-          <label>Stream Diagnostics & Statistics</label>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <label style="margin-bottom: 0;">Stream Diagnostics & Statistics</label>
+            <div style="display: flex; gap: 6px;">
+              <button type="button" id="btnCopyLogs" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem;">📋 Copy Logs</button>
+              <button type="button" id="btnClearLogs" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem;">🗑️ Clear</button>
+            </div>
+          </div>
           <div id="diagnosticsLog" class="diagnostics-panel">Not connected.</div>
         </div>
       </div>

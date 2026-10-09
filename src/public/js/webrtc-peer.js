@@ -7,10 +7,13 @@
 export class WebRtcPeer {
   constructor(config = {}) {
     this.iceServers = config.iceServers || [
-      { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }
+      { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] }
     ];
     this.peerConnection = null;
     this.onIceCandidate = config.onIceCandidate || (() => {});
+    this.onIceCandidateError = config.onIceCandidateError || (() => {});
+    this.onIceGatheringStateChange = config.onIceGatheringStateChange || (() => {});
+    this.onSignalingStateChange = config.onSignalingStateChange || (() => {});
     this.onTrack = config.onTrack || (() => {});
     this.onConnectionStateChange = config.onConnectionStateChange || (() => {});
     this.onIceConnectionStateChange = config.onIceConnectionStateChange || (() => {});
@@ -22,12 +25,28 @@ export class WebRtcPeer {
     this.close();
 
     this.peerConnection = new RTCPeerConnection({
-      iceServers: this.iceServers
+      iceServers: this.iceServers,
+      iceCandidatePoolSize: 2,
+      bundlePolicy: 'max-bundle'
     });
 
     this.peerConnection.onicecandidate = (event) => {
-      if (event.candidate) {
-        this.onIceCandidate(event.candidate);
+      this.onIceCandidate(event.candidate);
+    };
+
+    this.peerConnection.onicecandidateerror = (event) => {
+      this.onIceCandidateError(event);
+    };
+
+    this.peerConnection.onicegatheringstatechange = () => {
+      if (this.peerConnection) {
+        this.onIceGatheringStateChange(this.peerConnection.iceGatheringState);
+      }
+    };
+
+    this.peerConnection.onsignalingstatechange = () => {
+      if (this.peerConnection) {
+        this.onSignalingStateChange(this.peerConnection.signalingState);
       }
     };
 
@@ -38,11 +57,15 @@ export class WebRtcPeer {
     };
 
     this.peerConnection.onconnectionstatechange = () => {
-      this.onConnectionStateChange(this.peerConnection.connectionState);
+      if (this.peerConnection) {
+        this.onConnectionStateChange(this.peerConnection.connectionState);
+      }
     };
 
     this.peerConnection.oniceconnectionstatechange = () => {
-      this.onIceConnectionStateChange(this.peerConnection.iceConnectionState);
+      if (this.peerConnection) {
+        this.onIceConnectionStateChange(this.peerConnection.iceConnectionState);
+      }
     };
 
     return this.peerConnection;
@@ -90,7 +113,7 @@ export class WebRtcPeer {
   }
 
   async addIceCandidate(candidateInit) {
-    if (!candidateInit || !candidateInit.candidate) {
+    if (!candidateInit) {
       return;
     }
 
@@ -118,31 +141,51 @@ export class WebRtcPeer {
   }
 
   async getStatsReport() {
-    if (!this.peerConnection) return null;
+    if (!this.peerConnection) {
+      return null;
+    }
     try {
       const stats = await this.peerConnection.getStats();
       const report = {
         candidatePairType: null,
         localCandidateType: null,
         remoteCandidateType: null,
+        localAddress: null,
+        remoteAddress: null,
+        protocol: null,
         rtt: null,
         bytesReceived: null,
+        bytesSent: null,
         framesPerSecond: null,
         frameWidth: null,
         frameHeight: null
       };
 
       stats.forEach((stat) => {
-        if (stat.type === 'candidate-pair' && stat.state === 'succeeded') {
+        if (stat.type === 'candidate-pair' && (stat.state === 'succeeded' || stat.nominated === true)) {
           report.rtt = stat.currentRoundTripTime ? Math.round(stat.currentRoundTripTime * 1000) + ' ms' : null;
           const localCand = stats.get(stat.localCandidateId);
           const remoteCand = stats.get(stat.remoteCandidateId);
-          if (localCand) report.localCandidateType = localCand.candidateType;
-          if (remoteCand) report.remoteCandidateType = remoteCand.candidateType;
+          if (localCand) {
+            report.localCandidateType = localCand.candidateType;
+            report.localAddress = (localCand.ip || localCand.address || '?') + ':' + (localCand.port || '?');
+            report.protocol = localCand.protocol ? localCand.protocol.toUpperCase() : null;
+          }
+          if (remoteCand) {
+            report.remoteCandidateType = remoteCand.candidateType;
+            report.remoteAddress = (remoteCand.ip || remoteCand.address || '?') + ':' + (remoteCand.port || '?');
+          }
         }
 
         if (stat.type === 'inbound-rtp' && stat.kind === 'video') {
           report.bytesReceived = stat.bytesReceived;
+          report.framesPerSecond = stat.framesPerSecond;
+          report.frameWidth = stat.frameWidth;
+          report.frameHeight = stat.frameHeight;
+        }
+
+        if (stat.type === 'outbound-rtp' && stat.kind === 'video') {
+          report.bytesSent = stat.bytesSent;
           report.framesPerSecond = stat.framesPerSecond;
           report.frameWidth = stat.frameWidth;
           report.frameHeight = stat.frameHeight;
@@ -159,6 +202,9 @@ export class WebRtcPeer {
     if (this.peerConnection) {
       this.peerConnection.ontrack = null;
       this.peerConnection.onicecandidate = null;
+      this.peerConnection.onicecandidateerror = null;
+      this.peerConnection.onicegatheringstatechange = null;
+      this.peerConnection.onsignalingstatechange = null;
       this.peerConnection.onconnectionstatechange = null;
       this.peerConnection.oniceconnectionstatechange = null;
       this.peerConnection.close();
@@ -168,3 +214,4 @@ export class WebRtcPeer {
     this.queuedIceCandidates = [];
   }
 }
+
