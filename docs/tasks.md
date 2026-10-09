@@ -27,29 +27,29 @@ Use these checkboxes as the implementation source of truth. Move completed work 
 
 ## P2 — Viewer and WebRTC
 
-- [ ] Create `/viewer` UI with room entry and remote video element.
-- [ ] Implement in-memory room lifecycle and one-sender/one-viewer capacity.
-- [ ] Define and validate payload schemas for each Socket.IO event.
-- [ ] Implement room create/join/leave and peer-ready notifications.
+- [x] Create `/viewer` UI with room entry and remote video element.
+- [x] Implement in-memory room lifecycle and one-sender/one-viewer capacity.
+- [x] Define and validate payload schemas for each Socket.IO event.
+- [x] Implement room create/join/leave and peer-ready notifications.
 - [ ] Implement WebRTC offer/answer exchange.
 - [ ] Implement ICE candidate exchange and correct handling of candidates arriving before remote description setup completes.
 - [ ] Add the sender video track to the peer connection.
 - [ ] Render remote tracks in the viewer.
 - [ ] Handle connection failure, peer departure, server disconnect, and retry.
-- [ ] Confirm the Node.js server never handles raw video frames.
+- [x] Confirm the Node.js server never handles raw video frames.
 - [ ] Verify the viewer becomes Live only after receiving/rendering a remote track.
 
 ## P3 — Security and cleanup
 
-- [ ] Generate unpredictable room IDs and pairing secrets.
-- [ ] Require and validate the room secret/PIN on join.
-- [ ] Enforce sender/viewer role and room capacity on the server.
-- [ ] Verify every signaling event is authorized for the current room membership.
-- [ ] Validate input types and limit signaling payload size.
+- [x] Generate unpredictable room IDs and pairing secrets.
+- [x] Require and validate the room secret/PIN on join.
+- [x] Enforce sender/viewer role and room capacity on the server.
+- [x] Verify every signaling event is authorized for the current room membership.
+- [x] Validate input types and limit signaling payload size.
 - [ ] Rate-limit room creation and join attempts.
-- [ ] Add inactive-room expiry and disconnected-socket cleanup.
-- [ ] Redact pairing secrets and sensitive connection payloads from logs.
-- [ ] Test invalid room IDs, wrong secrets, unauthorized recipients, and duplicate role joins.
+- [x] Add inactive-room expiry and disconnected-socket cleanup.
+- [x] Redact pairing secrets and sensitive connection payloads from logs.
+- [x] Test invalid room IDs, wrong secrets, unauthorized recipients, and duplicate role joins.
 - [ ] Review public tunnel exposure; do not add router port forwarding.
 
 ## P4 — Quality and diagnostics

@@ -2,10 +2,11 @@
 
 ## Current status
 
-**Status:** Backend bootstrap complete and verified (Phase 0 / P0 completed).
-- Express HTTP server, config validation, logger, `/health`, `/api/config`, and static file serving implemented.
-- Automated tests passing (4/4 test cases).
-- Next milestone: Frontend shell (home, sender, and viewer interfaces with responsive styling and error handling).
+**Status:** Room management and Socket.IO signaling completed and verified (Phase 3 / P2/P3 room components).
+- RoomManager enforcing 1-to-1 capacity, PIN validation, room ID sanitization, and automatic cleanup.
+- Socket.IO signaling relays (SDP offer/answer, ICE candidates, stream states) with room isolation and max buffer bounds.
+- All 6 automated tests pass (startup, config, room manager, and full client signaling relays).
+- Next milestone: Browser camera capture and WebRTC media connection implementation.
 
 ## Read before implementation
 
