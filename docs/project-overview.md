@@ -44,9 +44,10 @@ For the first milestone, support one sender and one viewer. Multi-camera and mul
 | HTTP server | Express | Serves the web pages and static assets |
 | Signaling | Socket.IO | Room membership and WebRTC offer/answer/ICE exchange |
 | Camera capture | Browser `getUserMedia()` | Requests permission and returns a local media stream |
-| Media transport | WebRTC | Carries live video between sender and viewer |
+| Browser media transport | WebRTC | Carries live video between sender and browser viewer |
+| Python inference transports | `aiortc` (WebRTC) & HTTP MJPEG | Delivers BGR frames to OpenCV, YOLO, and PyTorch pipelines |
 | UI | HTML, CSS, browser JavaScript | Sender, viewer, room and connection status interfaces |
-| HTTPS during initial development | One tunnel: ngrok **or** zrok | Provides a browser-trusted HTTPS entry point to the local web server |
+| HTTPS / Tunnel | zrok or ngrok | Provides browser-trusted HTTPS entry point to the local web server |
 | Media fallback | TURN server, if later required | Relays media when direct ICE connectivity cannot be established |
 
 Use one tunnel provider at a time. The tunnel is for serving the site and signaling, not the normal video path.

@@ -115,43 +115,61 @@ For strictly offline or tunnel-free LAN environments:
 
 ---
 
-## Direct Python Stream for Machine Learning & Inference
+---
 
-When streaming is started, a direct **Python Inference Stream URL** is provided directly on the `/sender` and `/viewer` pages:
+## Python Computer Vision & Inference Pipeline (Dual Transports)
 
-```text
-http://<host>:3000/stream/<roomId>?pin=<accessPin>
+The application provides a unified, transport-agnostic Python pipeline (`python_inference`) that delivers standard OpenCV-compatible BGR numpy frames directly into **OpenCV**, **PyTorch**, or **YOLO** inference loops.
+
+### Key Features
+- **Dual Transports**:
+  1. **WebRTC (`aiortc`)**: Direct peer-to-peer transport over LAN or through TURN relay with **sub-100ms ultra-low latency**.
+  2. **HTTP MJPEG**: Standard multipart HTTP stream for universal OpenCV `cv2.VideoCapture` compatibility.
+- **Fresh-Frame Policy**: Enforces a single-item queue (`maxsize=1`). When inference is slower than stream capture, stale buffered frames are automatically discarded rather than queued up.
+- **Configurable Frame-Age Drop**: Frames older than `max_frame_age_ms` (default 250ms) are skipped to prevent lagging behind real-time.
+- **Real-Time Telemetry**: Automatically tracks and logs FPS, inference latency, frame age, CPU %, RAM MB, dropped frames, and bandwidth.
+
+### Running with the Unified CLI Runner
+
+Install Python dependencies:
+```bash
+pip install opencv-python aiortc "python-socketio[asyncio-client]" av psutil
 ```
 
-### Python / OpenCV Example
+#### Option A: WebRTC Transport (Lowest Latency)
+```bash
+python run_inference.py --transport webrtc --url http://localhost:3000 --room <roomId> --pin 123456
+```
+
+#### Option B: MJPEG Transport (Standard HTTP)
+```bash
+python run_inference.py --transport mjpeg --url http://localhost:3000/stream/<roomId>?pin=123456
+```
+
+### Direct Python Code Example
 
 ```python
-import cv2
+from python_inference.pipeline import InferencePipeline
+from python_inference.transports.webrtc_transport import WebRtcVideoTransport
+from python_inference.transports.mjpeg_transport import MjpegVideoTransport
 
-# Direct stream URL from your sender or viewer page:
-stream_url = "http://localhost:3000/stream/room-abc123?pin=123456"
+# 1. Choose transport:
+# For WebRTC:
+transport = WebRtcVideoTransport(signaling_url="http://localhost:3000", room_id="room-abc", access_pin="123456")
+# Or for MJPEG:
+# transport = MjpegVideoTransport("http://localhost:3000/stream/room-abc?pin=123456")
 
-cap = cv2.VideoCapture(stream_url)
+# 2. Attach your custom model:
+pipeline = InferencePipeline(transport=transport, model_fn=lambda frame: yolo_model(frame))
+pipeline.start()
 
 while True:
-    ret, frame = cap.read()
-    if not ret:
-        continue
-
-    # Feed 'frame' (numpy array BGR) directly into YOLO, PyTorch, MediaPipe, etc.
-    # results = model(frame)
-
-    cv2.imshow("Python Inference", frame)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
-
-cap.release()
-cv2.destroyAllWindows()
-```
-
-You can also run the bundled test script:
-```bash
-python examples/python_inference_client.py "http://localhost:3000/stream/<your-room-id>?pin=123456"
+    output = pipeline.process_next_frame()
+    if output and not output["dropped"]:
+        frame = output["frame"]       # numpy ndarray (BGR)
+        result = output["result"]     # model inference output
+        metrics = output["metrics"]   # real-time stats
+        print(f"FPS: {metrics['fps']}, Latency: {metrics['frame_age_ms']}ms, CPU: {metrics['cpu_percent']}%")
 ```
 
 ---

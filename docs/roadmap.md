@@ -56,6 +56,20 @@ Tasks:
 
 **Exit criteria:** Invalid secrets and unauthorized signaling are rejected; abandoned rooms are cleaned; the UI never displays Live without a usable remote track.
 
+## Phase 3.5 — Python Computer Vision Inference Pipeline (Dual Transports)
+
+**Objective:** Enable OpenCV, PyTorch, and YOLO models to ingest live camera frames with lowest practical latency and zero stale frame queuing.
+
+Tasks:
+- Create abstract `BaseVideoTransport` and `VideoFrame` data classes.
+- Implement `MjpegVideoTransport` (HTTP multipart stream).
+- Implement `WebRtcVideoTransport` (`aiortc` + `python-socketio` peer connection).
+- Implement `InferencePipeline` with fresh-frame prioritization and stale frame drop threshold.
+- Implement `MetricsCollector` measuring FPS, latency, dropped frames, CPU, memory, and bandwidth.
+- Provide unified CLI runner `run_inference.py`.
+
+**Exit criteria:** Automated tests pass for pipeline and fresh-frame drop policy. Python can ingest video via either `--transport mjpeg` or `--transport webrtc`.
+
 ## Phase 4 — LAN quality and diagnostics
 
 **Objective:** Measure real behavior on target devices instead of relying on assumptions.

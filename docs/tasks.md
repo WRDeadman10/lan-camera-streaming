@@ -52,6 +52,17 @@ Use these checkboxes as the implementation source of truth. Move completed work 
 - [x] Test invalid room IDs, wrong secrets, unauthorized recipients, and duplicate role joins.
 - [x] Review public tunnel exposure; do not add router port forwarding.
 
+## P3.5 — Python Inference Pipeline (Dual Transports)
+
+- [x] Implement abstract `BaseVideoTransport` and `VideoFrame` contract.
+- [x] Implement `MjpegVideoTransport` with background capture worker and single-slot queue.
+- [x] Implement `WebRtcVideoTransport` using `aiortc` and `python-socketio`.
+- [x] Enforce fresh-frame policy: automatically drop stale buffered frames when inference queue is full.
+- [x] Implement `InferencePipeline` with configurable `max_frame_age_ms` threshold.
+- [x] Implement `MetricsCollector` measuring FPS, latency, dropped frames, CPU, RAM, and bandwidth.
+- [x] Create unified CLI `run_inference.py` with HUD overlay.
+- [x] Add automated unit tests for transport, metrics, and drop policies in `tests/test_python_inference.py`.
+
 ## P4 — Quality and diagnostics
 
 - [x] Display clear states: Waiting, Connecting, Live, Reconnecting, Disconnected, Stopped, Error.

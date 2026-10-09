@@ -8,8 +8,9 @@ The Windows PC hosts the application. Browsers use it for the sender/viewer UI a
 flowchart TB
     Host[Windows PC\nNode.js + Express + Socket.IO]
     Tunnel[Optional HTTPS tunnel\nngrok OR zrok]
-    Sender[Sender browser\ngetUserMedia + WebRTC]
+    Sender[Sender browser\ngetUserMedia + WebRTC / MJPEG]
     Viewer[Viewer browser\nWebRTC video element]
+    PyInference[Python Inference Engine\nOpenCV / YOLO / PyTorch]
     Turn[Optional TURN relay]
 
     Sender <-->|HTTPS / Socket.IO signaling| Tunnel
@@ -18,9 +19,18 @@ flowchart TB
     Sender <-->|Preferred: direct WebRTC media over LAN| Viewer
     Sender -.->|Fallback media path if ICE selects relay| Turn
     Turn -.-> Viewer
+
+    %% Python Inference Pathways
+    Sender -->|HTTP MJPEG frames via Server| Host
+    Host -->|HTTP /stream/:roomId| PyInference
+    Sender <-->|Direct WebRTC aiortc via Socket.IO| PyInference
 ```
 
-The tunnel is only one way to reach the host's HTTP(S) service. For strict LAN-only use, replace the tunnel with a trusted local HTTPS address/certificate. Do not run both ngrok and zrok unless testing a specific deployment scenario.
+The application provides two interchangeable ingestion transports for Python computer vision and machine learning (OpenCV, PyTorch, YOLO):
+1. **Direct WebRTC via `aiortc`**: Sub-100ms ultra-low latency direct peer-to-peer transport over LAN or through TURN relay.
+2. **HTTP MJPEG Stream**: Standard multipart/x-mixed-replace stream over HTTP for maximum client compatibility with standard `cv2.VideoCapture`.
+
+Both transports feed into a unified `InferencePipeline` that prioritizes fresh frames and drops stale buffered frames.
 
 ## 2. Components and responsibilities
 
