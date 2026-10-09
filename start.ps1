@@ -109,46 +109,35 @@ if (-not $isHealthy) {
     }
 }
 
-# 5. Check / Ensure reserved name 'lan' in zrok namespace
-$reservedUrl = $null
-try {
+# 5. Launch zrok public share in background
+Write-Host ""
+Write-Host "Starting zrok public share for $targetUrl..." -ForegroundColor Cyan
+
+$zrokShareProcess = Start-Process -FilePath $zrokBinary -ArgumentList "share public $targetUrl --backend-mode proxy --headless" -PassThru -NoNewWindow
+
+# Poll for the active share URL to register in zrok controller (up to 15 seconds)
+$activeShareUrl = $null
+$attempts = 0
+while ($attempts -lt 15 -and -not $activeShareUrl) {
+    Start-Sleep -Seconds 1
+    $attempts++
     $overviewOut = cmd /c "`"$zrokBinary`" overview 2>&1"
     $overviewStr = $overviewOut -join "`n"
-    if ($overviewStr -notmatch "lan\.shares\.zrok\.io") {
-        Write-Host "Creating permanent reserved name 'lan' in zrok..." -ForegroundColor Cyan
-        cmd /c "`"$zrokBinary`" create name lan"
-    } else {
-        Write-Host "Reserved domain 'lan.shares.zrok.io' is active." -ForegroundColor Green
+    if ($overviewStr -match "([a-z0-9]{10,16}\.shares\.zrok\.io)") {
+        $activeShareUrl = "https://" + $matches[1]
     }
-    $reservedUrl = "https://lan.shares.zrok.io"
-} catch {
-    Write-Warning "Could not verify reserved name 'lan': $_"
 }
 
-# 6. Display QR Code for Phone Access
+# 6. Display QR Code and URLs for Phone Access
 Write-Host ""
 Write-Host "=================================================" -ForegroundColor Cyan
 Write-Host " SCAN TO CONNECT ON PHONE" -ForegroundColor Green
 Write-Host "=================================================" -ForegroundColor Cyan
 
-# Spawn zrok public share in background so we can read its output
-$zrokShareProcess = Start-Process -FilePath $zrokBinary -ArgumentList "share public $targetUrl --backend-mode proxy --headless" -PassThru -NoNewWindow
-
-# Wait briefly for share to register
-Start-Sleep -Seconds 3
-
-# Discover generated share URL from zrok overview
-$activeShareUrl = $null
-$overviewOut = cmd /c "`"$zrokBinary`" overview 2>&1"
-$overviewStr = $overviewOut -join "`n"
-if ($overviewStr -match "([a-z0-9]{10,16}\.shares\.zrok\.io)") {
-    $activeShareUrl = "https://" + $matches[1]
-}
-
-$displayUrl = if ($activeShareUrl) { $activeShareUrl } elseif ($reservedUrl) { $reservedUrl } else { "http://localhost:$port" }
+$displayUrl = if ($activeShareUrl) { $activeShareUrl } else { "http://localhost:$port" }
 $senderDisplayUrl = "$displayUrl/sender"
 
-Write-Host "Public Stream URL: $displayUrl" -ForegroundColor Yellow
+Write-Host "Active Stream URL: $displayUrl" -ForegroundColor Yellow
 Write-Host "Sender URL:        $senderDisplayUrl" -ForegroundColor Cyan
 Write-Host ""
 
