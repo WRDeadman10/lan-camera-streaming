@@ -4,14 +4,14 @@ Use these checkboxes as the implementation source of truth. Move completed work 
 
 ## P0 — Inspect and bootstrap
 
-- [ ] Inspect the repository root, existing package files, `AGENTS.md`, `.editorconfig`, and current code patterns.
-- [ ] Confirm the intended Node.js version and document it.
-- [ ] Initialize or reuse `package.json` with start and development scripts.
-- [ ] Add Express and Socket.IO using the project's package manager and lockfile.
-- [ ] Create the server entry point and serve static frontend assets.
-- [ ] Add `/health` and verify it locally.
-- [ ] Add `.gitignore` and `.env.example` with no real secrets.
-- [ ] Document Windows startup and shutdown steps.
+- [x] Inspect the repository root, existing package files, `AGENTS.md`, `.editorconfig`, and current code patterns.
+- [x] Confirm the intended Node.js version and document it.
+- [x] Initialize or reuse `package.json` with start and development scripts.
+- [x] Add Express and Socket.IO using the project's package manager and lockfile.
+- [x] Create the server entry point and serve static frontend assets.
+- [x] Add `/health` and verify it locally.
+- [x] Add `.gitignore` and `.env.example` with no real secrets.
+- [x] Document Windows startup and shutdown steps.
 
 ## P1 — HTTPS and sender capture
 

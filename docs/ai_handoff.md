@@ -2,9 +2,10 @@
 
 ## Current status
 
-**Status:** Documentation baseline prepared; implementation has not been started or verified in this documentation package.
-
-The project is intended to be a self-hosted browser-based camera streaming tool. The first goal is one browser sending video from a phone or laptop camera to one viewer browser, with the Node.js app running on a Windows PC.
+**Status:** Backend bootstrap complete and verified (Phase 0 / P0 completed).
+- Express HTTP server, config validation, logger, `/health`, `/api/config`, and static file serving implemented.
+- Automated tests passing (4/4 test cases).
+- Next milestone: Frontend shell (home, sender, and viewer interfaces with responsive styling and error handling).
 
 ## Read before implementation
 
