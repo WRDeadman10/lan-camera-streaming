@@ -15,15 +15,15 @@ Use these checkboxes as the implementation source of truth. Move completed work 
 
 ## P1 — HTTPS and sender capture
 
-- [ ] Select one initial HTTPS approach: ngrok, zrok, or locally trusted HTTPS.
-- [ ] Verify the sender page opens from a phone browser using the selected HTTPS URL.
-- [ ] Create `/sender` UI with explicit Start and Stop controls.
-- [ ] Request video capture only after the user clicks Start.
-- [ ] Render a local camera preview.
-- [ ] Add a camera/device selector where supported.
-- [ ] Show useful errors for denied permission, missing device, busy device, and unsupported capture.
-- [ ] Stop every acquired media track on Stop and page teardown.
-- [ ] Verify camera capture is stopped after use.
+- [x] Select one initial HTTPS approach: ngrok, zrok, or locally trusted HTTPS.
+- [x] Verify the sender page opens from a phone browser using the selected HTTPS URL.
+- [x] Create `/sender` UI with explicit Start and Stop controls.
+- [x] Request video capture only after the user clicks Start.
+- [x] Render a local camera preview.
+- [x] Add a camera/device selector where supported.
+- [x] Show useful errors for denied permission, missing device, busy device, and unsupported capture.
+- [x] Stop every acquired media track on Stop and page teardown.
+- [x] Verify camera capture is stopped after use.
 
 ## P2 — Viewer and WebRTC
 
@@ -31,13 +31,13 @@ Use these checkboxes as the implementation source of truth. Move completed work 
 - [x] Implement in-memory room lifecycle and one-sender/one-viewer capacity.
 - [x] Define and validate payload schemas for each Socket.IO event.
 - [x] Implement room create/join/leave and peer-ready notifications.
-- [ ] Implement WebRTC offer/answer exchange.
-- [ ] Implement ICE candidate exchange and correct handling of candidates arriving before remote description setup completes.
-- [ ] Add the sender video track to the peer connection.
-- [ ] Render remote tracks in the viewer.
-- [ ] Handle connection failure, peer departure, server disconnect, and retry.
+- [x] Implement WebRTC offer/answer exchange.
+- [x] Implement ICE candidate exchange and correct handling of candidates arriving before remote description setup completes.
+- [x] Add the sender video track to the peer connection.
+- [x] Render remote tracks in the viewer.
+- [x] Handle connection failure, peer departure, server disconnect, and retry.
 - [x] Confirm the Node.js server never handles raw video frames.
-- [ ] Verify the viewer becomes Live only after receiving/rendering a remote track.
+- [x] Verify the viewer becomes Live only after receiving/rendering a remote track.
 
 ## P3 — Security and cleanup
 

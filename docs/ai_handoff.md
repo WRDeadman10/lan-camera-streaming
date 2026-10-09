@@ -2,11 +2,11 @@
 
 ## Current status
 
-**Status:** Room management and Socket.IO signaling completed and verified (Phase 3 / P2/P3 room components).
-- RoomManager enforcing 1-to-1 capacity, PIN validation, room ID sanitization, and automatic cleanup.
-- Socket.IO signaling relays (SDP offer/answer, ICE candidates, stream states) with room isolation and max buffer bounds.
-- All 6 automated tests pass (startup, config, room manager, and full client signaling relays).
-- Next milestone: Browser camera capture and WebRTC media connection implementation.
+**Status:** Camera capture and WebRTC media connection implementation completed and verified (Phases 4 & 5 / P1 & P2).
+- CameraManager handles explicit user-gesture capture, back/front camera toggle, device enumeration, and clean release of tracks.
+- WebRtcPeer handles RTCPeerConnection lifecycle, pre-remote ICE candidate queueing, SDP negotiation, and connection statistics.
+- Sender and Viewer controllers wired to Socket.IO signaling and WebRTC peer connection.
+- Next milestone: Network access documentation (LAN HTTPS & tunnel setup) and final security/resilience audit.
 
 ## Read before implementation
 
