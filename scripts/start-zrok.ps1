@@ -7,8 +7,25 @@
 
 $ErrorActionPreference = "Stop"
 
+# Read .env file if present
+$envFile = Join-Path $PSScriptRoot "..\.env"
+if (Test-Path $envFile) {
+    Get-Content $envFile | ForEach-Object {
+        $line = $_.Trim()
+        if ($line -and -not $line.StartsWith("#") -and $line.Contains("=")) {
+            $parts = $line.Split("=", 2)
+            $varName = $parts[0].Trim()
+            $varVal = $parts[1].Trim()
+            if (-not [System.Environment]::GetEnvironmentVariable($varName)) {
+                [System.Environment]::SetEnvironmentVariable($varName, $varVal)
+            }
+        }
+    }
+}
+
 $port = if ($env:PORT) { $env:PORT } else { "3000" }
 $targetUrl = "http://127.0.0.1:$port"
+$zrokToken = $env:ZROK_TOKEN
 
 # Discover zrok binary
 $zrokCmd = Get-Command "zrok" -ErrorAction SilentlyContinue
@@ -34,6 +51,17 @@ if (-not $zrokCmd) {
 if (-not $zrokBinary) {
     Write-Error "zrok executable was not found. Please install zrok or add it to your PATH."
     exit 1
+}
+
+# Auto-enable zrok environment if token is provided and environment is not enabled
+if ($zrokToken) {
+    $statusOut = & "$zrokBinary" status 2>&1 | Out-String
+    if ($statusOut -match "Account Token\s+\|\s+<<SET>>") {
+        Write-Host "zrok environment is already enabled." -ForegroundColor Green
+    } else {
+        Write-Host "Enabling zrok environment with configured ZROK_TOKEN..." -ForegroundColor Cyan
+        & "$zrokBinary" enable $zrokToken --headless
+    }
 }
 
 Write-Host "=================================================" -ForegroundColor Cyan

@@ -29,6 +29,7 @@
 
 - Host: Windows PC running Node.js + Express.
 - Primary Tunnel: `zrok` public HTTPS sharing (`zrok2 share public <target> --backend-mode proxy`).
+- Authentication: Configurable `ZROK_TOKEN` in `.env` automatically validated and enabled via `scripts/start-zrok.ps1`.
 - Mode A (WebRTC): Low-latency direct peer-to-peer media. Signaling carried by Socket.IO over zrok.
 - Mode B (Experimental zrok Tunnel): Camera frames downscaled to canvas, sent as raw binary JPEG buffers via Socket.IO over zrok tunnel, relayed by Windows server to authorized viewer. Evaluates performance against zrok's 5 GB daily free quota.
 - Security: Access PIN authentication, payload size bounds (600KB), brute-force rate-limiting, room isolation, and media mode agreement.

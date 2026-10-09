@@ -65,6 +65,7 @@ export function loadConfig(env = process.env) {
   const corsOrigin = parseString(env.CORS_ORIGIN, '*');
   const trustProxy = env.TRUST_PROXY === 'true' || env.TRUST_PROXY === '1';
   const logLevel = parseString(env.LOG_LEVEL, 'info').toLowerCase();
+  const zrokToken = parseString(env.ZROK_TOKEN, '');
 
   if (accessPin.length < 4) {
     throw new Error('Invalid configuration: ACCESS_PIN must be at least 4 characters long.');
@@ -79,6 +80,7 @@ export function loadConfig(env = process.env) {
     corsOrigin,
     trustProxy,
     logLevel,
-    iceServers
+    iceServers,
+    zrokToken
   };
 }

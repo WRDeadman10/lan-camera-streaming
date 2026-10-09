@@ -10,8 +10,12 @@ test('loadConfig validates default configuration', () => {
   assert.equal(config.host, '0.0.0.0');
   assert.equal(config.accessPin, '123456');
   assert.equal(config.trustProxy, false);
+  assert.equal(config.zrokToken, '');
   assert.ok(Array.isArray(config.iceServers));
   assert.ok(config.iceServers.length > 0);
+
+  const customConfig = loadConfig({ ZROK_TOKEN: 'test-token-123' });
+  assert.equal(customConfig.zrokToken, 'test-token-123');
 });
 
 test('loadConfig throws on invalid ACCESS_PIN', () => {
