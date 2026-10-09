@@ -41,5 +41,5 @@ Perform live cross-network verification using `scripts/start-zrok.ps1` with real
 ## Commands run & results
 
 - `npm test`: 13/13 tests passed (TunnelRelay validation, backpressure dropping, Socket.IO binary relay, room capacity, canonical roles, signaling relays, auth rate limiting, MJPEG streaming).
-- Server start: `npm start` or `powershell -File scripts/start-server.ps1`.
-- zrok share: `powershell -File scripts/start-zrok.ps1`.
+- All-in-one start: `powershell -File start.ps1` (launches Node server in background and zrok share in foreground).
+- Separate start options: `npm start` (server) and `powershell -File scripts/start-zrok.ps1` (zrok tunnel).
