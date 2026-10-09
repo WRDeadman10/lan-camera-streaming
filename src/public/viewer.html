@@ -4,8 +4,66 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Viewer - LAN Camera Streaming</title>
+  <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-  <h1>Camera Viewer</h1>
+  <div class="container">
+    <header>
+      <h1>Camera Viewer</h1>
+      <p>Watch live camera feed directly from sender via WebRTC</p>
+    </header>
+
+    <main>
+      <div id="errorAlert" class="alert alert-danger" role="alert"></div>
+      <div id="infoAlert" class="alert alert-info" role="status"></div>
+
+      <div class="card">
+        <h2>Join Session</h2>
+
+        <div class="form-group">
+          <label for="accessPin">Access PIN</label>
+          <input type="password" id="accessPin" placeholder="Enter configured PIN" value="123456" autocomplete="current-password">
+        </div>
+
+        <div class="form-group">
+          <label for="roomId">Room ID</label>
+          <input type="text" id="roomId" placeholder="Enter Room ID provided by sender">
+        </div>
+
+        <div class="button-group" style="margin-top: 20px;">
+          <button type="button" id="btnJoin" class="btn btn-primary">Join Room</button>
+          <button type="button" id="btnLeave" class="btn btn-danger" disabled>Leave Room</button>
+          <button type="button" id="btnFullscreen" class="btn btn-secondary">⛶ Fullscreen</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <h2>Live Stream</h2>
+          <span id="statusBadge" class="status-badge status-disconnected">
+            <span class="status-indicator"></span>
+            <span id="statusText">Disconnected</span>
+          </span>
+        </div>
+
+        <div class="video-container" id="videoWrapper">
+          <video id="remoteVideo" autoplay playsinline></video>
+          <div id="videoOverlay" class="video-overlay-msg">Enter Room ID and click "Join Room" to view stream</div>
+        </div>
+
+        <div style="margin-top: 16px;">
+          <label>Stream Diagnostics & Statistics</label>
+          <div id="diagnosticsLog" class="diagnostics-panel">Not connected.</div>
+        </div>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <a href="/" style="color: var(--primary); text-decoration: none;">&larr; Back to Home</a>
+    </footer>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script type="module" src="/js/viewer.js"></script>
 </body>
 </html>

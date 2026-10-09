@@ -4,8 +4,76 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sender - LAN Camera Streaming</title>
+  <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-  <h1>Camera Sender</h1>
+  <div class="container">
+    <header>
+      <h1>Camera Sender</h1>
+      <p>Stream your device camera to an authorized viewer</p>
+    </header>
+
+    <main>
+      <div id="errorAlert" class="alert alert-danger" role="alert"></div>
+      <div id="infoAlert" class="alert alert-info" role="status"></div>
+
+      <div class="card">
+        <h2>Session Setup</h2>
+
+        <div class="form-group">
+          <label for="accessPin">Access PIN</label>
+          <input type="password" id="accessPin" placeholder="Enter configured PIN" value="123456" autocomplete="current-password">
+        </div>
+
+        <div class="form-group">
+          <label for="roomId">Room ID</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="roomId" placeholder="Generate or enter Room ID" style="flex: 1;">
+            <button type="button" id="btnGenRoom" class="btn btn-secondary">Generate</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="cameraSelect">Select Camera</label>
+          <select id="cameraSelect">
+            <option value="">Default (Environment/Back camera)</option>
+          </select>
+        </div>
+
+        <div class="button-group" style="margin-top: 20px;">
+          <button type="button" id="btnStart" class="btn btn-primary">Start Streaming</button>
+          <button type="button" id="btnStop" class="btn btn-danger" disabled>Stop Streaming</button>
+          <button type="button" id="btnToggleFacing" class="btn btn-secondary" title="Flip camera">🔄 Switch Camera</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <h2>Camera Preview</h2>
+          <span id="statusBadge" class="status-badge status-stopped">
+            <span class="status-indicator"></span>
+            <span id="statusText">Stopped</span>
+          </span>
+        </div>
+
+        <div class="video-container">
+          <video id="localVideo" autoplay playsinline muted></video>
+          <div id="videoOverlay" class="video-overlay-msg">Click "Start Streaming" to begin camera capture</div>
+        </div>
+
+        <div style="margin-top: 16px;">
+          <label>Diagnostics & WebRTC State</label>
+          <div id="diagnosticsLog" class="diagnostics-panel">Ready.</div>
+        </div>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <a href="/" style="color: var(--primary); text-decoration: none;">&larr; Back to Home</a>
+    </footer>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script type="module" src="/js/sender.js"></script>
 </body>
 </html>
