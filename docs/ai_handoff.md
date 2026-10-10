@@ -1,5 +1,17 @@
 # LAN Camera Streaming — AI Handoff
 
+## External receivers (2026-10-10) — documentation added, server unchanged
+
+A first external receiver now exists: the Viitorx Unity app's Python sidecar joins a room as the WebRTC receiver and uses the phone as a webcam. Because this project is independent and meant to serve any technology, the contract was written down neutrally (ADR-016).
+
+- **Read first for any integration:** `docs/receiver-guide.md`. The formal schemas are `docs/architecture.md` §4, corrected this session (`mediaMode`, who receives `peer:joined`, `senderId`, `tunnel:frame`, `/api/config`, per-socket membership, the join rate limit, the exclusive viewer slot, the MJPEG delimiter).
+- **No server code changed.** Only `README.md` and `docs/` (`receiver-guide.md` new; `architecture.md`, `decisions.md` ADR-016, `tasks.md` P5, `roadmap.md` Phase 6, `project-overview.md`, this file).
+- **Behaviors a receiver must handle** (all from the server source, and met by the Python receiver): join on every `connect`; the viewer slot is exclusive (a browser viewer blocks a receiver); the sender creates the offer and trickles candidates after it; five failed joins block a socket for 30 s.
+- **Verified:** the WebRTC path against this server with a Python (`aiortc`) receiver and a Python stand-in phone on loopback (join, offer/answer, leave and return, socket drop, wrong PIN, occupied room, slow consumer, plus the full chain through a pose model); MJPEG and tunnel relay with an earlier standalone Python receiver.
+- **NOT verified:** a real phone's browser sender page with an external receiver; real Wi-Fi, firewall and zrok behavior; real-phone latency; any receiver in a language other than Python. `npm test` was not re-run for this documentation change.
+- **Next:** build a receiver in a second language from the guide alone and fix whatever the guide got wrong; then a real-device run (tasks.md P5).
+- **Reference implementation** (other repository, the Viitorx VRM project): `python-sidecar~/tools/video/lan_camera.py`, tested by `python-sidecar~/tests/test_lan_camera.py`, which starts THIS server (`CAMERA_SERVER_DIR`).
+
 ## Current status
 
 **Status:** Zero-zrok-quota LAN operation implemented (ADR-015). Code and automated tests are done; real phone + PC verification is still pending.

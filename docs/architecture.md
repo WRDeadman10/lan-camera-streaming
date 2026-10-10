@@ -101,7 +101,7 @@ The public tunnel should expose only the intended app routes. The MVP has no una
 
 ## 4. External WebRTC Receiver Signaling Contract (Version 1.0)
 
-This contract defines the exact Socket.IO event protocol for any external client (such as an external Python `aiortc` client in another project) connecting to this Node.js signaling server.
+This contract defines the exact Socket.IO event protocol for any external client (such as an external Python `aiortc` client, a Unity app, a Go or Rust service) connecting to this Node.js signaling server. It is language-neutral. For how to *use* it (sequence, error handling, the mistakes that cost the most time) read [`receiver-guide.md`](receiver-guide.md); this section is the formal reference.
 
 ### 4.1 Connection & Authentication
 - **Transport**: Socket.IO client (v4.x compatible over WebSocket/Polling).
@@ -109,9 +109,12 @@ This contract defines the exact Socket.IO event protocol for any external client
 - **Namespace**: Default (`/`).
 - **Authorization**: Required `pin` (matching server `ACCESS_PIN`, minimum 4 characters).
 - **Room ID Format**: `^[a-zA-Z0-9_-]{3,32}$`.
+- **ICE configuration**: `GET /api/config` returns `{ "iceServers": [ { "urls": [...] }, { "urls": [...], "username", "credential" } ] }` (STUN, plus TURN when the server has one). A receiver builds its peer connection from it and falls back to public STUN if the request fails. `GET /api/network-info` returns only `{ protocol, port }`.
+- **Membership is per socket.** The server removes a socket from its room when it disconnects, so a receiver must emit `room:join` again on **every** `connect` event, including automatic reconnects.
+- **Join rate limit.** Five failed `room:join` attempts on one socket block that socket for 30 seconds.
 
 ### 4.2 Participant Roles
-The server enforces a 1-sender and 1-receiver model per room. Canonical role identifiers:
+The server enforces a 1-sender and 1-receiver model per room: a second receiver (including a browser viewer) is refused with `Room already has an active viewer/receiver.`, and the reverse. Canonical role identifiers:
 - `camera-sender` (or `sender`): captures and publishes camera stream.
 - `webrtc-receiver` (or `viewer`): receives the remote camera stream.
 
@@ -123,15 +126,19 @@ Requests room registration and authentication.
 {
   "roomId": "room-abc123",
   "role": "webrtc-receiver",
-  "pin": "123456"
+  "pin": "123456",
+  "mediaMode": "webrtc"
 }
 ```
+`mediaMode` is `"webrtc"` (default) or `"tunnel-relay"`. A room's mode is fixed by whoever created it; joining with the other mode is refused.
+
 **Server Ack Callback Response**:
 ```json
 {
   "success": true,
   "roomId": "room-abc123",
   "role": "viewer",
+  "mediaMode": "webrtc",
   "hasPeer": true,
   "peerSocketId": "socket_xyz"
 }
@@ -143,24 +150,28 @@ If failed:
   "error": "Invalid access PIN"
 }
 ```
+Error strings (see [`receiver-guide.md` section 5](receiver-guide.md#5-errors-and-limits) for which can be retried): `Invalid access PIN`; `Invalid Room ID. Must be 3-32 alphanumeric characters.`; `Invalid role. ...`; `Media mode mismatch. This room is configured for "<mode>" mode.`; `Room already has an active sender.`; `Room already has an active viewer/receiver.`; `Too many failed attempts. Please wait N seconds before retrying.`; `Invalid payload format.`; `Internal server error`.
 
 #### 2. `peer:joined` (Server → Peer)
-Emitted to the other peer when an authorized participant joins the room:
+Emitted **only to the participant who was already in the room**, when the other one joins. The participant who joins second does **not** receive it; it learns the peer is present from `hasPeer` in its own join ack. (So the sender creates its offer either on `peer:joined` or, when it joins second, on `hasPeer: true`.)
 ```json
 {
   "role": "viewer",
+  "mediaMode": "webrtc",
   "peerId": "socket_abc"
 }
 ```
 
 #### 3. `webrtc:offer` (Bidirectional: Peer ↔ Server ↔ Peer)
-Relays standard SDP offer payload to the peer in the room:
+Relays standard SDP offer payload to the peer in the room. The sender creates the offer; the relayed event also carries the sender's socket id:
 ```json
 {
   "sdp": "v=0\r\no=- 1234567 2 IN IP4 127.0.0.1...",
-  "type": "offer"
+  "type": "offer",
+  "senderId": "socket_abc"
 }
 ```
+The offer has one video m-line and no audio. A receiver builds a **new** peer connection for every offer. (The shipped sender page also answers an offer it receives, i.e. a receiver-initiated flow, but no test here exercises it.)
 
 #### 4. `webrtc:answer` (Bidirectional: Peer ↔ Server ↔ Peer)
 Relays standard SDP answer payload to the peer in the room:
@@ -180,6 +191,7 @@ Relays an ICE candidate:
   "sdpMLineIndex": 0
 }
 ```
+The sender trickles candidates **after** its offer; they can reach a receiver before it has finished applying the offer, so a receiver queues them until the remote description is set. An empty `candidate` string is end-of-candidates. A candidate may use an mDNS `.local` host that not every stack can resolve; a receiver ignores a candidate it cannot add rather than ending the session. A receiver whose WebRTC stack does not trickle (for example `aiortc`) embeds its candidates in the answer SDP and sends none.
 
 #### 6. `stream:state` (Sender → Server → Receiver)
 Notifies of explicit stream lifecycle changes:
@@ -205,6 +217,9 @@ Tells the sender whether any HTTP MJPEG/snapshot consumer is waiting. The sender
 }
 ```
 
+#### 8b. `tunnel:frame` (Sender → Server → Receiver, relay mode only)
+A binary JPEG buffer. The server accepts it only from a sender in a `tunnel-relay` room, rejects anything that is not a JPEG (`0xFF 0xD8` header) or exceeds 600 000 bytes, drops frames beyond 30 per second, and forwards the buffer unchanged to the room's receiver.
+
 #### 8. `room:leave` (Client → Server)
 Explicit departure from the room. Triggers cleanup and notifies peer.
 
@@ -217,14 +232,15 @@ Returns safe error notification if an unauthorized or malformed event is sent:
 ```
 
 ### 4.4 External Receiver Connection Sequence
-1. External client establishes Socket.IO connection to `https://<host-or-zrok-url>`.
-2. Emits `room:join` with `{ roomId, role: "webrtc-receiver", pin }`.
-3. Acknowledged with `hasPeer: true` (or awaits `peer:joined` when sender joins).
-4. Sender creates SDP offer and transmits `webrtc:offer` through Socket.IO.
-5. Receiver sets remote description, generates SDP answer, and emits `webrtc:answer`.
-6. Both peers exchange `webrtc:ice-candidate` events through Socket.IO.
-7. WebRTC establishes direct P2P media path (or TURN relay).
-8. Remote video track is consumed by the receiver.
+1. External client reads `GET /api/config` and builds its ICE configuration.
+2. It establishes a Socket.IO connection to `https://<host-or-zrok-url>`.
+3. On **every** `connect` it emits `room:join` with `{ roomId, role: "webrtc-receiver", pin, mediaMode: "webrtc" }` and checks the ack.
+4. Acknowledged with `hasPeer: true`, or it simply waits (the sender, joining later, sees `hasPeer: true` in its own ack and offers).
+5. Sender creates the SDP offer and transmits `webrtc:offer` through Socket.IO.
+6. Receiver creates a new peer connection, sets the remote description, applies any queued candidates, generates the SDP answer, and emits `webrtc:answer`.
+7. The sender's `webrtc:ice-candidate` events are applied as they arrive (queued before step 6 completes).
+8. WebRTC establishes the media path: direct on a LAN, TURN relay if the server has one and direct fails. A zrok tunnel never carries WebRTC media.
+9. The remote video track is consumed by the receiver. `peer:left` closes the connection and the receiver waits for a fresh offer.
 
 ### 4.5 Optional HTTP MJPEG Ingestion
 As an alternative to WebRTC, external applications can read:
@@ -232,7 +248,12 @@ As an alternative to WebRTC, external applications can read:
 GET /stream/:roomId?pin=<accessPin>
 ```
 Response format: `multipart/x-mixed-replace; boundary=--frame`.
-Each part is a complete standard JPEG image.
+Each part is a complete standard JPEG image with its own `Content-Length`. `401` for a missing or wrong PIN. This route does **not** join the room, so it works while a browser viewer is open.
+
+The server writes the delimiter as `--frame` while the header declares `boundary=--frame`; a strictly RFC-conforming parser would expect `----frame`. OpenCV and ffmpeg tolerate it; a hand-written parser should rely on each part's `Content-Length`. Frames flow only while at least one consumer is connected (the server tells the sender through `mjpeg:demand`), and the PIN is part of the URL, so the URL must not be logged. `GET /snapshot/:roomId?pin=<accessPin>` returns a single fresh JPEG.
+
+### 4.6 Writing a receiver
+[`receiver-guide.md`](receiver-guide.md) is the practical companion to this section: choosing a transport, the sequence with message examples, the error and retry table, when WebRTC will not connect, a receiver checklist, and a reference integration (a Unity app with a Python sidecar).
 
 ## 6. HTTPS and LAN topology
 

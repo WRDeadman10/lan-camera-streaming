@@ -183,6 +183,22 @@ High-resolution camera sensors operate at their full optical fidelity. The termi
 
 **Consequences:** A Python/HTTP consumer connected to the zrok URL still pulls frames through zrok (by design, only while connected). Tunnel-free phone camera access needs either the Chrome insecure-origin flag or a user-supplied trusted certificate.
 
+## ADR-016 — External receivers are first-class: the contract is documented technology-neutrally, and the server is unchanged
+
+**Status:** Accepted
+
+**Decision:**
+1. This project stays the **camera source and signaling server**. Receivers (a Python/OpenCV/YOLO script, a Unity or other engine app, a service in any language) are separate programs that speak the documented contract; the server gains no receiver-specific code.
+2. The contract lives in two places: the formal schemas in `architecture.md` §4 (corrected to the server's real behavior) and a practical, technology-neutral `receiver-guide.md` (transport choice, sequence, error and retry table, failure diagnosis, receiver checklist).
+3. Three transports are documented for receivers: WebRTC (lowest latency, peer to peer, signaling only through the server), MJPEG over HTTP (simplest, does not join the room) and tunnel relay (last resort). MJPEG and tunnel relay spend tunnel quota (ADR-015).
+4. The first real receiver, the Viitorx Unity app with its Python sidecar, is recorded as a **reference integration**, not as part of this project: it lives in the other repository and is written to the guide.
+
+**Reasoning:** The first external receiver surfaced several behaviors that the earlier contract did not state, and each cost debugging time: `peer:joined` is sent only to the participant already in the room (the second to join learns from `hasPeer` in its ack); membership is per socket, so a reconnecting receiver must join again; the viewer slot is exclusive, so a browser viewer silently blocks a receiver; five failed joins block a socket for 30 s, so a receiver that retries a wrong PIN makes things worse; candidates arrive before the offer is applied; the MJPEG delimiter is not the RFC form. Writing these down once, in a form that does not assume Python, is cheaper than each integration rediscovering them.
+
+**Consequences:** A new integration in any language has a checklist to build against. The server's behavior is now a documented contract, so changing it (event names, payloads, the exclusive viewer slot, the join rate limit) is a breaking change for receivers in other repositories and needs an ADR and a `receiver-guide.md` update.
+
+**Verified / not verified:** The WebRTC path was exercised against this server with a Python (`aiortc`) receiver and a Python stand-in phone on loopback (join, offer/answer, a phone that leaves and returns, a socket drop, wrong PIN, occupied room, a slow consumer); MJPEG and tunnel relay with an earlier standalone Python receiver. Not verified: a real phone's browser sender page with an external receiver, real Wi-Fi/firewall behavior, a zrok tunnel, real-phone latency, and any receiver in a language other than Python.
+
 ## Open decisions to revisit after the first working stream
 
 - Whether TypeScript should replace plain JavaScript for stricter types.

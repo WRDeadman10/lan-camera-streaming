@@ -130,3 +130,18 @@ Tasks:
 4. Room authorization and cleanup.
 5. Real LAN testing and diagnostics.
 6. TURN, multiple viewers, audio, QR code, and other optional features only when evidence or requirements justify them.
+
+## Phase 6 — External receivers and integrations
+
+**Objective:** Let any program consume the camera feed without changes to the server.
+
+Delivered (documentation, ADR-016):
+- A technology-neutral receiver guide (`docs/receiver-guide.md`) and a corrected formal contract (`docs/architecture.md` §4).
+- A reference integration: a Unity app whose Python sidecar joins a room as the WebRTC receiver and treats the phone as a webcam for pose tracking.
+
+Remaining:
+- Build and verify a receiver in a second language from the guide alone.
+- Verify an external receiver on real devices and over a tunnel; measure its latency.
+- Consider a machine-readable description of the signaling events.
+
+**Exit criteria:** A receiver in a language other than Python connects using only the guide, and one external receiver is verified on a real phone and Wi-Fi.

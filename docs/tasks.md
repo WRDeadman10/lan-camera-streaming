@@ -125,3 +125,16 @@ Use these checkboxes as the implementation source of truth. Move completed work 
 - [x] Test results and any known limitations are documented.
 - [x] `decisions.md` is updated for any material architecture changes.
 - [x] `ai_handoff.md` describes the actual state of the repository and the next task.
+
+## P5 — External receivers (documentation, 2026-10-10)
+
+Decision: **ADR-016**. Docs only; no server code changed.
+
+- [x] Write `docs/receiver-guide.md`: a technology-neutral guide to connecting any receiver (transport choice, the WebRTC sequence, MJPEG and tunnel relay, error and retry table, diagnosing a failed WebRTC connection, a receiver checklist, library suggestions).
+- [x] Correct `docs/architecture.md` §4 to the server's real behavior: `mediaMode` in `room:join` and its ack, who receives `peer:joined`, `senderId` on relayed offers, `tunnel:frame`, `/api/config`, per-socket membership, the join rate limit, the exclusive viewer slot, the MJPEG delimiter and demand behavior.
+- [x] README: replace the Python-only integration section with a language-neutral "Connecting a receiver" section, a documentation index, and the Viitorx Unity + Python sidecar reference integration.
+- [x] Record the reference integration (a Unity app with a Python sidecar receiver, written to the guide) and what was verified against this server.
+- [ ] Verify the guide by building a receiver in a **second language** (for example Node.js or Go) from the guide alone. Only Python has been exercised, so every statement that is not about Python is from the server source, not from a test.
+- [ ] Real-device verification of an external receiver: a real phone's browser sender page, real Wi-Fi (client isolation, the Windows Firewall profile), and a zrok tunnel for the signaling.
+- [ ] Measure real-phone latency end to end for the WebRTC receiver path; it is unmeasured.
+- [ ] Decide whether the server should expose a machine-readable contract (a JSON schema or an OpenAPI-style description of the events) so receivers can be generated or validated.

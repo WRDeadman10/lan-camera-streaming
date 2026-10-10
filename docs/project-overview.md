@@ -26,6 +26,7 @@ For the first milestone, support one sender and one viewer. Multi-camera and mul
 - Use Socket.IO for room coordination, WebRTC signaling, and binary frame relay.
 - Support zrok as the primary public HTTPS tunnel provider for convenient, secure mobile browser access.
 - Make stream state visible: waiting, connecting, live, disconnected, and stopped.
+- Serve **external receivers** in any language or engine (a Python/OpenCV/YOLO script, a Unity app, a service) through a documented contract: WebRTC signaling, an MJPEG endpoint and the tunnel relay. See [`receiver-guide.md`](receiver-guide.md).
 - Provide real-time diagnostics: frame rates, dropped frames, encoding latency, and data transfer rates.
 - Avoid recording, storing, or uploading video to a cloud service.
 

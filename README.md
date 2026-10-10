@@ -13,6 +13,15 @@ Production-ready self-hosted WebRTC camera streaming application for Windows and
 
 ---
 
+## Documentation
+
+| Read | For |
+|---|---|
+| [`docs/receiver-guide.md`](docs/receiver-guide.md) | **Connecting anything to this server** (any language or engine): transports, sequence, errors, checklist, the Unity + Python reference integration |
+| [`docs/architecture.md`](docs/architecture.md) | Components, routes, the formal receiver signaling contract (§4) |
+| [`docs/project-overview.md`](docs/project-overview.md), [`docs/roadmap.md`](docs/roadmap.md), [`docs/tasks.md`](docs/tasks.md), [`docs/decisions.md`](docs/decisions.md) | Scope, plan, backlog, decisions |
+| [`docs/ai_handoff.md`](docs/ai_handoff.md) | Current status for the next person or agent |
+
 ## Prerequisites
 
 - **Node.js**: `v20.0.0` or higher (`v22.15.0+` tested).
@@ -118,33 +127,53 @@ Open the viewer on the PC at `http://localhost:3000/viewer`. If the phone cannot
 
 ---
 
-## External Client Integration (Python, OpenCV, YOLO)
+## Connecting a receiver (any language, any engine)
 
-This Node.js application serves as the **camera capture source and WebRTC signaling server**. External clients (such as a separate Python project using `aiortc` or `cv2.VideoCapture`) can consume the live camera feed using either of two supported integration methods:
+This application is the **camera source and signaling server**. It does not care what consumes the video: a Python/OpenCV/YOLO
+script, a Unity or Unreal app, a Go or Rust service, `ffmpeg`, another browser. Anything that can speak HTTP + Socket.IO (and, for the
+low-latency path, WebRTC) can be a receiver. **Start with [`docs/receiver-guide.md`](docs/receiver-guide.md)**: the technology-neutral
+contract, the message sequence, the error table and the mistakes that cost the most time.
 
-### Method 1: Direct WebRTC via Socket.IO Signaling (Recommended for Lowest Latency)
+| Transport | How a receiver gets frames | Joins the room? | Uses tunnel quota? |
+|---|---|---|---|
+| **WebRTC** (lowest latency) | Socket.IO signaling + a WebRTC video track, peer to peer | Yes, as `webrtc-receiver` | Signaling only |
+| **MJPEG** (simplest) | `GET /stream/<roomId>?pin=<accessPin>`, read by OpenCV, ffmpeg or any HTTP client | No | Yes, every frame |
+| **Tunnel relay** (last resort) | `tunnel:frame` Socket.IO events carrying JPEG buffers | Yes, with `mediaMode: "tunnel-relay"` | Yes, every frame |
 
-External applications (like Python `aiortc`) connect as an authorized receiver:
-1. Connect via Socket.IO client to `https://<your-host-or-zrok-url>`.
-2. Emit `room:join` with:
+What every receiver needs to know:
+
+- **Endpoints:** `GET /api/config` returns the ICE servers (build your peer connection from it); Socket.IO is on the base URL, default
+  namespace; the viewer link a person sees is `http(s)://<host>/viewer?room=<roomId>` and **does not contain the PIN**.
+- **One viewer per room.** A browser viewer open in the room blocks a receiver (and the reverse): the join is refused with
+  `Room already has an active viewer/receiver.`
+- **Emit `room:join` on every Socket.IO `connect`, including reconnects.** The server drops a socket's membership when it
+  disconnects.
+- **The sender creates the WebRTC offer.** Build a new peer connection per offer, queue the sender's trickled candidates until the
+  remote description is set, answer with `webrtc:answer`. Start order does not matter.
+- **Never put the PIN on a command line or in a logged URL.**
+
+### Method 1: Direct WebRTC via Socket.IO signaling (lowest latency)
+
+1. `GET <base>/api/config` for the ICE servers.
+2. Connect a Socket.IO v4 client to `<base>` (for example `https://<host-or-zrok-url>`).
+3. On every `connect`, emit `room:join` and read the ack:
    ```json
-   {
-     "roomId": "<roomId>",
-     "role": "webrtc-receiver",
-     "pin": "123456"
-   }
+   { "roomId": "<roomId>", "role": "webrtc-receiver", "pin": "123456", "mediaMode": "webrtc" }
    ```
-3. Exchange standard WebRTC SDP offer/answer (`webrtc:offer`, `webrtc:answer`) and ICE candidates (`webrtc:ice-candidate`).
-4. WebRTC establishes a direct, ultra-low latency peer-to-peer media track.
-5. Full event payload schemas and lifecycle transitions are specified in [`docs/architecture.md`](docs/architecture.md#4-external-webrtc-receiver-signaling-contract-version-10).
+   Success: `{ "success": true, "roomId", "role": "viewer", "mediaMode", "hasPeer", "peerSocketId" }`; failure:
+   `{ "success": false, "error": "..." }` (see the error table in the guide).
+4. Receive `webrtc:offer` `{ sdp, type, senderId }`, create the answer, emit `webrtc:answer` `{ sdp, type }`, and exchange
+   `webrtc:ice-candidate` events.
+5. The remote **video** track is the camera. Full schemas: [`docs/architecture.md` §4](docs/architecture.md#4-external-webrtc-receiver-signaling-contract-version-10).
 
-### Method 2: HTTP MJPEG Streaming Endpoint (Universal Fallback)
+### Method 2: HTTP MJPEG streaming endpoint (universal fallback)
 
-While a client is connected to it, the Node.js server provides an authenticated HTTP multipart video stream (the sender uploads JPEG frames only while a client is connected; connect Python to `localhost` to avoid tunnel traffic):
+While a client is connected to it, the server provides an authenticated HTTP multipart video stream (the sender uploads JPEG frames
+only while a client is connected; connect to `localhost` to avoid tunnel traffic):
 ```text
 http://<host>:3000/stream/<roomId>?pin=<accessPin>
 ```
-Any external tool or script can read this stream directly with standard OpenCV:
+Any tool that reads an MJPEG stream can use it, for example OpenCV:
 ```python
 import cv2
 
@@ -157,6 +186,21 @@ while cap.isOpened():
         if cv2.waitKey(1) == ord('q'):
             break
 ```
+This route does not join the room, so it works while a browser viewer is open. The PIN is in the URL: do not log it.
+
+### Reference integration: the Viitorx Unity app with its Python sidecar
+
+The first real receiver treats the phone as a webcam for a Unity pose-tracking app. To use it:
+
+1. Start this server and open the **sender** page on the phone; press start.
+2. In Unity, `AppBootstrap` > `Video Test Source`: tick **Track From Video**, paste the **viewer** link into **Video Source**, type
+   the server's `ACCESS_PIN` into **Lan Camera Pin**, press Play. Close any browser viewer in that room first.
+3. Five status lights in the Unity window (top right, F8 hides) show the sidecar, its watchdog, the source, the model and whether a
+   person is being tracked.
+
+The receiver is a Python module in that repository (`python-sidecar~/tools/video/lan_camera.py`) written to the receiver guide, and its
+test suite drives **this** server with a fake phone (set `CAMERA_SERVER_DIR` to this folder). Details, what was verified and what was
+not: [`docs/receiver-guide.md` section 9](docs/receiver-guide.md#9-reference-integration-the-viitorx-unity--python-sidecar).
 
 ---
 
