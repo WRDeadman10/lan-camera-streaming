@@ -16,6 +16,11 @@
     <main>
       <div id="errorAlert" class="alert alert-danger" role="alert"></div>
       <div id="infoAlert" class="alert alert-info" role="status"></div>
+      <div id="localViewerHint" class="alert alert-info" role="status">
+        You opened this page through the public zrok URL. Open
+        <a id="localViewerHintLink" href="#" style="color: inherit; font-family: monospace;"></a>
+        on this PC instead so the viewer does not use zrok at all.
+      </div>
 
       <div class="card">
         <h2>Join Session</h2>
@@ -34,7 +39,7 @@
           <label for="mediaMode">Media Transport Mode</label>
           <select id="mediaMode">
             <option value="webrtc" selected>WebRTC — Direct/ICE media (Low Latency P2P)</option>
-            <option value="tunnel-relay">Experimental — Video through zrok (Application Relay)</option>
+            <option value="tunnel-relay">Fallback — Video through zrok (uses zrok quota)</option>
           </select>
         </div>
 
@@ -64,6 +69,8 @@
             <span id="statusText">Disconnected</span>
           </span>
         </div>
+
+        <div id="pathIndicator" class="path-indicator" role="status"></div>
 
         <div class="video-container" id="videoWrapper">
           <video id="remoteVideo" autoplay playsinline style="display: block;"></video>

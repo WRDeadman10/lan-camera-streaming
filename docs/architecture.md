@@ -197,6 +197,14 @@ Notifies when the counterpart leaves or disconnects:
 }
 ```
 
+#### 8a. `mjpeg:demand` (Server → Sender)
+Tells the sender whether any HTTP MJPEG/snapshot consumer is waiting. The sender uploads `mjpeg:frame` buffers only while `active` is `true` (also emitted right after the sender joins if a consumer is already waiting); the server drops frames received without demand.
+```json
+{
+  "active": true
+}
+```
+
 #### 8. `room:leave` (Client → Server)
 Explicit departure from the room. Triggers cleanup and notifies peer.
 
@@ -230,7 +238,8 @@ Each part is a complete standard JPEG image.
 
 - Camera access requires a secure context in supported browsers. Use a trusted HTTPS origin for the sender page.
 - For quick development, run one HTTPS tunnel to the local web server. The public URL is internet-reachable unless the tunnel provider/access configuration restricts it; pairing authorization is still required.
-- For deployment restricted to a LAN, use a stable private IP or local DNS name and a certificate trusted by every client device. Installing a local CA on mobile devices requires device-specific steps.
+- For deployment restricted to a LAN, use a stable private IP or local DNS name and a certificate trusted by every client device. Installing a local CA on mobile devices requires device-specific steps. The server serves HTTPS directly when `HTTPS_CERT_PATH` and `HTTPS_KEY_PATH` are set; `start.ps1 -LocalOnly` runs with no zrok involvement over plain HTTP (phone uses the Chrome "treat insecure origin as secure" flag) or over HTTPS when the user supplies a certificate; no certificate tooling is bundled.
+- Recommended viewer placement: the Windows PC opens `/viewer` on `localhost` (a secure context, no camera needed) so only the phone's page load and signaling use the tunnel; WebRTC media stays on the LAN as a host-to-host UDP path.
 - A host firewall rule may be needed for local access. Do not disable the firewall globally.
 - Wi-Fi client isolation, guest networks, VPN routing, browser privacy policies, and restrictive NAT can prevent direct media connectivity even when the web page loads.
 
@@ -300,6 +309,7 @@ Adjust the layout if the repository already has established conventions; do not 
     1. Android Chrome obfuscates host candidates with mDNS (`<uuid>.local`), which Windows cannot resolve if multicast UDP 5353 is blocked by router AP isolation or Windows Firewall.
     2. STUN server-reflexive (`srflx`) fallback fails because both devices share the router's public WAN IP, and consumer routers lack NAT Loopback / Hairpinning for UDP.
     3. Windows Defender Firewall classifies the Wi-Fi network as "Public" and blocks unsolicited incoming UDP packets.
-  - *Mitigation*: Client displays a clear on-screen diagnosis and directs the user to **Mode B (Experimental zrok Tunnel Relay)**, which transmits frames through the authenticated server WebSocket and operates reliably on any network topology.
+  - *Update (ADR-015)*: causes 1 and 2 above are unlikely for a host-to-host pair (a camera-permitted sender exposes its real LAN IP and ICE checks work in both directions). The on-screen diagnosis now lists AP/client isolation, Windows Firewall profile and VPN adapters, and the path indicator shows whether the nominated pair is LAN direct.
+  - *Mitigation*: Client directs the user to **Mode B (Fallback zrok Tunnel Relay)** as a last resort; it transmits frames through the authenticated server WebSocket, works on any topology, and consumes zrok quota.
 - **Server restarts**: all in-memory rooms are lost in the MVP; both peers must create/join a new room.
 - **Tunnel URL changes**: clients must reopen the current URL; document this development limitation.

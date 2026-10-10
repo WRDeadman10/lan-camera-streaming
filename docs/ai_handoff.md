@@ -2,53 +2,53 @@
 
 ## Current status
 
-**Status:** Full Camera Resolution Option, Dedicated `lan.shares.zrok.io` Tunnel Binding, and Clean Cloud Deallocation Implemented.
-- **Dedicated Reserved Tunnel Binding & Accurate QR Code:**
-  - `start.ps1` binds directly to reserved name `public:lan` (`lan.shares.zrok.io`).
-  - Terminal ASCII QR code and displayed URLs strictly encode `https://lan.shares.zrok.io/sender`.
-  - Stale random share tokens left over from previous runs (`8kp060ytibnq`, `xx777tmwbi5m`, `mele44v03uf1`) were cleaned up via `zrok2 delete share`.
-- **Automatic Dashboard Endpoint Release:**
-  - `start.ps1` runs pre-flight and graceful teardown deallocation (`zrok2 delete share public:lan` and token cleanup), ensuring the zrok web console dashboard never retains dangling bound endpoints after terminating the application.
-  - Added standalone `scripts/release-zrok.ps1` for manual on-demand dashboard unbinding.
-  - Replaced non-ASCII Unicode box characters (`│`) with pure ASCII regex patterns in `start.ps1`, ensuring 100% compatibility with Windows PowerShell 5.1 and UTF-8/ANSI environments.
-- **Maximum / Full Camera Resolution:**
-  - Added "🌟 Full Maximum Resolution (Native 4K / 1080p Sensor)" option to `/sender`, along with 1080p, 720p, and 480p tiers.
-  - Supported "Native (Full Camera Resolution)" in Mode B (Tunnel Relay) without forced downscaling.
-  - Automatically reads and logs the actual negotiated hardware resolution and frame rate upon stream acquisition.
-- **WebRTC vs Application Relay Connectivity Analysis:**
-  - Verified and confirmed: Mode B (Application Relay) operates over the authenticated zrok WebSocket and works universally on all networks.
-  - Documented root causes for WebRTC direct media blockage over zrok between Android and Windows (mDNS IP masking, lack of router NAT loopback on same Wi-Fi, and Symmetric NAT/CGNAT on mobile data without TURN).
-- **Automated Tests:** All 18 Node.js automated tests pass (`npm test`).
+**Status:** Zero-zrok-quota LAN operation implemented (ADR-015). Code and automated tests are done; real phone + PC verification is still pending.
+
+- **Quota leak fixed:** the sender used to upload ~15 FPS JPEGs (`mjpeg:frame`) through Socket.IO (and zrok) unconditionally, even in WebRTC mode. It is now demand-driven: the server emits `mjpeg:demand { active }` to the sender only while an HTTP `/stream/:roomId` consumer or a `/snapshot/:roomId` request is waiting, and drops frames otherwise. Frames are capped at 1280 px width / 900 KB with one in-flight encode. `/snapshot` now asks for a fresh frame on demand.
+- **Viewer on the PC via localhost:** `/api/network-info` returns `{ protocol, port }` only (no LAN IPs, since the route is public through zrok). Sender page shows an "Open Viewer on the PC" localhost link; viewer page shows a hint banner when opened through a non-local hostname; `start.ps1` prints `http://localhost:<port>/viewer`.
+- **Path indicator:** `webrtc-peer.js` classifies the nominated ICE pair (`classifyPath`) as `lan` / `internet` / `relay`; `#pathIndicator` on both pages and a `[PATH]` diagnostics line show it. `lan` means no video bytes through zrok.
+- **Mode B relabelled** as "Fallback — Video through zrok (uses zrok quota)", with a warning on the sender page. ICE-failure diagnosis rewritten (AP isolation, Windows Firewall profile, VPN adapter). Tunnel frames above 600 KB are skipped client-side.
+- **Local HTTPS / tunnel-free mode:** server serves HTTPS when `HTTPS_CERT_PATH` + `HTTPS_KEY_PATH` are set (both or neither, validated in `config.js`). `start.ps1 -LocalOnly` skips zrok and prints LAN sender URLs + QR over plain HTTP (or HTTPS with a user-supplied cert). The mkcert auto-setup was removed again at the user's request; phone camera on plain HTTP needs the Chrome insecure-origin flag. The recommended path is the default zrok mode. In normal (zrok) mode `start.ps1` forces plain HTTP because zrok proxies to `http://127.0.0.1`.
+- **Previous work still in place:** reserved `lan.shares.zrok.io` binding, full-resolution camera option, zrok endpoint release on exit.
+- **Automated tests:** 29/29 pass (`npm test`). Also verified manually: server starts over HTTPS with a throwaway cert, `/api/network-info` returns `https`, missing cert files produce an actionable error. PowerShell scripts parse cleanly (no non-ASCII characters). The browser UI changes (sender/viewer pages, path indicator) were syntax-checked only, not exercised in a browser with a camera.
 
 ## Read before implementation
 
 1. `AGENTS.md` — agent behavior, code style and file rules.
-2. `docs/architecture.md` — component boundaries, network flows, Mode A vs Mode B, and external receiver signaling contract.
+2. `docs/architecture.md` — component boundaries, network flows, Mode A vs Mode B, external receiver signaling contract (now includes `mjpeg:demand`).
 3. `docs/roadmap.md` — phased delivery plan and exit criteria.
-4. `docs/decisions.md` — accepted decisions (ADR-001 through ADR-014) and unresolved questions.
-5. `docs/tasks.md` — implementation backlog and checkboxes.
+4. `docs/decisions.md` — accepted decisions (ADR-001 through ADR-015) and unresolved questions.
+5. `docs/tasks.md` — implementation backlog and checkboxes (see P4.6).
 6. `docs/project-overview.md` — goals, scope, and MVP definition.
 
 ## Agreed architecture
 
 - Host: Windows PC running Node.js + Express.
-- Primary Tunnel: `zrok` public HTTPS sharing (`zrok2 share public <target> -n public:lan --backend-mode proxy`).
-- Authentication: Configurable `ZROK_TOKEN` in `.env` automatically validated and enabled via `scripts/start-zrok.ps1`.
-- Mode A (WebRTC): Low-latency direct peer-to-peer media. Signaling carried by Socket.IO over zrok. Early candidate queueing guarantees 0% candidate drop rate.
-- Mode B (Experimental zrok Tunnel): Camera frames downscaled or streamed native via canvas, sent as raw binary JPEG buffers via Socket.IO over zrok tunnel, relayed by Windows server to authorized viewer. Evaluates performance against zrok's 5 GB daily free quota and acts as resilient fallback when same-LAN NAT loopback fails.
-- Security: Access PIN authentication, payload size bounds (600KB), brute-force rate-limiting, room isolation, and media mode agreement.
-- Access & Pairing: Persistent reserved domain `lan.shares.zrok.io`, ASCII QR codes displayed in terminal upon launch, and in-browser QR codes on index and sender pages for phone camera scanning.
+- Tunnel (optional): `zrok` public HTTPS share bound to `public:lan`; carries only the phone's page load and Socket.IO signaling in Mode A. WebRTC media is UDP and never goes through zrok.
+- Mode A (WebRTC): host-to-host on the same Wi-Fi when the PC viewer uses `localhost`.
+- Mode B (tunnel relay): last-resort fallback that sends every frame through zrok.
+- Tunnel-free alternative: `start.ps1 -LocalOnly` (plain HTTP + Chrome flag on the phone, or user-supplied certificate).
+- Security was explicitly de-prioritised by the user for this iteration (default PIN `123456` unchanged).
+
+## Modified files (this iteration)
+
+- Server: `src/server/mjpeg-streamer.js`, `src/server/signaling.js`, `src/server/server.js`, `src/server/config.js`, `src/server/index.js`.
+- Client: `src/public/js/sender.js`, `src/public/js/viewer.js`, `src/public/js/webrtc-peer.js`, `src/public/js/ui-utils.js`, `src/public/sender.html`, `src/public/viewer.html`, `src/public/index.html`, `src/public/css/style.css`.
+- Scripts/config: `start.ps1` is now the ONLY script. The `scripts/` folder (start-server, start-zrok, release-zrok, setup-local-https) was deleted and folded into it (also does first-run `npm install` and `.env` creation). Also `.env.example`, `.gitignore`.
+- Tests: `tests/mjpeg.test.js` (rewritten for demand-driven flow), `tests/server.test.js`, `tests/path-classification.test.js` (new).
+- Docs: `README.md`, `docs/tasks.md`, `docs/decisions.md`, `docs/architecture.md`, `docs/ai_handoff.md`.
 
 ## Immediate next task
 
-Run `powershell -File start.ps1`:
-1. Verify terminal ASCII QR code encodes `https://lan.shares.zrok.io/sender`.
-2. Connect mobile camera sender in Mode B (Application Relay) and verify full resolution.
-3. When stopping with Ctrl+C, verify all endpoints are released from the zrok cloud dashboard.
+On the real devices:
+1. `powershell -File start.ps1`; open the sender URL on the phone, start streaming in WebRTC mode; open `http://localhost:3000/viewer?room=<id>` on the PC.
+2. Confirm the green "LAN direct" indicator and a `[STATS] Pair: host ... <-> host/prflx ...` line. If ICE fails, check Wi-Fi AP/client isolation, the Windows network profile (Private), and VPN adapters.
+3. Check the zrok dashboard: transfer should be KBs (page + signaling), not MBs.
+4. Optional tunnel-free run: `powershell -File start.ps1 -LocalOnly`; on the phone enable the Chrome insecure-origin flag for the printed URL.
 
 ## Commands run & results
 
-- `npm test`: 18/18 tests passed.
-- All-in-one start: `powershell -File start.ps1` (verified clean start, QR rendering, and graceful deallocation).
-- Manual endpoint release: `powershell -File scripts/release-zrok.ps1` (verified clean unbinding).
-- Cloud cleanup test: `cmd /c "C:\scrcpy-win64-v2.4\zrok2.exe overview"` (verified 0 ghost shares).
+- `npm test`: 29/29 passed.
+- HTTPS smoke test with a throwaway self-signed cert: `/health` and `/api/network-info` served over HTTPS; plain HTTP rejected.
+- PowerShell parser check on `start.ps1`: 0 errors.
+- Neither `start.ps1` mode was executed end to end here (default mode starts a real zrok share).

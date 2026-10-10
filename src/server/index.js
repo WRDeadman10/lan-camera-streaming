@@ -18,9 +18,11 @@ config.mjpegStreamer = mjpegStreamer;
 const { httpServer } = createServer(config, logger);
 const { io, roomManager } = setupSignaling(httpServer, config, logger);
 
+const scheme = config.useHttps ? 'https' : 'http';
+
 httpServer.listen(config.port, config.host, () => {
-  logger.info(`LAN Camera Streaming server listening on http://${config.host}:${config.port}`);
-  logger.info(`Health check available at http://${config.host}:${config.port}/health`);
+  logger.info(`LAN Camera Streaming server listening on ${scheme}://${config.host}:${config.port}`);
+  logger.info(`Health check available at ${scheme}://${config.host}:${config.port}/health`);
 });
 
 function handleShutdown(signal) {

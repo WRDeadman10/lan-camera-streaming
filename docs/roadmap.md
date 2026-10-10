@@ -92,7 +92,7 @@ Tasks:
 - Add canvas downscaling, JPEG blob generation, and binary ArrayBuffer transport on the sender.
 - Add binary frame reception and canvas rendering with freshest-frame buffer queue on the viewer.
 - Add real-time throughput metrics (FPS, dropped frames, MB sent/received, estimated MB/hour).
-- Provide Windows PowerShell helper scripts (`scripts/start-server.ps1`, `scripts/start-zrok.ps1`).
+- Provide a single Windows PowerShell entry point (`start.ps1`, which supersedes the former `scripts/` helpers).
 
 **Exit criteria:** Automated tests pass for binary relay and room isolation; sender and viewer can run in tunnel-relay mode without Base64 encoding.
 

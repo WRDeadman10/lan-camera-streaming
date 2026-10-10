@@ -87,9 +87,23 @@ Use these checkboxes as the implementation source of truth. Move completed work 
 - [x] Bind public zrok tunnel explicitly to reserved namespace name `public:lan` (`lan.shares.zrok.io`).
 - [x] Fix terminal ASCII QR code generation to encode the exact active sender URL (`https://lan.shares.zrok.io/sender`).
 - [x] Implement pre-flight and graceful teardown share deallocation in `start.ps1` (`zrok2 delete share public:lan`) to release bound endpoints from zrok web dashboard.
-- [x] Create standalone `scripts/release-zrok.ps1` for one-click manual release of all zrok dashboard endpoints.
+- [x] Release zrok dashboard endpoints automatically (pre-flight and on exit) inside `start.ps1`; the standalone `scripts/release-zrok.ps1` was removed.
 - [x] Fix PowerShell 5.1 ANSI parsing errors by eliminating non-ASCII box-drawing characters from `start.ps1`.
 - [x] Add automated unit and integration tests covering binary frame relay and room mode isolation.
+
+## P4.6 — Zero-zrok-quota LAN operation
+
+- [x] Make the sender's MJPEG frame upload demand-driven (server emits `mjpeg:demand`; frames dropped server-side when no consumer; sender downscales to 1280 px max width, one in-flight encode, 900 KB cap).
+- [x] Make `/snapshot/:roomId` request a fresh frame on demand instead of relying on a permanently cached frame.
+- [x] Skip oversized tunnel frames on the sender instead of letting the server reject them or Socket.IO drop the connection.
+- [x] Add `/api/network-info` (scheme + port only) and a "viewer on the PC via localhost" link on the sender page, viewer hint banner, index page, and `start.ps1` output.
+- [x] Add a connection-path indicator (LAN direct / internet / TURN relay) driven by the nominated ICE candidate pair on sender and viewer.
+- [x] Rewrite the ICE-failure diagnosis (AP isolation, Windows Firewall profile, VPN adapter); relabel Mode B as a quota-consuming fallback.
+- [x] Optional local HTTPS (`HTTPS_CERT_PATH` / `HTTPS_KEY_PATH`), and `start.ps1 -LocalOnly` for tunnel-free LAN mode (mkcert auto-setup was tried and removed).
+- [x] Add automated tests for demand-driven MJPEG, network-info, HTTPS config validation, and path classification.
+- [ ] Run `start.ps1` on the real phone + PC and confirm the sender shows "LAN direct" and the zrok dashboard shows only signaling-sized transfer.
+- [x] Consolidate all PowerShell helpers into the single root `start.ps1` (removed `scripts/` folder; first-run `npm install` and `.env` creation handled by it).
+- [ ] Optional: run `start.ps1 -LocalOnly` and confirm Chrome on the phone (with the insecure-origin flag) opens the LAN URL and grants camera access.
 
 ## P5 — Conditional / post-MVP
 
@@ -97,7 +111,7 @@ Use these checkboxes as the implementation source of truth. Move completed work 
 - [ ] Evaluate whether audio is required.
 - [ ] Evaluate multiple viewers or multiple camera senders.
 - [ ] Add QR-based pairing if it materially improves setup.
-- [ ] Evaluate a stable local DNS name and locally trusted certificate for tunnel-free LAN operation.
+- [x] Evaluate a stable local DNS name and locally trusted certificate for tunnel-free LAN operation (mkcert + `start.ps1 -LocalOnly`, see ADR-015).
 - [ ] Add a Windows service or auto-start setup only if explicitly required.
 
 ## Completion checklist

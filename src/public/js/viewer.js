@@ -4,7 +4,7 @@
  * WebRTC answer creation, remote track rendering, and connection statistics.
  */
 
-import { showError, clearError, showInfo, clearInfo, updateStatus, logDiagnostic, parseCandidateSummary, setupDiagnosticsControls } from './ui-utils.js';
+import { showError, clearError, showInfo, clearInfo, updateStatus, logDiagnostic, parseCandidateSummary, setupDiagnosticsControls, setPathIndicator, describePath, isLocalHostname, fetchLocalServerOrigin } from './ui-utils.js';
 import { WebRtcPeer } from './webrtc-peer.js';
 
 let webrtcPeer = null;
@@ -14,6 +14,7 @@ let currentMediaMode = 'webrtc';
 let statsInterval = null;
 let cachedIceServers = null;
 let pendingRemoteCandidates = [];
+let lastLoggedPathKind = null;
 
 // Tunnel rendering state
 let tunnelIsRendering = false;
@@ -37,6 +38,8 @@ const videoWrapper = document.getElementById('videoWrapper');
 const pythonLinkCard = document.getElementById('pythonLinkCard');
 const pythonStreamUrl = document.getElementById('pythonStreamUrl');
 const btnCopyPythonUrl = document.getElementById('btnCopyPythonUrl');
+const localViewerHint = document.getElementById('localViewerHint');
+const localViewerHintLink = document.getElementById('localViewerHintLink');
 
 const canvasContext = remoteCanvas ? remoteCanvas.getContext('2d') : null;
 
@@ -252,11 +255,11 @@ function createViewerPeer(iceServers) {
         logDiagnostic('[ICE] ✓ WebRTC media connection established successfully!', 'INFO');
       } else if (state === 'failed') {
         logDiagnostic('[ICE] ❌ ICE connection failed! Direct P2P media could not connect.', 'ERROR');
-        logDiagnostic('[DIAGNOSIS] Why does WebRTC fail between Windows & Android on the same Wi-Fi?', 'WARN');
-        logDiagnostic('1. Android mDNS host candidate (.local) could not be resolved by Windows over LAN.', 'WARN');
-        logDiagnostic('2. Wi-Fi client isolation or Windows Firewall blocking inbound peer UDP packets.', 'WARN');
-        logDiagnostic('3. Router lacks NAT Loopback / Hairpinning to loop STUN srflx UDP packets on same LAN.', 'WARN');
-        logDiagnostic('💡 FIX: Switch Media Transport Mode to "Experimental — Video through zrok" (Mode B) in the dropdown above, which routes frames reliably through the server WebSocket!', 'INFO');
+        logDiagnostic('[DIAGNOSIS] Most likely causes on the same Wi-Fi:', 'WARN');
+        logDiagnostic('1. Router "AP / client isolation" (or a guest network) blocks phone-to-PC traffic.', 'WARN');
+        logDiagnostic('2. Windows Firewall blocks inbound UDP for this browser (Wi-Fi profile set to Public).', 'WARN');
+        logDiagnostic('3. A VPN or virtual adapter on this PC hides the real LAN route.', 'WARN');
+        logDiagnostic('LAST RESORT: switch Media Transport Mode to "Fallback - Video through zrok" (Mode B) on both sender and viewer. It works anywhere but consumes zrok quota.', 'INFO');
       }
     }
   });
@@ -321,6 +324,8 @@ function createViewerPeer(iceServers) {
   socket.on('peer:left', () => {
     logDiagnostic('[ROOM] Sender left the room.', 'INFO');
     updateStatus('waiting', 'Sender Left. Waiting...');
+    setPathIndicator(null);
+    lastLoggedPathKind = null;
     pendingRemoteCandidates = [];
     if (remoteVideo.srcObject) {
       remoteVideo.srcObject = null;
@@ -364,6 +369,14 @@ function startStatsPolling() {
         const fps = stats.framesPerSecond !== null && stats.framesPerSecond !== undefined ? `${stats.framesPerSecond} FPS` : 'active';
         const res = stats.frameWidth ? ` (${stats.frameWidth}x${stats.frameHeight})` : '';
         logDiagnostic(`[STATS] Pair: ${pairInfo} | RTT: ${stats.rtt} | Inbound: ${fps}${res}`, 'INFO');
+      }
+      if (stats && stats.pathKind) {
+        setPathIndicator(stats.pathKind);
+        if (stats.pathKind !== lastLoggedPathKind) {
+          lastLoggedPathKind = stats.pathKind;
+          const description = describePath(stats.pathKind);
+          logDiagnostic(`[PATH] ${description ? description.text : stats.pathKind}`, stats.pathKind === 'lan' ? 'INFO' : 'WARN');
+        }
       }
     }
   }, 4000);
@@ -465,6 +478,8 @@ function leaveRoom() {
   btnJoin.disabled = false;
   btnLeave.disabled = true;
   pendingRemoteCandidates = [];
+  setPathIndicator(null);
+  lastLoggedPathKind = null;
   updateStatus('disconnected', 'Disconnected');
   logDiagnostic('Left room.');
 }
@@ -487,7 +502,24 @@ window.addEventListener('beforeunload', () => {
   leaveRoom();
 });
 
+async function showLocalViewerHint() {
+  if (!localViewerHint || !localViewerHintLink || isLocalHostname(window.location.hostname)) {
+    return;
+  }
+  const localOrigin = await fetchLocalServerOrigin();
+  if (!localOrigin) {
+    return;
+  }
+  const roomQuery = roomParam ? `?room=${encodeURIComponent(roomParam)}` : '';
+  const localViewerUrl = `${localOrigin}/viewer${roomQuery}`;
+  localViewerHintLink.href = localViewerUrl;
+  localViewerHintLink.textContent = localViewerUrl;
+  localViewerHint.classList.add('visible');
+  logDiagnostic('[HINT] This viewer is loaded through a public URL. Use the localhost viewer on the PC to avoid any zrok traffic.', 'WARN');
+}
+
 // Initialize default state
 setupDiagnosticsControls('btnCopyLogs', 'btnClearLogs', 'diagnosticsLog');
+showLocalViewerHint();
 fetchIceServers().catch(() => {});
 logDiagnostic('Viewer client ready.');

@@ -67,9 +67,15 @@ export function loadConfig(env = process.env) {
   const trustProxy = env.TRUST_PROXY === 'true' || env.TRUST_PROXY === '1';
   const logLevel = parseString(env.LOG_LEVEL, 'info').toLowerCase();
   const zrokToken = parseString(env.ZROK_TOKEN, '');
+  const httpsCertPath = parseString(env.HTTPS_CERT_PATH, '');
+  const httpsKeyPath = parseString(env.HTTPS_KEY_PATH, '');
 
   if (accessPin.length < 4) {
     throw new Error('Invalid configuration: ACCESS_PIN must be at least 4 characters long.');
+  }
+
+  if ((httpsCertPath === '') !== (httpsKeyPath === '')) {
+    throw new Error('Invalid configuration: HTTPS_CERT_PATH and HTTPS_KEY_PATH must be set together.');
   }
 
   const iceServers = parseIceServers();
@@ -82,6 +88,9 @@ export function loadConfig(env = process.env) {
     trustProxy,
     logLevel,
     iceServers,
-    zrokToken
+    zrokToken,
+    httpsCertPath,
+    httpsKeyPath,
+    useHttps: httpsCertPath !== ''
   };
 }

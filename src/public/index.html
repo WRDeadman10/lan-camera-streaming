@@ -40,9 +40,9 @@
             </p>
           </div>
           <div style="padding: 14px; background-color: #0b1120; border-radius: 6px; border: 1px solid var(--border);">
-            <strong style="color: #facc15;">Mode B: Experimental (Video through zrok Tunnel)</strong>
+            <strong style="color: #facc15;">Mode B: Fallback (Video through zrok Tunnel)</strong>
             <p style="font-size: 0.9rem; color: var(--text-muted); margin-top: 4px;">
-              Canvas capture & binary JPEG frames routed deliberately through Windows Node.js server. Tested against zrok free daily quota.
+              Canvas capture & binary JPEG frames routed through the Windows Node.js server and the zrok tunnel. Consumes zrok daily quota, so use it only when WebRTC cannot connect.
             </p>
           </div>
         </div>
@@ -67,7 +67,7 @@
           <li>Ensure both devices are on the same local Wi-Fi or connected via the secure zrok HTTPS tunnel.</li>
           <li>On the camera device, click <strong>Start Streaming</strong>, choose the Media Mode, enter PIN, and generate or enter Room ID.</li>
           <li>Grant browser camera permission when prompted.</li>
-          <li>On the receiving device, click <strong>Watch Stream</strong>, select the same Media Mode, enter Room ID and PIN.</li>
+          <li>On the receiving device, click <strong>Watch Stream</strong>, select the same Media Mode, enter Room ID and PIN. When the viewer is the Windows PC running this server, open it at <code id="localViewerUrl">http://localhost:3000/viewer</code> so it does not touch zrok.</li>
           <li>Monitor real-time throughput, dropped frames, and connection diagnostics in the status panel.</li>
         </ol>
       </div>
@@ -94,6 +94,16 @@
           if (qrImage && data.dataUrl) {
             qrImage.src = data.dataUrl;
           }
+        }
+      } catch (e) {}
+    })();
+
+    (async function initLocalViewerUrl() {
+      try {
+        const res = await fetch('/api/network-info');
+        if (res.ok) {
+          const data = await res.json();
+          document.getElementById('localViewerUrl').textContent = data.protocol + '://localhost:' + data.port + '/viewer';
         }
       } catch (e) {}
     })();

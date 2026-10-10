@@ -1,18 +1,52 @@
 <#
 .SYNOPSIS
-    Starts both the Node.js application server and the public zrok HTTPS tunnel in a single console session.
+    Single entry point: prepares everything, starts the Node.js server, and publishes it (or not).
 .DESCRIPTION
-    1. Loads configuration from .env.
-    2. Spawns the Node.js server as a background job/process.
-    3. Waits for /health to become available.
-    4. Auto-enables and starts the zrok public tunnel in the foreground.
-    5. Cleanly terminates the Node.js server when the script exits (Ctrl+C).
+    Default mode (zrok tunnel, phone gets an HTTPS URL from zrok):
+      1. Installs npm dependencies and creates .env from .env.example when missing.
+      2. Loads configuration from .env.
+      3. Enables the zrok environment when ZROK_TOKEN is set, and releases stale shares.
+      4. Starts the Node.js server and the zrok share bound to public:lan.
+      5. Prints the phone URL and QR code, then releases the share and stops the server on Ctrl+C.
+
+    -LocalOnly (no zrok at all, so no zrok quota is used):
+      Serves the app on the LAN over plain HTTP (or HTTPS when HTTPS_CERT_PATH / HTTPS_KEY_PATH are set in
+      .env) and prints the LAN sender URL and QR code. Phone browsers only allow the camera on HTTPS or
+      localhost, so on the phone either use the Chrome flag chrome://flags/#unsafely-treat-insecure-origin-as-secure
+      for the printed LAN URL, or use your own trusted certificate.
+.PARAMETER LocalOnly
+    Run without zrok; the phone connects directly to this PC over the LAN.
 #>
+
+param(
+    [switch]$LocalOnly
+)
 
 $ErrorActionPreference = "Stop"
 
-# 1. Load configuration from .env
+# 0. First-run preparation: dependencies and .env
+if (-not (Test-Path (Join-Path $PSScriptRoot "node_modules"))) {
+    Write-Host "Installing npm dependencies (first run)..." -ForegroundColor Cyan
+    Push-Location $PSScriptRoot
+    try {
+        cmd /c "npm install"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "npm install failed." -ForegroundColor Red
+            exit 1
+        }
+    } finally {
+        Pop-Location
+    }
+}
+
 $envFile = Join-Path $PSScriptRoot ".env"
+$envExampleFile = Join-Path $PSScriptRoot ".env.example"
+if (-not (Test-Path $envFile) -and (Test-Path $envExampleFile)) {
+    Copy-Item $envExampleFile $envFile
+    Write-Host "Created .env from .env.example (set ZROK_TOKEN there for tunnel mode)." -ForegroundColor Yellow
+}
+
+# 1. Load configuration from .env
 if (Test-Path $envFile) {
     Get-Content $envFile | ForEach-Object {
         $line = $_.Trim()
@@ -29,64 +63,117 @@ if (Test-Path $envFile) {
 
 $port = if ($env:PORT) { $env:PORT } else { "3000" }
 $hostAddress = if ($env:HOST) { $env:HOST } else { "0.0.0.0" }
-$targetUrl = "http://127.0.0.1:$port"
 $pin = if ($env:ACCESS_PIN) { $env:ACCESS_PIN } else { "123456" }
 $zrokToken = $env:ZROK_TOKEN
 
-Write-Host "=================================================" -ForegroundColor Cyan
-Write-Host " LAN Camera Streaming & zrok Public Tunnel" -ForegroundColor Green
-Write-Host " Port: $port | Host: $hostAddress | PIN: $pin" -ForegroundColor Cyan
-Write-Host "=================================================" -ForegroundColor Cyan
-
-# 2. Discover zrok executable
-$zrokCmd = Get-Command "zrok" -ErrorAction SilentlyContinue
-if (-not $zrokCmd) {
-    $zrokCmd = Get-Command "zrok2" -ErrorAction SilentlyContinue
-}
-if (-not $zrokCmd) {
-    $possiblePaths = @(
-        "C:\scrcpy-win64-v2.4\zrok2.exe",
-        "$env:LOCALAPPDATA\Programs\zrok\zrok.exe",
-        "C:\Program Files\zrok\zrok.exe"
-    )
-    foreach ($p in $possiblePaths) {
-        if (Test-Path $p) {
-            $zrokBinary = $p
-            break
+function Test-ServerHealthy {
+    param([string]$ServerScheme, [string]$ServerPort)
+    if ($ServerScheme -eq "https") {
+        $client = New-Object System.Net.Sockets.TcpClient
+        try {
+            $iar = $client.BeginConnect("127.0.0.1", [int]$ServerPort, $null, $null)
+            if (-not $iar.AsyncWaitHandle.WaitOne(1000)) {
+                return $false
+            }
+            $client.EndConnect($iar)
+            return $true
+        } catch {
+            return $false
+        } finally {
+            $client.Close()
         }
     }
+    try {
+        $res = Invoke-WebRequest -Uri "http://127.0.0.1:$ServerPort/health" -TimeoutSec 1 -UseBasicParsing -ErrorAction Stop
+        return ($res.StatusCode -eq 200)
+    } catch {
+        return $false
+    }
+}
+
+function Get-LanAddresses {
+    try {
+        return @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
+            Where-Object { $_.IPAddress -match '^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)' } |
+            ForEach-Object { $_.IPAddress })
+    } catch {
+        return @()
+    }
+}
+
+function Show-TerminalQr {
+    param([string]$Url)
+    try {
+        node -e "import('qrcode-terminal').then(q => q.default.generate(process.argv[1], { small: true }))" "$Url"
+    } catch {
+        Write-Warning "Could not render terminal QR code."
+    }
+}
+
+# A user-supplied certificate (HTTPS_CERT_PATH / HTTPS_KEY_PATH in .env) is honoured only without the
+# tunnel, because zrok proxies plain HTTP to the local server.
+if (-not $LocalOnly) {
+    $env:HTTPS_CERT_PATH = $null
+    $env:HTTPS_KEY_PATH = $null
+}
+$scheme = if ($env:HTTPS_CERT_PATH -and $env:HTTPS_KEY_PATH) { "https" } else { "http" }
+$targetUrl = "${scheme}://127.0.0.1:$port"
+
+Write-Host "=================================================" -ForegroundColor Cyan
+if ($LocalOnly) {
+    Write-Host " LAN Camera Streaming (local only, no zrok)" -ForegroundColor Green
 } else {
-    $zrokBinary = $zrokCmd.Source
+    Write-Host " LAN Camera Streaming & zrok Public Tunnel" -ForegroundColor Green
 }
+Write-Host " Port: $port | Host: $hostAddress | PIN: $pin | Scheme: $scheme" -ForegroundColor Cyan
+Write-Host "=================================================" -ForegroundColor Cyan
 
-if (-not $zrokBinary) {
-    Write-Error "zrok executable was not found. Please install zrok or add it to PATH."
-    exit 1
-}
-
-# 3. Enable zrok environment if needed
-if ($zrokToken) {
-    $statusOut = cmd /c "`"$zrokBinary`" status 2>&1"
-    $statusStr = $statusOut -join "`n"
-    if ($statusStr -match "Account Token" -and $statusStr -match "<<SET>>") {
-        Write-Host "zrok environment is already enabled." -ForegroundColor Green
+$zrokBinary = $null
+if (-not $LocalOnly) {
+    # 2. Discover zrok executable
+    $zrokCmd = Get-Command "zrok" -ErrorAction SilentlyContinue
+    if (-not $zrokCmd) {
+        $zrokCmd = Get-Command "zrok2" -ErrorAction SilentlyContinue
+    }
+    if (-not $zrokCmd) {
+        $possiblePaths = @(
+            "C:\scrcpy-win64-v2.4\zrok2.exe",
+            "$env:LOCALAPPDATA\Programs\zrok\zrok.exe",
+            "C:\Program Files\zrok\zrok.exe"
+        )
+        foreach ($p in $possiblePaths) {
+            if (Test-Path $p) {
+                $zrokBinary = $p
+                break
+            }
+        }
     } else {
-        Write-Host "Enabling zrok environment with configured ZROK_TOKEN..." -ForegroundColor Cyan
-        cmd /c "`"$zrokBinary`" enable $zrokToken --headless"
+        $zrokBinary = $zrokCmd.Source
+    }
+
+    if (-not $zrokBinary) {
+        Write-Error "zrok executable was not found. Please install zrok or add it to PATH."
+        exit 1
+    }
+
+    # 3. Enable zrok environment if needed
+    if ($zrokToken) {
+        $statusOut = cmd /c "`"$zrokBinary`" status 2>&1"
+        $statusStr = $statusOut -join "`n"
+        if ($statusStr -match "Account Token" -and $statusStr -match "<<SET>>") {
+            Write-Host "zrok environment is already enabled." -ForegroundColor Green
+        } else {
+            Write-Host "Enabling zrok environment with configured ZROK_TOKEN..." -ForegroundColor Cyan
+            cmd /c "`"$zrokBinary`" enable $zrokToken --headless"
+        }
     }
 }
 
 # 4. Check if port is already running Node server or needs spawning
 $serverProcess = $null
-$isHealthy = $false
-try {
-    $res = Invoke-WebRequest -Uri "$targetUrl/health" -TimeoutSec 1 -UseBasicParsing -ErrorAction Stop
-    if ($res.StatusCode -eq 200) {
-        $isHealthy = $true
-        Write-Host "Node.js server is already running on $targetUrl." -ForegroundColor Green
-    }
-} catch {
-    $isHealthy = $false
+$isHealthy = Test-ServerHealthy -ServerScheme $scheme -ServerPort $port
+if ($isHealthy) {
+    Write-Host "Node.js server is already running on $targetUrl." -ForegroundColor Green
 }
 
 if (-not $isHealthy) {
@@ -94,19 +181,55 @@ if (-not $isHealthy) {
     $projectRoot = $PSScriptRoot
     $serverProcess = Start-Process -FilePath "node" -ArgumentList "src/server/index.js" -WorkingDirectory $projectRoot -PassThru -NoNewWindow
 
-    # Wait for server /health to respond (up to 10 seconds)
+    # Wait for server to respond (up to 10 seconds)
     $attempts = 0
     while ($attempts -lt 20) {
         Start-Sleep -Milliseconds 500
         $attempts++
-        try {
-            $check = Invoke-WebRequest -Uri "$targetUrl/health" -TimeoutSec 1 -UseBasicParsing -ErrorAction Stop
-            if ($check.StatusCode -eq 200) {
-                Write-Host "Node.js server verified healthy ($targetUrl)." -ForegroundColor Green
-                break
-            }
-        } catch {}
+        if (Test-ServerHealthy -ServerScheme $scheme -ServerPort $port) {
+            Write-Host "Node.js server verified healthy ($targetUrl)." -ForegroundColor Green
+            break
+        }
     }
+}
+
+# 4b. Local-only mode: no zrok, print LAN URLs and exit when the server stops
+if ($LocalOnly) {
+    $lanAddresses = Get-LanAddresses
+    Write-Host ""
+    Write-Host "=================================================" -ForegroundColor Cyan
+    Write-Host " LOCAL MODE - no zrok traffic" -ForegroundColor Green
+    Write-Host "=================================================" -ForegroundColor Cyan
+    Write-Host "Viewer on this PC: ${scheme}://localhost:$port/viewer" -ForegroundColor Yellow
+    foreach ($addr in $lanAddresses) {
+        Write-Host "Sender on phone:   ${scheme}://${addr}:$port/sender" -ForegroundColor Cyan
+    }
+    if ($lanAddresses.Count -eq 0) {
+        Write-Warning "No private LAN IPv4 address was found. Check that this PC is connected to Wi-Fi/Ethernet."
+    } else {
+        Write-Host ""
+        Show-TerminalQr -Url "${scheme}://$($lanAddresses[0]):$port/sender"
+    }
+    if ($scheme -eq "http") {
+        Write-Warning "Phone browsers block the camera on plain HTTP. On the phone open chrome://flags/#unsafely-treat-insecure-origin-as-secure, add the sender URL above, enable it and relaunch Chrome."
+    }
+    Write-Host ""
+    Write-Host "If the phone cannot open the URL, allow Node.js through Windows Firewall on your Private network." -ForegroundColor Yellow
+
+    if ($serverProcess) {
+        Write-Host "Press Ctrl+C to stop the server." -ForegroundColor Yellow
+        try {
+            Wait-Process -Id $serverProcess.Id
+        } finally {
+            if (-not $serverProcess.HasExited) {
+                Write-Host "Stopping background Node.js server (PID: $($serverProcess.Id))..." -ForegroundColor Cyan
+                Stop-Process -Id $serverProcess.Id -Force -ErrorAction SilentlyContinue
+            }
+        }
+    } else {
+        Write-Host "Server was already running; nothing to supervise." -ForegroundColor Yellow
+    }
+    exit 0
 }
 
 # 5. Pre-flight cleanup of any stale shares
@@ -169,14 +292,11 @@ $senderDisplayUrl = "$displayUrl/sender"
 
 Write-Host "Public Stream URL: $displayUrl" -ForegroundColor Yellow
 Write-Host "Sender URL:        $senderDisplayUrl" -ForegroundColor Cyan
+Write-Host "Viewer on this PC: http://localhost:$port/viewer  (no zrok traffic)" -ForegroundColor Yellow
 Write-Host ""
 
 # Generate ASCII QR Code in terminal using node qrcode-terminal
-try {
-    node -e "import('qrcode-terminal').then(q => q.default.generate(process.argv[1], { small: true }))" "$senderDisplayUrl"
-} catch {
-    Write-Warning "Could not render terminal QR code."
-}
+Show-TerminalQr -Url $senderDisplayUrl
 
 Write-Host ""
 Write-Host "Press Ctrl+C to terminate both zrok tunnel and server." -ForegroundColor Yellow

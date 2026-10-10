@@ -234,6 +234,37 @@ video {
   color: #93c5fd;
 }
 
+.path-indicator {
+  display: none;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin: 12px 0;
+}
+
+.path-indicator.visible {
+  display: block;
+}
+
+.path-indicator.path-lan {
+  background-color: rgba(16, 185, 129, 0.15);
+  border: 1px solid var(--success);
+  color: #6ee7b7;
+}
+
+.path-indicator.path-internet {
+  background-color: rgba(59, 130, 246, 0.15);
+  border: 1px solid var(--primary);
+  color: #93c5fd;
+}
+
+.path-indicator.path-relay {
+  background-color: rgba(250, 204, 21, 0.15);
+  border: 1px solid #facc15;
+  color: #fde68a;
+}
+
 .diagnostics-panel {
   background-color: #090d16;
   border: 1px solid var(--border);

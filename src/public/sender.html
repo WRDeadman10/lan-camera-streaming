@@ -37,8 +37,12 @@
           <label for="mediaMode">Media Transport Mode</label>
           <select id="mediaMode">
             <option value="webrtc" selected>WebRTC — Direct/ICE media (Low Latency P2P)</option>
-            <option value="tunnel-relay">Experimental — Video through zrok (Application Relay)</option>
+            <option value="tunnel-relay">Fallback — Video through zrok (uses zrok quota)</option>
           </select>
+        </div>
+
+        <div id="tunnelQuotaWarning" class="alert alert-info visible" style="display: none; margin-bottom: 16px;">
+          This mode sends every video frame through the zrok tunnel and consumes your daily zrok transfer quota. Use it only if WebRTC cannot connect on your network.
         </div>
 
         <div id="tunnelConfigPanel" style="display: none; padding: 12px; margin-bottom: 16px; background-color: #0b1120; border-radius: 6px; border: 1px dashed var(--border);">
@@ -112,10 +116,18 @@
         </div>
       </div>
 
+      <div class="card" id="localViewerCard" style="display: none; border-color: var(--success);">
+        <h2>🖥️ Open Viewer on the PC (no zrok traffic)</h2>
+        <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 12px;">
+          Open this link in a browser on the Windows PC running the server. The video travels directly from this phone to the PC over Wi-Fi.
+        </p>
+        <a id="localViewerLink" href="#" target="_blank" style="color: var(--primary); font-family: monospace; font-size: 0.85rem; word-break: break-all;"></a>
+      </div>
+
       <div class="card" id="pythonLinkCard" style="display: none; border-color: var(--primary);">
         <h2>🐍 Direct Python Inference Stream</h2>
         <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 12px;">
-          Use this direct URL in Python with OpenCV (<code>cv2.VideoCapture</code>) or PyTorch/YOLO:
+          Use this direct URL in Python with OpenCV (<code>cv2.VideoCapture</code>) or PyTorch/YOLO. Frames are uploaded from this device only while a client is connected, and travel through the server (and zrok, if this page was opened through it).
         </p>
         <div style="display: flex; gap: 8px;">
           <input type="text" id="pythonStreamUrl" readonly style="font-family: monospace; background-color: #050811;">
@@ -131,6 +143,8 @@
             <span id="statusText">Stopped</span>
           </span>
         </div>
+
+        <div id="pathIndicator" class="path-indicator" role="status"></div>
 
         <div class="video-container">
           <video id="localVideo" autoplay playsinline muted></video>

@@ -4,7 +4,7 @@
  * and WebRTC peer connection to viewer.
  */
 
-import { showError, clearError, showInfo, clearInfo, updateStatus, logDiagnostic, parseCandidateSummary, setupDiagnosticsControls } from './ui-utils.js';
+import { showError, clearError, showInfo, clearInfo, updateStatus, logDiagnostic, parseCandidateSummary, setupDiagnosticsControls, setPathIndicator, describePath, isLocalHostname, fetchLocalServerOrigin } from './ui-utils.js';
 import { CameraManager } from './camera-manager.js';
 import { WebRtcPeer } from './webrtc-peer.js';
 
@@ -23,6 +23,12 @@ let tunnelBytesSent = 0;
 let tunnelEncodeTimes = [];
 let cachedIceServers = null;
 let pendingRemoteCandidates = [];
+let mjpegIsEncoding = false;
+let lastLoggedPathKind = null;
+
+const MjpegMaxWidth = 1280;
+const MjpegMaxFrameBytes = 900000;
+const TunnelMaxFrameBytes = 600000;
 
 const mjpegCanvas = document.createElement('canvas');
 const mjpegContext = mjpegCanvas.getContext('2d');
@@ -51,11 +57,18 @@ const viewerQrLink = document.getElementById('viewerQrLink');
 const pythonLinkCard = document.getElementById('pythonLinkCard');
 const pythonStreamUrl = document.getElementById('pythonStreamUrl');
 const btnCopyPythonUrl = document.getElementById('btnCopyPythonUrl');
+const localViewerCard = document.getElementById('localViewerCard');
+const localViewerLink = document.getElementById('localViewerLink');
+const tunnelQuotaWarning = document.getElementById('tunnelQuotaWarning');
 
 if (mediaModeSelect) {
   mediaModeSelect.addEventListener('change', () => {
+    const isTunnelMode = mediaModeSelect.value === 'tunnel-relay';
     if (tunnelConfigPanel) {
-      tunnelConfigPanel.style.display = mediaModeSelect.value === 'tunnel-relay' ? 'block' : 'none';
+      tunnelConfigPanel.style.display = isTunnelMode ? 'block' : 'none';
+    }
+    if (tunnelQuotaWarning) {
+      tunnelQuotaWarning.style.display = isTunnelMode ? 'block' : 'none';
     }
   });
 }
@@ -231,6 +244,8 @@ async function startSession() {
       })
       .catch(() => {});
 
+    showLocalViewerLink(roomId);
+
     // Display Direct Python Stream Link
     const streamUrl = `${window.location.origin}/stream/${roomId}?pin=${encodeURIComponent(pin)}`;
     if (pythonStreamUrl) {
@@ -239,10 +254,7 @@ async function startSession() {
     if (pythonLinkCard) {
       pythonLinkCard.style.display = 'block';
     }
-    logDiagnostic(`Python stream available at: ${streamUrl}`);
-
-    // Start sending MJPEG frames for Python consumers
-    startMjpegFrameLoop();
+    logDiagnostic(`Python stream available at: ${streamUrl} (frames are uploaded only while a client is connected to it)`);
 
     if (currentMediaMode === 'tunnel-relay') {
       logDiagnostic('Operating in Mode B: Experimental zrok-tunneled binary video.');
@@ -263,6 +275,23 @@ async function startSession() {
       }
     }
   });
+}
+
+async function showLocalViewerLink(roomId) {
+  if (!localViewerCard || !localViewerLink) {
+    return;
+  }
+  const localOrigin = await fetchLocalServerOrigin();
+  if (!localOrigin || roomId !== currentRoomId) {
+    return;
+  }
+  const localViewerUrl = `${localOrigin}/viewer?room=${encodeURIComponent(roomId)}`;
+  localViewerLink.href = localViewerUrl;
+  localViewerLink.textContent = localViewerUrl;
+  localViewerCard.style.display = 'block';
+  if (!isLocalHostname(window.location.hostname)) {
+    logDiagnostic('[HINT] Open the viewer on the PC via the localhost link above so only the phone page and signaling use zrok.', 'INFO');
+  }
 }
 
 function createSenderPeer(iceServers) {
@@ -316,11 +345,11 @@ function createSenderPeer(iceServers) {
         logDiagnostic('[ICE] ✓ WebRTC media connection established successfully!', 'INFO');
       } else if (state === 'failed') {
         logDiagnostic('[ICE] ❌ ICE connection failed! Direct P2P media could not connect.', 'ERROR');
-        logDiagnostic('[DIAGNOSIS] Why does WebRTC fail between Android & Windows on the same Wi-Fi?', 'WARN');
-        logDiagnostic('1. Wi-Fi client isolation or Windows Firewall blocking inbound peer UDP packets.', 'WARN');
-        logDiagnostic('2. Router lacks NAT Loopback / Hairpinning to loop STUN srflx UDP packets on same LAN.', 'WARN');
-        logDiagnostic('3. Android mDNS host candidate (.local) could not be resolved across local network.', 'WARN');
-        logDiagnostic('💡 FIX: Switch Media Transport Mode to "Experimental — Video through zrok" (Mode B) in the dropdown above, which routes frames reliably through the server WebSocket!', 'INFO');
+        logDiagnostic('[DIAGNOSIS] Most likely causes on the same Wi-Fi:', 'WARN');
+        logDiagnostic('1. Router "AP / client isolation" (or a guest network) blocks phone-to-PC traffic.', 'WARN');
+        logDiagnostic('2. Windows Firewall blocks inbound UDP for the viewer browser (Wi-Fi profile set to Public).', 'WARN');
+        logDiagnostic('3. A VPN or virtual adapter on the PC hides the real LAN route.', 'WARN');
+        logDiagnostic('LAST RESORT: switch Media Transport Mode to "Fallback - Video through zrok" (Mode B). It works anywhere but consumes zrok quota.', 'INFO');
       }
     }
   });
@@ -380,6 +409,16 @@ function setupSocketListeners() {
     logDiagnostic(`[SOCKET] Connection error: ${err.message}`, 'ERROR');
   });
 
+  socket.on('mjpeg:demand', (data) => {
+    if (data && data.active) {
+      logDiagnostic('[MJPEG] Python/HTTP consumer connected - uploading JPEG frames.', 'INFO');
+      startMjpegFrameLoop();
+    } else {
+      logDiagnostic('[MJPEG] No Python/HTTP consumer - frame upload paused.', 'INFO');
+      stopMjpegFrameLoop();
+    }
+  });
+
   socket.on('peer:joined', async (data) => {
     logDiagnostic(`[ROOM] Viewer joined (${data.peerId}) [mode: ${data.mediaMode || currentMediaMode}].`, 'INFO');
     if (currentMediaMode === 'tunnel-relay') {
@@ -436,6 +475,8 @@ function setupSocketListeners() {
     logDiagnostic('[ROOM] Viewer left the room.', 'INFO');
     updateStatus('waiting', 'Viewer Left. Waiting...');
     stopStatsPolling();
+    setPathIndicator(null);
+    lastLoggedPathKind = null;
     pendingRemoteCandidates = [];
     if (webrtcPeer) {
       webrtcPeer.close();
@@ -460,6 +501,14 @@ function startStatsPolling() {
         const res = stats.frameWidth ? ` (${stats.frameWidth}x${stats.frameHeight})` : '';
         logDiagnostic(`[STATS] Pair: ${pairInfo} | RTT: ${stats.rtt} | Outbound: ${fps}${res}`, 'INFO');
       }
+      if (stats && stats.pathKind) {
+        setPathIndicator(stats.pathKind);
+        if (stats.pathKind !== lastLoggedPathKind) {
+          lastLoggedPathKind = stats.pathKind;
+          const description = describePath(stats.pathKind);
+          logDiagnostic(`[PATH] ${description ? description.text : stats.pathKind}`, stats.pathKind === 'lan' ? 'INFO' : 'WARN');
+        }
+      }
     }
   }, 4000);
 }
@@ -473,14 +522,17 @@ function stopStatsPolling() {
 
 function startMjpegFrameLoop() {
   stopMjpegFrameLoop();
-  // Capture frame every 66ms (~15 FPS) for Python inference stream
+  // Capture frame every 66ms (~15 FPS), only while an HTTP/Python consumer is connected
   mjpegInterval = setInterval(() => {
-    if (!socket || !localVideo || !cameraManager.currentStream || localVideo.readyState < 2) {
+    if (!socket || !localVideo || !cameraManager.currentStream || localVideo.readyState < 2 || mjpegIsEncoding) {
       return;
     }
 
-    const videoWidth = localVideo.videoWidth || 640;
-    const videoHeight = localVideo.videoHeight || 480;
+    const sourceWidth = localVideo.videoWidth || 640;
+    const sourceHeight = localVideo.videoHeight || 480;
+    const scale = Math.min(1, MjpegMaxWidth / sourceWidth);
+    const videoWidth = Math.round(sourceWidth * scale);
+    const videoHeight = Math.round(sourceHeight * scale);
 
     // Resize canvas if dimensions changed
     if (mjpegCanvas.width !== videoWidth || mjpegCanvas.height !== videoHeight) {
@@ -488,13 +540,23 @@ function startMjpegFrameLoop() {
       mjpegCanvas.height = videoHeight;
     }
 
+    mjpegIsEncoding = true;
     mjpegContext.drawImage(localVideo, 0, 0, videoWidth, videoHeight);
     mjpegCanvas.toBlob((blob) => {
-      if (blob && socket) {
-        blob.arrayBuffer().then((buffer) => {
-          socket.emit('mjpeg:frame', buffer);
-        }).catch(() => {});
+      if (!blob || !socket) {
+        mjpegIsEncoding = false;
+        return;
       }
+      blob.arrayBuffer().then((buffer) => {
+        if (buffer.byteLength <= MjpegMaxFrameBytes) {
+          socket.emit('mjpeg:frame', buffer);
+        } else {
+          logDiagnostic(`[MJPEG] Skipped oversized frame (${Math.round(buffer.byteLength / 1024)} KB).`, 'WARN');
+        }
+        mjpegIsEncoding = false;
+      }).catch(() => {
+        mjpegIsEncoding = false;
+      });
     }, 'image/jpeg', 0.7);
   }, 66);
 }
@@ -504,6 +566,7 @@ function stopMjpegFrameLoop() {
     clearInterval(mjpegInterval);
     mjpegInterval = null;
   }
+  mjpegIsEncoding = false;
 }
 
 function startTunnelFrameLoop() {
@@ -550,9 +613,13 @@ function startTunnelFrameLoop() {
 
       if (blob && socket) {
         blob.arrayBuffer().then((buffer) => {
-          socket.emit('tunnel:frame', buffer);
-          tunnelFramesSent += 1;
-          tunnelBytesSent += buffer.byteLength;
+          if (buffer.byteLength > TunnelMaxFrameBytes) {
+            logDiagnostic(`[Tunnel] Skipped frame of ${Math.round(buffer.byteLength / 1024)} KB (limit ${Math.round(TunnelMaxFrameBytes / 1024)} KB). Lower the tunnel resolution or JPEG quality.`, 'WARN');
+          } else {
+            socket.emit('tunnel:frame', buffer);
+            tunnelFramesSent += 1;
+            tunnelBytesSent += buffer.byteLength;
+          }
           tunnelIsEncoding = false;
         }).catch(() => {
           tunnelIsEncoding = false;
@@ -600,6 +667,11 @@ function stopSession() {
   if (shareQrCard) {
     shareQrCard.style.display = 'none';
   }
+  if (localViewerCard) {
+    localViewerCard.style.display = 'none';
+  }
+  setPathIndicator(null);
+  lastLoggedPathKind = null;
 
   if (socket) {
     socket.emit('stream:state', { state: 'stopped' });

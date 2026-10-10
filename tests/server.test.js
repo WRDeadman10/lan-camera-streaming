@@ -30,6 +30,47 @@ test('loadConfig throws on invalid PORT', () => {
   }, /Invalid configuration: expected integer between 1 and 65535/);
 });
 
+test('loadConfig requires HTTPS certificate and key together', () => {
+  assert.throws(() => {
+    loadConfig({ HTTPS_CERT_PATH: 'certs/lan.pem' });
+  }, /HTTPS_CERT_PATH and HTTPS_KEY_PATH must be set together/);
+
+  const httpConfig = loadConfig({});
+  assert.equal(httpConfig.useHttps, false);
+
+  const httpsConfig = loadConfig({ HTTPS_CERT_PATH: 'certs/lan.pem', HTTPS_KEY_PATH: 'certs/lan-key.pem' });
+  assert.equal(httpsConfig.useHttps, true);
+});
+
+test('createServer fails with an actionable error when HTTPS files are missing', () => {
+  const config = loadConfig({
+    HTTPS_CERT_PATH: 'certs/does-not-exist.pem',
+    HTTPS_KEY_PATH: 'certs/does-not-exist-key.pem'
+  });
+  const logger = new Logger('error');
+  assert.throws(() => {
+    createServer(config, logger);
+  }, /Failed to read HTTPS certificate or key/);
+});
+
+test('createServer exposes only scheme and port on /api/network-info', async () => {
+  const config = loadConfig({ PORT: '3002' });
+  const logger = new Logger('error');
+  const { httpServer } = createServer(config, logger);
+
+  await new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+  const address = httpServer.address();
+
+  try {
+    const res = await fetch(`http://127.0.0.1:${address.port}/api/network-info`);
+    assert.equal(res.status, 200);
+    const json = await res.json();
+    assert.deepEqual(json, { protocol: 'http', port: 3002 });
+  } finally {
+    await new Promise((resolve) => httpServer.close(resolve));
+  }
+});
+
 test('createServer responds to /health and /api/config', async () => {
   const config = loadConfig({ PORT: '3001' });
   const logger = new Logger('error');

@@ -85,6 +85,61 @@ export function parseCandidateSummary(cand) {
   return `${type} via ${proto} (${addressInfo})`;
 }
 
+const PATH_DESCRIPTIONS = {
+  lan: { text: 'LAN direct - video stays on your network, 0 bytes through zrok', className: 'path-lan' },
+  internet: { text: 'Direct over the internet (STUN) - video does not use zrok', className: 'path-internet' },
+  relay: { text: 'TURN relay - video goes through the TURN server, not zrok', className: 'path-relay' }
+};
+
+export function describePath(pathKind) {
+  return PATH_DESCRIPTIONS[pathKind] || null;
+}
+
+export function setPathIndicator(pathKind) {
+  const el = document.getElementById('pathIndicator');
+  const description = describePath(pathKind);
+  if (!el) {
+    return;
+  }
+  if (!description) {
+    el.textContent = '';
+    el.className = 'path-indicator';
+    return;
+  }
+  el.textContent = description.text;
+  el.className = `path-indicator visible ${description.className}`;
+}
+
+export function isLocalHostname(hostname) {
+  if (!hostname) {
+    return false;
+  }
+  const host = hostname.toLowerCase();
+  if (host === 'localhost' || host === '[::1]' || host.endsWith('.local') || host.endsWith('.localhost')) {
+    return true;
+  }
+  const match = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(host);
+  if (!match) {
+    return false;
+  }
+  const first = parseInt(match[1], 10);
+  const second = parseInt(match[2], 10);
+  return first === 127 || first === 10 || (first === 192 && second === 168) || (first === 172 && second >= 16 && second <= 31);
+}
+
+export async function fetchLocalServerOrigin() {
+  try {
+    const res = await fetch('/api/network-info');
+    if (!res.ok) {
+      return null;
+    }
+    const data = await res.json();
+    return `${data.protocol}://localhost:${data.port}`;
+  } catch (err) {
+    return null;
+  }
+}
+
 export function setupDiagnosticsControls(copyBtnId, clearBtnId, logElementId = 'diagnosticsLog') {
   const copyBtn = document.getElementById(copyBtnId);
   const clearBtn = document.getElementById(clearBtnId);

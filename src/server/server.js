@@ -4,7 +4,9 @@
  */
 
 import express from 'express';
+import fs from 'node:fs';
 import http from 'node:http';
+import https from 'node:https';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import QRCode from 'qrcode';
@@ -12,9 +14,25 @@ import QRCode from 'qrcode';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+function createHttpServer(app, config) {
+  if (!config.useHttps) {
+    return http.createServer(app);
+  }
+
+  let cert = null;
+  let key = null;
+  try {
+    cert = fs.readFileSync(config.httpsCertPath);
+    key = fs.readFileSync(config.httpsKeyPath);
+  } catch (err) {
+    throw new Error(`Failed to read HTTPS certificate or key (${err.message}). Fix HTTPS_CERT_PATH / HTTPS_KEY_PATH or leave both empty.`);
+  }
+  return https.createServer({ cert, key }, app);
+}
+
 export function createServer(config, logger) {
   const app = express();
-  const httpServer = http.createServer(app);
+  const httpServer = createHttpServer(app, config);
 
   if (config.trustProxy) {
     app.set('trust proxy', 1);
@@ -41,6 +59,15 @@ export function createServer(config, logger) {
   app.get('/api/config', (req, res) => {
     res.status(200).json({
       iceServers: config.iceServers
+    });
+  });
+
+  // Scheme and port of this server, used by clients to build a "localhost" viewer link.
+  // Deliberately excludes LAN IP addresses: this route is reachable through the public tunnel.
+  app.get('/api/network-info', (req, res) => {
+    res.status(200).json({
+      protocol: config.useHttps ? 'https' : 'http',
+      port: config.port
     });
   });
 
@@ -85,7 +112,7 @@ export function createServer(config, logger) {
   });
 
   // Single JPEG frame snapshot endpoint
-  app.get('/snapshot/:roomId', (req, res) => {
+  app.get('/snapshot/:roomId', async (req, res) => {
     const { roomId } = req.params;
     const pin = req.query.pin;
 
@@ -99,18 +126,23 @@ export function createServer(config, logger) {
       return;
     }
 
-    const frame = config.mjpegStreamer.latestFrames.get(roomId);
-    if (!frame) {
-      res.status(404).send('No frame available yet for this room');
-      return;
-    }
+    try {
+      const frame = await config.mjpegStreamer.getFreshFrame(roomId);
+      if (!frame) {
+        res.status(404).send('No frame available for this room (is the sender streaming?)');
+        return;
+      }
 
-    res.writeHead(200, {
-      'Content-Type': 'image/jpeg',
-      'Content-Length': frame.length,
-      'Cache-Control': 'no-cache'
-    });
-    res.end(frame);
+      res.writeHead(200, {
+        'Content-Type': 'image/jpeg',
+        'Content-Length': frame.length,
+        'Cache-Control': 'no-cache'
+      });
+      res.end(frame);
+    } catch (err) {
+      logger.error(`Snapshot request failed for room "${roomId}": ${err.message}`);
+      res.status(500).send('Snapshot failed');
+    }
   });
 
   // Static files directory

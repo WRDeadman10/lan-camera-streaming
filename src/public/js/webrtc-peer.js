@@ -4,6 +4,38 @@
  * ICE candidates, stats collection, and stream attachment.
  */
 
+export function isPrivateAddress(address) {
+  if (!address) {
+    return false;
+  }
+  const host = address.toLowerCase();
+  if (host.endsWith('.local')) {
+    return true;
+  }
+  if (host.includes(':')) {
+    return host === '::1' || host.startsWith('fe80:') || host.startsWith('fc') || host.startsWith('fd');
+  }
+  const match = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(host);
+  if (!match) {
+    return false;
+  }
+  const first = parseInt(match[1], 10);
+  const second = parseInt(match[2], 10);
+  return first === 10 || first === 127 || (first === 169 && second === 254) || (first === 192 && second === 168) || (first === 172 && second >= 16 && second <= 31);
+}
+
+export function classifyPath(localType, localIp, remoteType, remoteIp) {
+  if (localType === 'relay' || remoteType === 'relay') {
+    return 'relay';
+  }
+  if (localType === 'srflx' || remoteType === 'srflx') {
+    return 'internet';
+  }
+  const localIsLan = !localIp || isPrivateAddress(localIp);
+  const remoteIsLan = !remoteIp || isPrivateAddress(remoteIp);
+  return localIsLan && remoteIsLan ? 'lan' : 'internet';
+}
+
 export class WebRtcPeer {
   constructor(config = {}) {
     this.iceServers = config.iceServers || [
@@ -152,6 +184,7 @@ export class WebRtcPeer {
         remoteCandidateType: null,
         localAddress: null,
         remoteAddress: null,
+        pathKind: null,
         protocol: null,
         rtt: null,
         bytesReceived: null,
@@ -161,19 +194,30 @@ export class WebRtcPeer {
         frameHeight: null
       };
 
+      let hasSelectedPair = false;
       stats.forEach((stat) => {
-        if (stat.type === 'candidate-pair' && (stat.state === 'succeeded' || stat.nominated === true)) {
+        const isSelectedPair = stat.type === 'candidate-pair' && stat.state === 'succeeded' && stat.nominated === true;
+        const isUsablePair = stat.type === 'candidate-pair' && (stat.state === 'succeeded' || stat.nominated === true);
+        if (isSelectedPair || (isUsablePair && !hasSelectedPair)) {
+          hasSelectedPair = hasSelectedPair || isSelectedPair;
           report.rtt = stat.currentRoundTripTime ? Math.round(stat.currentRoundTripTime * 1000) + ' ms' : null;
           const localCand = stats.get(stat.localCandidateId);
           const remoteCand = stats.get(stat.remoteCandidateId);
+          let localIp = null;
+          let remoteIp = null;
           if (localCand) {
+            localIp = localCand.ip || localCand.address || null;
             report.localCandidateType = localCand.candidateType;
-            report.localAddress = (localCand.ip || localCand.address || '?') + ':' + (localCand.port || '?');
+            report.localAddress = (localIp || '?') + ':' + (localCand.port || '?');
             report.protocol = localCand.protocol ? localCand.protocol.toUpperCase() : null;
           }
           if (remoteCand) {
+            remoteIp = remoteCand.ip || remoteCand.address || null;
             report.remoteCandidateType = remoteCand.candidateType;
-            report.remoteAddress = (remoteCand.ip || remoteCand.address || '?') + ':' + (remoteCand.port || '?');
+            report.remoteAddress = (remoteIp || '?') + ':' + (remoteCand.port || '?');
+          }
+          if (localCand && remoteCand) {
+            report.pathKind = classifyPath(report.localCandidateType, localIp, report.remoteCandidateType, remoteIp);
           }
         }
 

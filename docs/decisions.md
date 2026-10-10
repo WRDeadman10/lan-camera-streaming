@@ -168,6 +168,21 @@ Eliminating candidate drops ensures all candidate pairs are evaluated. Detailed 
 **Consequences:**
 High-resolution camera sensors operate at their full optical fidelity. The terminal QR code reliably opens `https://lan.shares.zrok.io/sender`. Terminating `start.ps1` immediately releases the endpoint from the zrok cloud controller.
 
+## ADR-015 — Keep video off zrok: on-demand MJPEG, localhost viewer, optional local HTTPS
+
+**Status:** Accepted
+
+**Decision:**
+1. The sender uploads MJPEG frames (`mjpeg:frame`) only while the server reports demand (`mjpeg:demand { active }`): an open `/stream/:roomId` connection or a pending `/snapshot/:roomId`. The server also drops frames when there is no demand. Frames are capped at 1280 px width and 900 KB with one in-flight encode.
+2. The viewer on the Windows PC should be opened at `<scheme>://localhost:<port>/viewer` so it never touches zrok. `/api/network-info` returns only scheme and port (never LAN IPs, because the route is reachable through the public tunnel); LAN addresses are printed only in the local terminal by `start.ps1`.
+3. Mode B (tunnel relay) is a last-resort fallback and labelled as quota-consuming.
+4. The server can serve HTTPS directly (`HTTPS_CERT_PATH` + `HTTPS_KEY_PATH`). `start.ps1 -LocalOnly` runs without zrok over plain HTTP, or HTTPS with a user-supplied certificate. A bundled mkcert flow (CA install on every phone) was tried and removed: the zrok default already gives a trusted certificate with no phone setup. `start.ps1` is the only script in the repository; the former `scripts/` helpers were folded into it. In tunnel mode `start.ps1` forces plain HTTP because zrok proxies to an `http://127.0.0.1` target.
+5. The sender and viewer classify the nominated ICE pair as LAN direct / internet / TURN relay and show it in the UI.
+
+**Reasoning:** `startMjpegFrameLoop()` previously ran unconditionally after joining a room, uploading ~15 FPS JPEGs through Socket.IO (and therefore zrok) even in WebRTC mode with no consumer, which dominated quota use. WebRTC media is UDP and cannot traverse a zrok public share; on one Wi-Fi it flows host-to-host, so only the page and signaling need zrok. The earlier mDNS/NAT-hairpin explanation in ADR-013 is unlikely to apply to a host-host pair (a camera-permitted sender exposes real LAN IPs and ICE checks are bidirectional); the real blockers are AP/client isolation, Windows Firewall profile and VPN adapters. This is reasoned from browser behavior and not yet measured on the target network.
+
+**Consequences:** A Python/HTTP consumer connected to the zrok URL still pulls frames through zrok (by design, only while connected). Tunnel-free phone camera access needs either the Chrome insecure-origin flag or a user-supplied trusted certificate.
+
 ## Open decisions to revisit after the first working stream
 
 - Whether TypeScript should replace plain JavaScript for stricter types.

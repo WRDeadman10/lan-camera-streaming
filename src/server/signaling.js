@@ -21,6 +21,16 @@ export function setupSignaling(httpServer, config, logger) {
 
   const failedAttempts = new Map(); // socketId -> { count: number, blockedUntil: number }
 
+  // Tell the room's sender when MJPEG consumers appear or disappear so it uploads frames only on demand
+  if (config.mjpegStreamer) {
+    config.mjpegStreamer.onDemandChange = (roomId, active) => {
+      const room = roomManager.getRoom(roomId);
+      if (room && room.senderSocketId) {
+        io.to(room.senderSocketId).emit('mjpeg:demand', { active });
+      }
+    };
+  }
+
   io.on('connection', (socket) => {
     logger.debug(`Socket connected: ${socket.id}`);
 
@@ -64,6 +74,11 @@ export function setupSignaling(httpServer, config, logger) {
 
         if (typeof callback === 'function') {
           callback(result);
+        }
+
+        // A consumer may already be waiting on /stream/:roomId before the sender joins
+        if (result.role === 'sender' && config.mjpegStreamer && config.mjpegStreamer.hasDemand(roomId)) {
+          socket.emit('mjpeg:demand', { active: true });
         }
 
         // Notify client and peer if peer is present
@@ -199,7 +214,7 @@ export function setupSignaling(httpServer, config, logger) {
         return;
       }
 
-      if (!config.mjpegStreamer) {
+      if (!config.mjpegStreamer || !config.mjpegStreamer.hasDemand(membership.roomId)) {
         return;
       }
 
