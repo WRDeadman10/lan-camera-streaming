@@ -116,7 +116,7 @@ cmd /c "`"$zrokBinary`" delete share public:lan 2>&1" | Out-Null
 $overviewOut = cmd /c "`"$zrokBinary`" overview 2>&1"
 $overviewLines = $overviewOut -split "`n"
 foreach ($line in $overviewLines) {
-    if ($line -match "│\s+([a-z0-9]{10,16})\s+│\s+public\s+│\s+proxy\s+│\s+http://127\.0\.0\.1:$port") {
+    if ($line -match "http://127\.0\.0\.1:$port" -and $line -match "([a-z0-9]{10,16})") {
         $staleToken = $matches[1]
         Write-Host "Cleaning up stale share token '$staleToken'..." -ForegroundColor Yellow
         cmd /c "`"$zrokBinary`" delete share $staleToken 2>&1" | Out-Null
@@ -147,7 +147,7 @@ if ($zrokShareProcess.HasExited) {
         $ov = cmd /c "`"$zrokBinary`" overview 2>&1"
         $ovLines = $ov -split "`n"
         foreach ($l in $ovLines) {
-            if ($l -match "│\s+([a-z0-9]{10,16})\s+│\s+public\s+│\s+proxy\s+│\s+http://127\.0\.0\.1:$port") {
+            if ($l -match "http://127\.0\.0\.1:$port" -and $l -match "([a-z0-9]{10,16})") {
                 $activeShareToken = $matches[1]
                 $activeShareUrl = "https://$activeShareToken.shares.zrok.io"
                 break
@@ -173,8 +173,7 @@ Write-Host ""
 
 # Generate ASCII QR Code in terminal using node qrcode-terminal
 try {
-    $qrNodeCmd = "import('qrcode-terminal').then(q => q.default.generate('$senderDisplayUrl', { small: true }))"
-    node -e $qrNodeCmd
+    node -e "import('qrcode-terminal').then(q => q.default.generate(process.argv[1], { small: true }))" "$senderDisplayUrl"
 } catch {
     Write-Warning "Could not render terminal QR code."
 }
@@ -204,7 +203,7 @@ try {
     $ovAfter = cmd /c "`"$zrokBinary`" overview 2>&1"
     $ovAfterLines = $ovAfter -split "`n"
     foreach ($line in $ovAfterLines) {
-        if ($line -match "│\s+([a-z0-9]{10,16})\s+│\s+public\s+│\s+proxy\s+│\s+http://127\.0\.0\.1:$port") {
+        if ($line -match "http://127\.0\.0\.1:$port" -and $line -match "([a-z0-9]{10,16})") {
             $remToken = $matches[1]
             cmd /c "`"$zrokBinary`" delete share $remToken 2>&1" | Out-Null
         }
@@ -216,4 +215,5 @@ try {
     }
     Write-Host "Shutdown complete. Endpoints released." -ForegroundColor Green
 }
+
 

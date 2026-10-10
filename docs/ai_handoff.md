@@ -9,6 +9,8 @@
   - Stale random share tokens left over from previous runs (`8kp060ytibnq`, `xx777tmwbi5m`, `mele44v03uf1`) were cleaned up via `zrok2 delete share`.
 - **Automatic Dashboard Endpoint Release:**
   - `start.ps1` runs pre-flight and graceful teardown deallocation (`zrok2 delete share public:lan` and token cleanup), ensuring the zrok web console dashboard never retains dangling bound endpoints after terminating the application.
+  - Added standalone `scripts/release-zrok.ps1` for manual on-demand dashboard unbinding.
+  - Replaced non-ASCII Unicode box characters (`│`) with pure ASCII regex patterns in `start.ps1`, ensuring 100% compatibility with Windows PowerShell 5.1 and UTF-8/ANSI environments.
 - **Maximum / Full Camera Resolution:**
   - Added "🌟 Full Maximum Resolution (Native 4K / 1080p Sensor)" option to `/sender`, along with 1080p, 720p, and 480p tiers.
   - Supported "Native (Full Camera Resolution)" in Mode B (Tunnel Relay) without forced downscaling.
@@ -39,13 +41,14 @@
 
 ## Immediate next task
 
-Run `powershell -File start.ps1` to verify:
-1. Terminal ASCII QR code matches `https://lan.shares.zrok.io/sender`.
-2. Sender captures at full camera resolution (1080p/4K).
-3. Stopping with Ctrl+C cleanly releases the endpoint in the zrok cloud console dashboard.
+Run `powershell -File start.ps1`:
+1. Verify terminal ASCII QR code encodes `https://lan.shares.zrok.io/sender`.
+2. Connect mobile camera sender in Mode B (Application Relay) and verify full resolution.
+3. When stopping with Ctrl+C, verify all endpoints are released from the zrok cloud dashboard.
 
 ## Commands run & results
 
 - `npm test`: 18/18 tests passed.
-- All-in-one start: `powershell -File start.ps1` (launches Node server, displays terminal QR code for phone scan, and runs zrok tunnel with auto-deallocation).
+- All-in-one start: `powershell -File start.ps1` (verified clean start, QR rendering, and graceful deallocation).
+- Manual endpoint release: `powershell -File scripts/release-zrok.ps1` (verified clean unbinding).
 - Cloud cleanup test: `cmd /c "C:\scrcpy-win64-v2.4\zrok2.exe overview"` (verified 0 ghost shares).

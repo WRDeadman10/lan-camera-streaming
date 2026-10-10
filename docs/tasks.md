@@ -87,6 +87,8 @@ Use these checkboxes as the implementation source of truth. Move completed work 
 - [x] Bind public zrok tunnel explicitly to reserved namespace name `public:lan` (`lan.shares.zrok.io`).
 - [x] Fix terminal ASCII QR code generation to encode the exact active sender URL (`https://lan.shares.zrok.io/sender`).
 - [x] Implement pre-flight and graceful teardown share deallocation in `start.ps1` (`zrok2 delete share public:lan`) to release bound endpoints from zrok web dashboard.
+- [x] Create standalone `scripts/release-zrok.ps1` for one-click manual release of all zrok dashboard endpoints.
+- [x] Fix PowerShell 5.1 ANSI parsing errors by eliminating non-ASCII box-drawing characters from `start.ps1`.
 - [x] Add automated unit and integration tests covering binary frame relay and room mode isolation.
 
 ## P5 — Conditional / post-MVP
