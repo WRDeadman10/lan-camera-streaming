@@ -1,5 +1,11 @@
 # LAN Camera Streaming — AI Handoff
 
+## "Download Driver" returned a .txt (2026-10-12)
+
+- **Cause:** `/download/lancam-vcam` looked for the zip only at `<cwd>/dist/` and a bundle-relative path, so the exe started from `dist\` returned a 404 text message, which the `<a download>` link saved as `lancam-vcam.txt`.
+- **Fix:** the route now also checks next to the exe, `<exe>/dist/`, the cwd and `dist/`, and falls back to a copy of the zip embedded in the exe at build time (`scripts/build-embedded-assets.js`, so `build.bat` must build the zip before the exe, which it does). The link no longer has the `download` attribute. Test added (37/37).
+- **Verified:** the rebuilt exe (v1.0.17) returns the 68,270-byte zip (`PK`, three files) both from `dist\` and from an empty folder. The exe that was already running must be restarted to pick this up.
+
 ## Windows Camera app now sees the phone camera (2026-10-12) — ADR-023
 
 - **Why the user still got "We can't find your camera":** reinstalling the DirectShow driver could not help; the Camera app only lists kernel-streaming / Media Foundation cameras. Confirmed with the same enumeration API the Camera app uses (`Windows.Devices.Enumeration`, VideoCapture): 0 devices before.

@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { embeddedAssets } from '../src/server/embedded-assets.js';
 import { loadConfig } from '../src/server/config.js';
 import { Logger } from '../src/server/logger.js';
 import { createServer } from '../src/server/server.js';
@@ -117,6 +119,30 @@ test('Socket.IO browser client script is served while signaling is attached', as
     const body = await res.text();
     assert.ok(body.length > 50000);
     assert.match(body, /Socket\.IO/);
+  } finally {
+    await new Promise((resolve) => httpServer.close(resolve));
+  }
+});
+
+test('virtual camera driver zip is downloadable when it has been built', async (t) => {
+  const hasZip = fs.existsSync('dist/lancam-vcam-setup.zip') || Boolean(embeddedAssets['/download/lancam-vcam-setup.zip']);
+  if (!hasZip) {
+    t.skip('lancam-vcam-setup.zip has not been built (run build.bat)');
+    return;
+  }
+
+  const config = loadConfig({ PORT: '3005' });
+  const logger = new Logger('error');
+  const { httpServer } = createServer(config, logger);
+  await new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+  const address = httpServer.address();
+
+  try {
+    const res = await fetch(`http://127.0.0.1:${address.port}/download/lancam-vcam`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type'), /zip/);
+    const bytes = Buffer.from(await res.arrayBuffer());
+    assert.equal(bytes.subarray(0, 2).toString('latin1'), 'PK');
   } finally {
     await new Promise((resolve) => httpServer.close(resolve));
   }

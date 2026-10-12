@@ -56,6 +56,17 @@ const assetMap = {};
 if (!fs.existsSync(socketClientPath)) {
   throw new Error(`Socket.IO browser client not found at ${socketClientPath}. Run "npm install" first.`);
 }
+// The virtual camera installer zip (built by vcam/build.bat before this step in build.bat) is embedded too, so the
+// standalone exe can serve /download/lancam-vcam from any folder.
+const vcamZipPath = path.resolve(__dirname, '../dist/lancam-vcam-setup.zip');
+if (fs.existsSync(vcamZipPath)) {
+  files.push({
+    path: '/download/lancam-vcam-setup.zip',
+    mimeType: 'application/zip',
+    content: fs.readFileSync(vcamZipPath).toString('base64'),
+    isBinary: true
+  });
+}
 files.push({
   path: '/vendor/socket.io.js',
   mimeType: 'application/javascript; charset=utf-8',

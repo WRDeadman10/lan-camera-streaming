@@ -207,16 +207,31 @@ export function createServer(config, logger) {
 
   // Download virtual camera installer & DirectShow driver package
   app.get(['/download/lancam-vcam', '/download/lancam-vcam.zip'], (req, res) => {
+    const exeDir = path.dirname(process.execPath);
     const candidatePaths = [
+      path.join(exeDir, 'lancam-vcam-setup.zip'),
+      path.join(exeDir, 'dist', 'lancam-vcam-setup.zip'),
+      path.join(process.cwd(), 'lancam-vcam-setup.zip'),
       path.join(process.cwd(), 'dist', 'lancam-vcam-setup.zip'),
       path.resolve(__dirname, '../../dist/lancam-vcam-setup.zip')
     ];
     const zipPath = candidatePaths.find((p) => fs.existsSync(p));
     if (zipPath) {
       res.download(zipPath, 'lancam-vcam-setup.zip');
-    } else {
-      res.status(404).send('Virtual camera package not found. Run vcam/build.bat to build it.');
+      return;
     }
+
+    // The standalone exe carries a copy embedded at build time, so it works from any folder.
+    const embeddedZip = embeddedAssets ? embeddedAssets['/download/lancam-vcam-setup.zip'] : null;
+    if (embeddedZip) {
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', 'attachment; filename="lancam-vcam-setup.zip"');
+      res.send(Buffer.from(embeddedZip.content, 'base64'));
+      return;
+    }
+
+    logger.warn('Virtual camera package requested but lancam-vcam-setup.zip was not found next to the exe, in dist/, or embedded.');
+    res.status(404).send('Virtual camera package not found. Run build.bat to build it.');
   });
 
   // Static files directory: check filesystem locations, fallback to embedded assets
