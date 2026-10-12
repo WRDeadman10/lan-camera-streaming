@@ -145,23 +145,15 @@ export function createServer(config, logger) {
     config.mjpegStreamer.addSubscriber(roomId, res);
   });
 
-  // Local WebRTC Virtual Camera Shared-Memory Frame Bridge
-  let vcamBridgeClient = null;
-  function getVcamBridgeSocket() {
-    if (vcamBridgeClient && !vcamBridgeClient.destroyed) {
-      return vcamBridgeClient;
-    }
-    vcamBridgeClient = new net.Socket();
-    vcamBridgeClient.connect(7779, '127.0.0.1', () => {});
-    vcamBridgeClient.on('error', () => {
-      vcamBridgeClient = null;
-    });
-    return vcamBridgeClient;
-  }
+  // Local WebRTC Virtual Camera Frame Bridge
+  const activeVcamBridges = new Map(); // roomId -> timestamp
+  config.hasLocalVcamBridge = function(roomId) {
+    const lastSeen = activeVcamBridges.get(roomId);
+    return Boolean(lastSeen && (Date.now() - lastSeen < 3000));
+  };
 
-  app.post('/api/vcam/bridge-frame', express.raw({ type: 'application/octet-stream', limit: '10mb' }), (req, res) => {
-    const width = parseInt(req.query.w, 10) || 1280;
-    const height = parseInt(req.query.h, 10) || 720;
+  app.post('/api/vcam/bridge-frame', express.raw({ type: ['image/jpeg', 'application/octet-stream'], limit: '5mb' }), (req, res) => {
+    const roomId = req.query.room;
     const body = req.body;
 
     if (!body || !body.length) {
@@ -169,16 +161,11 @@ export function createServer(config, logger) {
       return;
     }
 
-    const sock = getVcamBridgeSocket();
-    if (sock && !sock.destroyed) {
-      const header = Buffer.alloc(12);
-      header.writeUInt32LE(width, 0);
-      header.writeUInt32LE(height, 4);
-      header.writeUInt32LE(body.length, 8);
-      try {
-        sock.write(header);
-        sock.write(body);
-      } catch (e) {}
+    if (roomId) {
+      activeVcamBridges.set(roomId, Date.now());
+      if (config.mjpegStreamer) {
+        config.mjpegStreamer.broadcastFrame(roomId, body);
+      }
     }
 
     res.status(200).send('OK');

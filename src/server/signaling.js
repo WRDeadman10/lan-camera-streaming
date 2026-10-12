@@ -25,6 +25,11 @@ export function setupSignaling(httpServer, config, logger) {
   // Tell the room's sender when MJPEG consumers appear or disappear so it uploads frames only on demand
   if (config.mjpegStreamer) {
     config.mjpegStreamer.onDemandChange = (roomId, active) => {
+      // If the local PC viewer is already actively streaming WebRTC frames into the bridge,
+      // never ask the phone camera to upload MJPEG frames
+      if (active && config.hasLocalVcamBridge && config.hasLocalVcamBridge(roomId)) {
+        return;
+      }
       const room = roomManager.getRoom(roomId);
       if (room && room.senderSocketId) {
         io.to(room.senderSocketId).emit('mjpeg:demand', { active });
@@ -79,7 +84,9 @@ export function setupSignaling(httpServer, config, logger) {
 
         // A consumer may already be waiting on /stream/:roomId before the sender joins
         if (result.role === 'sender' && config.mjpegStreamer && config.mjpegStreamer.hasDemand(roomId)) {
-          socket.emit('mjpeg:demand', { active: true });
+          if (!config.hasLocalVcamBridge || !config.hasLocalVcamBridge(roomId)) {
+            socket.emit('mjpeg:demand', { active: true });
+          }
         }
 
         // Notify client and peer if peer is present

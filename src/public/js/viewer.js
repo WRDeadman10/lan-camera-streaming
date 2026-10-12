@@ -55,43 +55,46 @@ const canvasContext = remoteCanvas ? remoteCanvas.getContext('2d') : null;
 
 setupPasswordToggle('btnTogglePin', 'accessPin');
 
+let isVcamPumping = false;
 let vcamPumpingInterval = null;
 const vcamCanvas = document.createElement('canvas');
 const vcamCtx = vcamCanvas.getContext('2d');
 
+function pumpVcamFrame() {
+  if (isVcamPumping) return;
+  if (!remoteVideo || remoteVideo.readyState < 2 || remoteVideo.paused || remoteVideo.ended) return;
+
+  const w = remoteVideo.videoWidth || 1280;
+  const h = remoteVideo.videoHeight || 720;
+  if (vcamCanvas.width !== w || vcamCanvas.height !== h) {
+    vcamCanvas.width = w;
+    vcamCanvas.height = h;
+  }
+
+  isVcamPumping = true;
+  vcamCtx.drawImage(remoteVideo, 0, 0, w, h);
+  vcamCanvas.toBlob((blob) => {
+    if (!blob) {
+      isVcamPumping = false;
+      return;
+    }
+
+    const roomId = currentRoomId || (roomIdInput && roomIdInput.value.trim());
+    fetch(`/api/vcam/bridge-frame?room=${encodeURIComponent(roomId)}&w=${w}&h=${h}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'image/jpeg' },
+      body: blob
+    })
+      .catch(() => {})
+      .finally(() => {
+        isVcamPumping = false;
+      });
+  }, 'image/jpeg', 0.82);
+}
+
 function startVcamFramePump() {
   if (vcamPumpingInterval) return;
-  vcamPumpingInterval = setInterval(() => {
-    if (!remoteVideo || remoteVideo.readyState < 2) return;
-    const w = remoteVideo.videoWidth || 1280;
-    const h = remoteVideo.videoHeight || 720;
-    if (vcamCanvas.width !== w || vcamCanvas.height !== h) {
-      vcamCanvas.width = w;
-      vcamCanvas.height = h;
-    }
-    vcamCtx.drawImage(remoteVideo, 0, 0, w, h);
-    const imgData = vcamCtx.getImageData(0, 0, w, h);
-    const rgba = imgData.data;
-
-    // Convert RGBA to RGB24 BGR format for DirectShow
-    const bgr = new Uint8Array(w * h * 3);
-    let sIdx = 0;
-    let dIdx = 0;
-    const totalPixels = w * h;
-    for (let i = 0; i < totalPixels; i++) {
-      bgr[dIdx] = rgba[sIdx + 2];     // B
-      bgr[dIdx + 1] = rgba[sIdx + 1]; // G
-      bgr[dIdx + 2] = rgba[sIdx];     // R
-      sIdx += 4;
-      dIdx += 3;
-    }
-
-    fetch(`/api/vcam/bridge-frame?w=${w}&h=${h}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/octet-stream' },
-      body: bgr
-    }).catch(() => {});
-  }, 33); // ~30 FPS
+  vcamPumpingInterval = setInterval(pumpVcamFrame, 33); // ~30 FPS with backpressure
 }
 
 if (btnSetWebcam) {
@@ -99,28 +102,30 @@ if (btnSetWebcam) {
     const roomId = currentRoomId || (roomIdInput && roomIdInput.value.trim());
     const pin = accessPinInput ? accessPinInput.value.trim() : '123456';
     const host = window.location.hostname || '127.0.0.1';
-    const port = window.location.port || '7777';
+    const port = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
 
     if (!roomId) {
       showError('Please join or enter a Room ID first.');
       return;
     }
 
-    // Start local WebRTC frame bridge pump
+    // Start lightweight local WebRTC frame bridge pump
     startVcamFramePump();
 
     const deeplink = `lancam://stream?room=${encodeURIComponent(roomId)}&pin=${encodeURIComponent(pin)}&host=${encodeURIComponent(host)}&port=${encodeURIComponent(port)}`;
     logDiagnostic(`[VCAM] Triggering DirectShow WebRTC webcam deeplink: ${deeplink}`, 'INFO');
 
-    // Trigger deeplink via hidden anchor or window.location
-    const tempA = document.createElement('a');
-    tempA.href = deeplink;
-    tempA.style.display = 'none';
-    document.body.appendChild(tempA);
-    tempA.click();
-    document.body.removeChild(tempA);
+    // Trigger deeplink via hidden iframe so the main page never unloads or disconnects WebRTC
+    let hiddenIframe = document.getElementById('lancam-deeplink-frame');
+    if (!hiddenIframe) {
+      hiddenIframe = document.createElement('iframe');
+      hiddenIframe.id = 'lancam-deeplink-frame';
+      hiddenIframe.style.display = 'none';
+      document.body.appendChild(hiddenIframe);
+    }
+    hiddenIframe.src = deeplink;
 
-    copyTextToClipboard(deeplink, btnSetWebcam, '✓ WebRTC Cam Linked!');
+    copyTextToClipboard(deeplink, btnSetWebcam, '✓ Opening Windows Camera...');
   });
 }
 
