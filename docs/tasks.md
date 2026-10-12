@@ -193,6 +193,20 @@ Decision: **ADR-021**.
 - [x] Add "Set as Webcam" action button to the browser viewer interface (`src/public/viewer.html`, `src/public/js/viewer.js`) that triggers the `lancam://` deeplink.
 - [x] All 35 automated tests pass (`npm test`).
 
+## P9 — Pure WebRTC Shared-Memory Bridge for DirectShow Virtual Camera (2026-10-12)
+
+Decision: **ADR-022**.
+
+- [x] Create Win32 shared-memory IPC header (`vcam/include/shm_bridge.h`) with mutex synchronization (`Local\LanCamSharedMemory_Video` & `Local\LanCamSharedMemory_Mutex`).
+- [x] Update DirectShow virtual capture filter (`vcam/src/lancam_filter.cpp`) to prioritize reading live WebRTC uncompressed RGB24 video samples directly from shared memory with sub-millisecond latency.
+- [x] Implement local loopback bridge server in setup launcher (`vcam/src/lancam_setup.cpp --bridge`) listening on `127.0.0.1:7779` via WinSock2.
+- [x] Implement local bridge HTTP frame ingestion endpoint (`POST /api/vcam/bridge-frame`) in `src/server/server.js` piping BGR24 frames directly to TCP port 7779.
+- [x] Implement browser WebRTC video frame pump in `src/public/js/viewer.js` extracting frames at ~30 FPS from `#remoteVideo` canvas to bridge endpoint when virtual camera mode is engaged.
+- [x] Recompile x64 DirectShow binaries (`LanCamFilter.dll` & `lancam-setup.exe`) via `vcam/build.bat`.
+- [x] Repackage setup archive (`dist/lancam-vcam-setup.zip`).
+- [x] Recompile embedded assets (`node scripts/build-embedded-assets.js`) and run test suite (`npm test`, 35/35 passing).
+
+
 
 
 

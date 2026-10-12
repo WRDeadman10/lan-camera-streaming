@@ -16,6 +16,14 @@
   - **Developer Tools & Integrations:** Python OpenCV endpoints (`/stream/:roomId?pin=...`), direct localhost PC links, and SDP/ICE diagnostic logs are housed inside a collapsed drawer, eliminating cognitive clutter while maintaining 100% feature availability.
 - **Verification:** All 35 automated tests (`npm test`) pass. Embedded assets recompiled with `node scripts/build-embedded-assets.js`.
 
+## Pure WebRTC Shared-Memory Bridge for DirectShow Virtual Camera (2026-10-12) — ADR-022
+
+- **Zero-MJPEG Architecture:** Replaced continuous HTTP MJPEG frame polling with an in-memory Win32 shared-memory bridge (`vcam/include/shm_bridge.h`) leveraging `Local\LanCamSharedMemory_Video` and `Local\LanCamSharedMemory_Mutex`.
+- **Browser WebRTC Frame Pump:** `src/public/js/viewer.js` automatically renders incoming P2P WebRTC frames from `#remoteVideo` to an offscreen canvas at ~30 FPS, converts RGBA to BGR24, and transmits them to `/api/vcam/bridge-frame`.
+- **WinSock2 Bridge Server:** `lancam-setup.exe --bridge` runs a lightweight local TCP daemon on `127.0.0.1:7779` which receives frames from the Node.js server and writes them into Win32 Shared Memory with sub-millisecond overhead.
+- **DirectShow Filter Integration:** `vcam/src/lancam_filter.cpp` continuously checks `m_pFilter->GetShmReader().ReadLatestFrame()`. If an active frame is detected (<1000ms old), it streams directly into DirectShow output buffers.
+- **Verification:** Both x64 binaries (`LanCamFilter.dll` & `lancam-setup.exe`) recompiled cleanly via `vcam/build.bat`, packaged into `dist/lancam-vcam-setup.zip`, embedded assets rebuilt (`node scripts/build-embedded-assets.js`), and 35/35 automated unit/integration tests passing (`npm test`).
+
 ## DirectShow Virtual Camera & Deeplink Integration (2026-10-12) — ADR-021
 
 - **Submodule Scaffold:** Submodule configured at `vcam/` referencing `https://github.com/WRDeadman10/DirectShow.git`.

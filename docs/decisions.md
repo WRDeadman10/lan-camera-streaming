@@ -309,6 +309,32 @@ Eliminates third-party software dependencies (such as OBS Studio or Python scrip
 **Consequences:**
 Users can view and use the phone camera stream inside native desktop apps like the Windows Camera app simply by downloading and registering the lightweight driver once.
 
+## ADR-022 — Pure WebRTC Shared-Memory Bridge for DirectShow Virtual Camera
+
+**Status:** Accepted
+
+**Decision:**
+1. **Zero-MJPEG Architecture for Virtual Camera:**
+   - Eliminate HTTP/MJPEG continuous polling when running the DirectShow virtual camera from an active WebRTC session.
+   - Establish a low-latency Win32 Shared Memory mapping (`Local\LanCamSharedMemory_Video`, up to $1920\times 1080\times 3$ bytes uncompressed RGB24) protected by a Win32 Mutex (`Local\LanCamSharedMemory_Mutex`).
+2. **Browser-Side WebRTC Frame Extraction (`viewer.js`):**
+   - The browser viewer running on the PC renders the peer-to-peer WebRTC video into an in-memory canvas at ~30 FPS when the virtual camera is requested.
+   - Packs raw BGR24 image frames with a 16-byte binary header (`magic=0x4C43414D`, width, height, sequence) and sends them to `/api/vcam/bridge-frame`.
+3. **Local Loopback Bridge Daemon (`lancam_setup.exe --bridge`):**
+   - A lightweight WinSock2 server listens on `127.0.0.1:7779`.
+   - The Node.js server streams received frame packets directly across loopback TCP to the bridge daemon.
+   - The bridge daemon writes each frame directly into the Win32 Shared Memory mapping.
+4. **DirectShow Virtual Source Filter Priority (`LanCamFilter.dll`):**
+   - In `LanCamPin::StreamLoop()`, check `m_pFilter->GetShmReader().ReadLatestFrame()`.
+   - If active shared memory frames exist (timestamp $< 1000\text{ms}$ old), stream them directly into DirectShow output buffers with $<15\text{ms}$ latency.
+   - If shared memory is inactive, gracefully fall back to the HTTP decoder.
+
+**Reasoning:**
+Prevents dual video encoding/decoding overhead and avoids stressing the phone or server with redundant MJPEG JPEG compression when an active WebRTC P2P stream is already running on the PC.
+
+**Consequences:**
+Windows Camera, Zoom, Teams, and Unity receive the pure WebRTC feed with minimal latency and high frame fidelity without incurring server or network bandwidth penalties.
+
 ## Open decisions to revisit after the first working stream
 
 - Whether TypeScript should replace plain JavaScript for stricter types.

@@ -7,6 +7,7 @@ import express from 'express';
 import fs from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
+import net from 'node:net';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -142,6 +143,45 @@ export function createServer(config, logger) {
 
     logger.info(`New MJPEG subscriber connected for room "${roomId}" (remote IP: ${req.ip})`);
     config.mjpegStreamer.addSubscriber(roomId, res);
+  });
+
+  // Local WebRTC Virtual Camera Shared-Memory Frame Bridge
+  let vcamBridgeClient = null;
+  function getVcamBridgeSocket() {
+    if (vcamBridgeClient && !vcamBridgeClient.destroyed) {
+      return vcamBridgeClient;
+    }
+    vcamBridgeClient = new net.Socket();
+    vcamBridgeClient.connect(7779, '127.0.0.1', () => {});
+    vcamBridgeClient.on('error', () => {
+      vcamBridgeClient = null;
+    });
+    return vcamBridgeClient;
+  }
+
+  app.post('/api/vcam/bridge-frame', express.raw({ type: 'application/octet-stream', limit: '10mb' }), (req, res) => {
+    const width = parseInt(req.query.w, 10) || 1280;
+    const height = parseInt(req.query.h, 10) || 720;
+    const body = req.body;
+
+    if (!body || !body.length) {
+      res.status(400).send('Empty frame');
+      return;
+    }
+
+    const sock = getVcamBridgeSocket();
+    if (sock && !sock.destroyed) {
+      const header = Buffer.alloc(12);
+      header.writeUInt32LE(width, 0);
+      header.writeUInt32LE(height, 4);
+      header.writeUInt32LE(body.length, 8);
+      try {
+        sock.write(header);
+        sock.write(body);
+      } catch (e) {}
+    }
+
+    res.status(200).send('OK');
   });
 
   // Single JPEG frame snapshot endpoint
