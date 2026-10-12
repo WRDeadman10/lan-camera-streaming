@@ -131,17 +131,15 @@ Tasks:
 5. Real LAN testing and diagnostics.
 6. TURN, multiple viewers, audio, QR code, and other optional features only when evidence or requirements justify them.
 
-## Phase 6 — External receivers and integrations
+## Phase 7 — Standalone Console Executable & CLI Distribution
 
-**Objective:** Let any program consume the camera feed without changes to the server.
+**Objective:** Package the entire application into a standalone Windows single `.exe` console application requiring zero runtime dependencies on client machines.
 
-Delivered (documentation, ADR-016):
-- A technology-neutral receiver guide (`docs/receiver-guide.md`) and a corrected formal contract (`docs/architecture.md` §4).
-- A reference integration: a Unity app whose Python sidecar joins a room as the WebRTC receiver and treats the phone as a webcam for pose tracking.
+Delivered (ADR-017):
+- Node.js Single Executable Application (SEA) build pipeline with `esbuild` and `postject`.
+- In-memory embedded frontend static asset registry with seamless filesystem override.
+- Interactive CLI application with banner, LAN IP detection, terminal ASCII QR code, and optional automated zrok tunnel supervision.
+- Standalone single executable binary `dist/lan-camera-streaming.exe`.
 
-Remaining:
-- Build and verify a receiver in a second language from the guide alone.
-- Verify an external receiver on real devices and over a tunnel; measure its latency.
-- Consider a machine-readable description of the signaling events.
+**Exit criteria:** The standalone executable launches and serves all endpoints and static assets in an isolated environment without Node.js or `src/` files present.
 
-**Exit criteria:** A receiver in a language other than Python connects using only the guide, and one external receiver is verified on a real phone and Wi-Fi.

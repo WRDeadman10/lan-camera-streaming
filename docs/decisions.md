@@ -199,6 +199,24 @@ High-resolution camera sensors operate at their full optical fidelity. The termi
 
 **Verified / not verified:** The WebRTC path was exercised against this server with a Python (`aiortc`) receiver and a Python stand-in phone on loopback (join, offer/answer, a phone that leaves and returns, a socket drop, wrong PIN, occupied room, a slow consumer); MJPEG and tunnel relay with an earlier standalone Python receiver. Not verified: a real phone's browser sender page with an external receiver, real Wi-Fi/firewall behavior, a zrok tunnel, real-phone latency, and any receiver in a language other than Python.
 
+## ADR-017 — Standalone console application and single .exe via Node SEA and embedded static assets
+
+**Status:** Accepted
+
+**Decision:**
+1. Support running the application as a standalone Windows console application single executable (`dist/lan-camera-streaming.exe`).
+2. Build the executable using Node.js official Single Executable Application (SEA) capabilities combined with `esbuild` for bundling and `postject` for resource injection into the PE binary.
+3. Automatically embed all frontend static assets (`src/public`) into an in-memory asset map (`src/server/embedded-assets.js`) during the build process, while preserving disk-based asset serving when assets exist on the filesystem.
+4. Provide a rich CLI interface (`src/server/cli.js`) featuring interactive console banner, automatic LAN IPv4 detection, terminal ASCII QR code generation via `qrcode-terminal`, command-line flags (`--port`, `--host`, `--pin`, `--local`, `--zrok`, `--env`, etc.), dynamic `.env` auto-loading, and optional automated zrok tunnel management with cleanup on shutdown.
+5. Expose `.env` and `.env.example` directly in `dist/` alongside the executable so users can configure settings (PORT, ACCESS_PIN, ZROK_TOKEN, etc.) in text without static baking. If launched without a `.env` file, the executable auto-generates a default template next to itself.
+6. Provide an icon identity (`assets/icon.ico`, `assets/icon.png`, `src/public/assets/icon.svg`, `src/public/favicon.ico`), integrated into all web UI headers/favicons and embedded directly into the Windows `.exe` resource table via `resedit`.
+
+**Reasoning:**
+Distributing the application as a standalone `.exe` eliminates the need for end users to install Node.js, npm, or dependencies on target machines. Exposing `.env` in `dist/` allows users to edit their configuration using standard text editors while the `.exe` dynamically loads the values at runtime rather than having settings hardcoded into the binary.
+
+**Consequences:**
+A single command (`npm run build:exe`) compiles the full application and all assets into `dist/lan-camera-streaming.exe` and exposes `dist/.env`. Testing verifies that the executable runs in an isolated directory, dynamically loads custom `.env` values, auto-generates `.env` when missing, and serves all endpoints.
+
 ## Open decisions to revisit after the first working stream
 
 - Whether TypeScript should replace plain JavaScript for stricter types.

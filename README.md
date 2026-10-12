@@ -72,6 +72,47 @@ npm run dev
 npm test
 ```
 
+### 5. Build & Run Standalone Single Executable (`.exe`)
+
+You can compile the entire application into a single, self-contained Windows console `.exe` with zero external dependencies (no Node.js or `node_modules` required to run):
+
+```bash
+npm run build:exe
+```
+
+This generates `dist/lan-camera-streaming.exe`. You can run it directly from terminal or by double-clicking:
+
+```powershell
+# Run in local LAN mode (prints LAN IPs and terminal ASCII QR code)
+.\dist\lan-camera-streaming.exe --local
+
+# Run on custom port and PIN
+.\dist\lan-camera-streaming.exe --local -p 8080 --pin 654321
+
+# Run with zrok public HTTPS tunnel (if zrok is installed)
+.\dist\lan-camera-streaming.exe --zrok
+```
+
+All frontend assets are embedded directly into the `.exe`. If you place a `public` folder next to the executable, it will serve your local customized files instead.
+
+#### User Configuration via `.env` File
+
+The executable does **not** hardcode your settings. When built, a `.env` configuration file is placed directly in `dist/` next to `lan-camera-streaming.exe`:
+
+```
+dist/
+├── lan-camera-streaming.exe
+├── .env          <-- Open and edit in Notepad!
+└── .env.example
+```
+
+- **Customizing Values**: Open `dist/.env` in any text editor, adjust your `PORT`, `ACCESS_PIN`, `ZROK_TOKEN`, or `LOG_LEVEL`, and save. When you launch `lan-camera-streaming.exe`, it automatically reads and applies these values.
+- **Portability**: If you copy `lan-camera-streaming.exe` to a new folder or machine without `.env`, it will automatically generate a clean `.env` template next to itself on first launch.
+- **Custom Config Flag**: You can also point to any `.env` file explicitly using the `--env` flag:
+  ```powershell
+  .\dist\lan-camera-streaming.exe --env C:\path\to\custom.env
+  ```
+
 ---
 
 ## Access Scenarios & HTTPS Configuration

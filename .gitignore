@@ -32,3 +32,8 @@ Thumbs.db
 # Coverage & test output
 coverage/
 .nyc_output/
+
+# Build artifacts & single executable
+dist/
+src/server/embedded-assets.js
+

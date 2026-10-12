@@ -88,6 +88,14 @@ Validate every event on the server. A client must not be allowed to send signali
 
 TURN is not required for same-LAN WebRTC streaming. Add it if testing shows that direct connectivity fails on restrictive networks. Mode B (tunneled relay) serves as an alternative application-level relay through the Windows server.
 
+### 2.7 Standalone Executable & Embedded Asset System
+
+To allow zero-dependency portable deployment on Windows, the application can be compiled into a single executable binary (`dist/lan-camera-streaming.exe`).
+- **Node.js SEA (Single Executable Application)**: Uses official Node 20+ SEA injection with `postject` and `esbuild`.
+- **Embedded Asset Registry**: Frontend assets from `src/public` are inlined into `src/server/embedded-assets.js` at build time. Express routes check disk paths first (allowing local customizations) and fall back to in-memory embedded assets when deployed as an isolated `.exe`.
+- **CLI & Supervision**: The console executable (`src/server/cli.js`) handles flag parsing, private LAN IP detection, terminal QR code rendering, and automated zrok lifecycle management.
+
+
 ## 3. Proposed routes and pages
 
 | Path | Purpose |

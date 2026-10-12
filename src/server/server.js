@@ -11,6 +11,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import QRCode from 'qrcode';
 
+import { embeddedAssets } from './embedded-assets.js';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -145,17 +147,58 @@ export function createServer(config, logger) {
     }
   });
 
-  // Static files directory
-  const publicDir = path.resolve(__dirname, '../public');
-  app.use(express.static(publicDir));
+  // Static files directory: check filesystem locations, fallback to embedded assets
+  const candidateDirs = [
+    path.resolve(__dirname, '../public'),
+    path.resolve(path.dirname(process.execPath), 'src/public'),
+    path.resolve(path.dirname(process.execPath), 'public'),
+    path.resolve(process.cwd(), 'src/public'),
+    path.resolve(process.cwd(), 'public')
+  ];
 
-  // Route fallbacks for clean URLs
-  app.get('/sender', (req, res) => {
-    res.sendFile(path.join(publicDir, 'sender.html'));
+  const publicDir = candidateDirs.find((dir) => {
+    try {
+      return fs.existsSync(dir) && fs.statSync(dir).isDirectory();
+    } catch {
+      return false;
+    }
   });
 
-  app.get('/viewer', (req, res) => {
-    res.sendFile(path.join(publicDir, 'viewer.html'));
+  if (publicDir) {
+    app.use(express.static(publicDir));
+  }
+
+  // Route handler for pages and fallback for embedded static assets
+  app.get(['/', '/sender', '/viewer', '*'], (req, res, next) => {
+    let reqPath = req.path;
+    if (reqPath === '/') {
+      reqPath = '/index.html';
+    } else if (reqPath === '/sender') {
+      reqPath = '/sender.html';
+    } else if (reqPath === '/viewer') {
+      reqPath = '/viewer.html';
+    }
+
+    if (publicDir) {
+      const diskFile = path.join(publicDir, reqPath.replace(/^\//, ''));
+      if (fs.existsSync(diskFile) && fs.statSync(diskFile).isFile()) {
+        res.sendFile(diskFile);
+        return;
+      }
+    }
+
+    if (embeddedAssets && embeddedAssets[reqPath]) {
+      const asset = embeddedAssets[reqPath];
+      res.setHeader('Content-Type', asset.mimeType);
+      if (asset.isBinary) {
+        res.send(Buffer.from(asset.content, 'base64'));
+      } else {
+        res.send(asset.content);
+      }
+      return;
+    }
+
+    next();
   });
 
   // 404 handler

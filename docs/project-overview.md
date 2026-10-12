@@ -44,6 +44,7 @@ For the first milestone, support one sender and one viewer. Multi-camera and mul
 | Area | Choice | Responsibility |
 |---|---|---|
 | Runtime | Node.js | Runs the server on Windows |
+| Distribution | Single Executable (`.exe`) | Standalone zero-dependency Windows console executable via Node SEA |
 | HTTP server | Express | Serves the web pages, static assets, and optional MJPEG stream |
 | Signaling & Relay | Socket.IO | Room membership, WebRTC signaling, and binary tunnel frame relay |
 | Camera capture | Browser `getUserMedia()` | Requests permission and captures local camera stream |

@@ -138,3 +138,19 @@ Decision: **ADR-016**. Docs only; no server code changed.
 - [ ] Real-device verification of an external receiver: a real phone's browser sender page, real Wi-Fi (client isolation, the Windows Firewall profile), and a zrok tunnel for the signaling.
 - [ ] Measure real-phone latency end to end for the WebRTC receiver path; it is unmeasured.
 - [ ] Decide whether the server should expose a machine-readable contract (a JSON schema or an OpenAPI-style description of the events) so receivers can be generated or validated.
+
+## P6 — Standalone Console Executable (.exe) & CLI
+
+Decision: **ADR-017**.
+
+- [x] Create embedded assets compiler (`scripts/build-embedded-assets.js`) to bundle frontend assets (`src/public`) into in-memory registry (`src/server/embedded-assets.js`).
+- [x] Update `src/server/server.js` to serve embedded static assets with filesystem fallback.
+- [x] Implement standalone CLI entry point (`src/server/cli.js`) with argument parsing, banner, LAN IP detection, terminal ASCII QR code, and zrok tunnel automation with graceful cleanup.
+- [x] Create single executable build pipeline (`scripts/build-exe.js`) using Node.js SEA (Single Executable Application), `esbuild`, and `postject`.
+- [x] Add npm scripts: `build:exe`, `build:assets`, `cli`.
+- [x] Add automated test suite for CLI and embedded assets (`tests/cli.test.js`).
+- [x] Verify standalone `.exe` execution in an isolated directory with zero external files.
+- [x] Expose `.env` and `.env.example` alongside the executable in `dist/` with dynamic runtime loading and auto-template generation on first run.
+- [x] Support `--env <path>` CLI flag to allow arbitrary custom configuration files.
+- [x] Create modern project icon (`assets/icon.ico`, `assets/icon.png`, `src/public/assets/icon.svg`, `src/public/favicon.ico`, `src/public/favicon.png`) and embed into web headers and PE `.exe` binary via `resedit`.
+

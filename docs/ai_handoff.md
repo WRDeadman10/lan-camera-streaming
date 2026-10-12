@@ -12,9 +12,19 @@ A first external receiver now exists: the Viitorx Unity app's Python sidecar joi
 - **Next:** build a receiver in a second language from the guide alone and fix whatever the guide got wrong; then a real-device run (tasks.md P5).
 - **Reference implementation** (other repository, the Viitorx VRM project): `python-sidecar~/tools/video/lan_camera.py`, tested by `python-sidecar~/tests/test_lan_camera.py`, which starts THIS server (`CAMERA_SERVER_DIR`).
 
+## Standalone Console Executable (.exe) & CLI (2026-10-12) — ADR-017
+
+A single, self-contained Windows console `.exe` is now fully supported (`dist/lan-camera-streaming.exe`). It requires zero runtime dependencies (no Node.js or `node_modules` required to run on client PCs).
+
+- **Build pipeline:** `npm run build:exe` runs `scripts/build-exe.js`, which compiles static assets, bundles with `esbuild`, creates an official Node.js Single Executable Application (SEA) blob, copies the Node PE binary, injects the resource using `postject`, and exposes `dist/.env` and `dist/.env.example` alongside the executable.
+- **Embedded asset fallback:** Frontend assets (`src/public`) are inlined into `src/server/embedded-assets.js`. Express routes check disk paths first (allowing local customizations) and fall back to in-memory embedded assets when running in an isolated environment. Verified by copying `lan-camera-streaming.exe` to an empty folder without `src/` and fetching `/health`, `/sender`, `/viewer`, and `/css/style.css` (all returned HTTP 200).
+- **Interactive CLI features:** `src/server/cli.js` provides CLI options (`-p, --port`, `--host`, `--pin`, `-l, --local`, `-z, --zrok`, `--zrok-token`, `--cert`, `--key`, `-e, --env`, `--help`), automatic detection and display of private LAN IPv4 addresses, ASCII QR code generation via `qrcode-terminal`, `.env` auto-discovery and template generation, and optional automated zrok tunnel supervision with cleanup on Ctrl+C.
+- **Runtime .env configuration:** The executable does not hardcode user settings; it dynamically loads `dist/.env` on launch. If launched in a new folder without `.env`, it automatically writes a default template `.env` next to the executable. Users can edit `.env` in Notepad to change `PORT`, `ACCESS_PIN`, `ZROK_TOKEN`, etc.
+- **Automated test suite:** `npm test` now runs 33 tests (all 33 pass), including `tests/cli.test.js` covering argument flags, `.env` parsing, and custom env file loading.
+
 ## Current status
 
-**Status:** Zero-zrok-quota LAN operation implemented (ADR-015). Code and automated tests are done; real phone + PC verification is still pending.
+**Status:** Zero-zrok-quota LAN operation implemented (ADR-015) and Standalone Console Executable (.exe) implemented (ADR-017). Code and automated tests are done.
 
 - **Quota leak fixed:** the sender used to upload ~15 FPS JPEGs (`mjpeg:frame`) through Socket.IO (and zrok) unconditionally, even in WebRTC mode. It is now demand-driven: the server emits `mjpeg:demand { active }` to the sender only while an HTTP `/stream/:roomId` consumer or a `/snapshot/:roomId` request is waiting, and drops frames otherwise. Frames are capped at 1280 px width / 900 KB with one in-flight encode. `/snapshot` now asks for a fresh frame on demand.
 - **Viewer on the PC via localhost:** `/api/network-info` returns `{ protocol, port }` only (no LAN IPs, since the route is public through zrok). Sender page shows an "Open Viewer on the PC" localhost link; viewer page shows a hint banner when opened through a non-local hostname; `start.ps1` prints `http://localhost:<port>/viewer`.
@@ -44,23 +54,23 @@ A first external receiver now exists: the Viitorx Unity app's Python sidecar joi
 
 ## Modified files (this iteration)
 
-- Server: `src/server/mjpeg-streamer.js`, `src/server/signaling.js`, `src/server/server.js`, `src/server/config.js`, `src/server/index.js`.
-- Client: `src/public/js/sender.js`, `src/public/js/viewer.js`, `src/public/js/webrtc-peer.js`, `src/public/js/ui-utils.js`, `src/public/sender.html`, `src/public/viewer.html`, `src/public/index.html`, `src/public/css/style.css`.
-- Scripts/config: `start.ps1` is now the ONLY script. The `scripts/` folder (start-server, start-zrok, release-zrok, setup-local-https) was deleted and folded into it (also does first-run `npm install` and `.env` creation). Also `.env.example`, `.gitignore`.
-- Tests: `tests/mjpeg.test.js` (rewritten for demand-driven flow), `tests/server.test.js`, `tests/path-classification.test.js` (new).
-- Docs: `README.md`, `docs/tasks.md`, `docs/decisions.md`, `docs/architecture.md`, `docs/ai_handoff.md`.
+- Assets: `assets/icon.ico` (new), `assets/icon.png` (new), `src/public/assets/icon.svg` (new), `src/public/favicon.ico` (new), `src/public/favicon.png` (new).
+- UI/Client: `src/public/index.html`, `src/public/sender.html`, `src/public/viewer.html`, `src/public/css/style.css`.
+- Server: `src/server/server.js`, `src/server/cli.js` (new), `src/server/embedded-assets.js` (generated).
+- Scripts/build: `scripts/build-embedded-assets.js` (updated for binary assets), `scripts/build-exe.js` (updated for icon embedding).
+- Package & config: `package.json`, `.gitignore`.
+- Tests: `tests/cli.test.js` (new).
+- Docs: `README.md`, `docs/tasks.md`, `docs/decisions.md`, `docs/architecture.md`, `docs/project-overview.md`, `docs/roadmap.md`, `docs/ai_handoff.md`.
 
 ## Immediate next task
 
-On the real devices:
-1. `powershell -File start.ps1`; open the sender URL on the phone, start streaming in WebRTC mode; open `http://localhost:3000/viewer?room=<id>` on the PC.
-2. Confirm the green "LAN direct" indicator and a `[STATS] Pair: host ... <-> host/prflx ...` line. If ICE fails, check Wi-Fi AP/client isolation, the Windows network profile (Private), and VPN adapters.
-3. Check the zrok dashboard: transfer should be KBs (page + signaling), not MBs.
-4. Optional tunnel-free run: `powershell -File start.ps1 -LocalOnly`; on the phone enable the Chrome insecure-origin flag for the printed URL.
+1. Distribute or test `dist/lan-camera-streaming.exe` on a target Windows machine without Node.js installed.
+2. Confirm the CLI launches with `.\dist\lan-camera-streaming.exe --local`, displays the banner, prints the local IP and terminal ASCII QR code, and serves the UI with the new icon to a phone browser.
 
 ## Commands run & results
 
-- `npm test`: 29/29 passed.
-- HTTPS smoke test with a throwaway self-signed cert: `/health` and `/api/network-info` served over HTTPS; plain HTTP rejected.
-- PowerShell parser check on `start.ps1`: 0 errors.
-- Neither `start.ps1` mode was executed end to end here (default mode starts a real zrok share).
+- `npm test`: 33/33 passed.
+- `npm run build:exe`: successfully generated standalone `dist/lan-camera-streaming.exe` (83.02 MB) with embedded icon, exposed `dist/.env`, and copied `dist/icon.ico`.
+- Icon endpoints test: verified HTTP 200 for `/favicon.ico`, `/favicon.png`, and `/assets/icon.svg` on running executable.
+- Dynamic `.env` verification test: edited `dist/.env` with custom `PORT=3888` and `ACCESS_PIN=987654`; verified executable booted on port 3888 and responded with HTTP 200.
+- Isolated directory test: verified auto-creation of `.env` template when `lan-camera-streaming.exe` was run in a new directory with zero existing files.

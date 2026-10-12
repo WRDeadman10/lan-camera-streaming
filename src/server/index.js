@@ -3,12 +3,13 @@
  * Application entry point: initializes configuration, logger, and HTTP server.
  */
 
-import { loadConfig } from './config.js';
+import { loadConfig, loadEnvFile } from './config.js';
 import { Logger } from './logger.js';
 import { createServer } from './server.js';
 import { setupSignaling } from './signaling.js';
 import { MjpegStreamer } from './mjpeg-streamer.js';
 
+loadEnvFile(null, { createIfMissing: false });
 const config = loadConfig();
 const logger = new Logger(config.logLevel);
 

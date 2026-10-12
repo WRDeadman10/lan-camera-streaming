@@ -87,10 +87,10 @@ if (btnCopyPythonUrl) {
 
 function generateRandomRoomId() {
   const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
-  let result = 'room-';
-  for (let i = 0; i < 6; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
+  let result = '123';
+  // for (let i = 0; i < 6; i++) {
+  //   result += chars.charAt(Math.floor(Math.random() * chars.length));
+  // }
   return result;
 }
 

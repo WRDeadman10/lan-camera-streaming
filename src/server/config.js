@@ -1,7 +1,112 @@
-/**
- * @file config.js
- * Centralized server configuration with strict environment variable validation.
- */
+import fs from 'node:fs';
+import path from 'node:path';
+
+export const DEFAULT_ENV_TEMPLATE = `# LAN Camera Streaming Configuration
+# Server network configuration
+PORT=3000
+HOST=0.0.0.0
+
+# Security & Access Control (PIN required to stream and view)
+ACCESS_PIN=123456
+
+# CORS & Trust Proxy settings
+CORS_ORIGIN=*
+TRUST_PROXY=false
+
+# STUN / TURN Configuration
+STUN_SERVERS=stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302
+TURN_SERVERS=
+TURN_USERNAME=
+TURN_CREDENTIAL=
+
+# zrok public tunnel configuration (leave blank for local mode)
+ZROK_TOKEN=
+
+# Optional: TLS certificate and key for HTTPS mode
+HTTPS_CERT_PATH=
+HTTPS_KEY_PATH=
+
+# Logging level: info, debug, warn, error
+LOG_LEVEL=info
+`;
+
+export function parseEnvContent(content) {
+  const parsed = {};
+  const lines = content.split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
+      const idx = trimmed.indexOf('=');
+      const key = trimmed.slice(0, idx).trim();
+      let val = trimmed.slice(idx + 1).trim();
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1);
+      }
+      if (key) {
+        parsed[key] = val;
+      }
+    }
+  }
+  return parsed;
+}
+
+export function loadEnvFile(customEnvPath = null, options = {}) {
+  const targetEnv = options.targetEnv || process.env;
+  const createIfMissing = options.createIfMissing ?? true;
+
+  if (customEnvPath) {
+    const resolvedPath = path.resolve(customEnvPath);
+    if (!fs.existsSync(resolvedPath)) {
+      throw new Error(`Specified environment file does not exist: ${resolvedPath}`);
+    }
+    const content = fs.readFileSync(resolvedPath, 'utf8');
+    const parsed = parseEnvContent(content);
+    for (const [key, val] of Object.entries(parsed)) {
+      targetEnv[key] = val;
+    }
+    return { loaded: true, path: resolvedPath, created: false, parsed };
+  }
+
+  const searchDirs = [
+    path.dirname(process.execPath),
+    process.cwd()
+  ];
+
+  for (const dir of searchDirs) {
+    const candidate = path.join(dir, '.env');
+    if (fs.existsSync(candidate)) {
+      try {
+        const content = fs.readFileSync(candidate, 'utf8');
+        const parsed = parseEnvContent(content);
+        for (const [key, val] of Object.entries(parsed)) {
+          targetEnv[key] = val;
+        }
+        return { loaded: true, path: candidate, created: false, parsed };
+      } catch {
+        // Continue searching
+      }
+    }
+  }
+
+  if (createIfMissing) {
+    const isNodeBinary = process.execPath.toLowerCase().endsWith('node.exe') || process.execPath.toLowerCase().endsWith('node');
+    const targetDir = isNodeBinary ? process.cwd() : path.dirname(process.execPath);
+    const targetFile = path.join(targetDir, '.env');
+    try {
+      fs.writeFileSync(targetFile, DEFAULT_ENV_TEMPLATE, 'utf8');
+      const parsed = parseEnvContent(DEFAULT_ENV_TEMPLATE);
+      for (const [key, val] of Object.entries(parsed)) {
+        targetEnv[key] = val;
+      }
+      return { loaded: true, path: targetFile, created: true, parsed };
+    } catch {
+      // Ignore write errors (e.g. read-only filesystem)
+    }
+  }
+
+  return { loaded: false, path: null, created: false, parsed: {} };
+}
+
 
 function parseInteger(val, defaultVal, min = 1, max = 65535) {
   if (val === undefined || val === null || val === '') {
