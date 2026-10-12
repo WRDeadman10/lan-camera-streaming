@@ -147,10 +147,14 @@ Decision: **ADR-017**.
 - [x] Update `src/server/server.js` to serve embedded static assets with filesystem fallback.
 - [x] Implement standalone CLI entry point (`src/server/cli.js`) with argument parsing, banner, LAN IP detection, terminal ASCII QR code, and zrok tunnel automation with graceful cleanup.
 - [x] Create single executable build pipeline (`scripts/build-exe.js`) using Node.js SEA (Single Executable Application), `esbuild`, and `postject`.
-- [x] Add npm scripts: `build:exe`, `build:assets`, `cli`.
+- [x] Add npm scripts: `build:exe`, `build:assets`, `bump:version`, `cli`.
 - [x] Add automated test suite for CLI and embedded assets (`tests/cli.test.js`).
 - [x] Verify standalone `.exe` execution in an isolated directory with zero external files.
+- [x] Fix: the exe never served the Socket.IO browser client (`/socket.io/socket.io.js` returned an empty reply because socket.io reads it from `node_modules`), so the sender/viewer pages could not connect. The client is now embedded and served at `/vendor/socket.io.js`; verified in an isolated folder, over websocket signaling, and in a real browser. The earlier isolated-directory check only requested pages and CSS, not the Socket.IO client or a signaling round trip.
+- [x] Fix: `src/server/embedded-assets.js` is git-ignored and generated, so a fresh clone could not start; `npm install` now generates it (`postinstall`).
 - [x] Expose `.env` and `.env.example` alongside the executable in `dist/` with dynamic runtime loading and auto-template generation on first run.
 - [x] Support `--env <path>` CLI flag to allow arbitrary custom configuration files.
 - [x] Create modern project icon (`assets/icon.ico`, `assets/icon.png`, `src/public/assets/icon.svg`, `src/public/favicon.ico`, `src/public/favicon.png`) and embed into web headers and PE `.exe` binary via `resedit`.
+- [x] Implement automated version incrementer (`scripts/bump-version.js`) to bump the last digit of the semantic version in `package.json` and `package-lock.json`.
+- [x] Create one-click Windows root build script (`build.bat`) to run the version bumper and produce a fully packaged `.exe` with PE file version metadata.
 

@@ -139,7 +139,10 @@ Delivered (ADR-017):
 - Node.js Single Executable Application (SEA) build pipeline with `esbuild` and `postject`.
 - In-memory embedded frontend static asset registry with seamless filesystem override.
 - Interactive CLI application with banner, LAN IP detection, terminal ASCII QR code, and optional automated zrok tunnel supervision.
+- Dynamic `.env` discovery, editable template generation in `dist/`, and custom `--env <path>` support.
+- Custom project visual identity and icon embedding in PE resource table via `resedit`.
+- Automated patch version bumping (`scripts/bump-version.js`) and one-click build automation (`build.bat`).
 - Standalone single executable binary `dist/lan-camera-streaming.exe`.
 
-**Exit criteria:** The standalone executable launches and serves all endpoints and static assets in an isolated environment without Node.js or `src/` files present.
+**Exit criteria:** The standalone executable launches and serves all endpoints and static assets in an isolated environment without Node.js or `src/` files present. Running `build.bat` increments the version and creates a release-ready executable.
 

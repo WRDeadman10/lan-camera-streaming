@@ -23,6 +23,7 @@ test('Embedded assets map includes all core frontend assets', () => {
   assert.ok(embeddedAssets['/js/sender.js'], 'embeddedAssets should contain sender.js');
   assert.ok(embeddedAssets['/js/viewer.js'], 'embeddedAssets should contain viewer.js');
   assert.ok(embeddedAssets['/js/webrtc-peer.js'], 'embeddedAssets should contain webrtc-peer.js');
+  assert.ok(embeddedAssets['/vendor/socket.io.js'], 'embeddedAssets should contain the Socket.IO browser client (not available from node_modules inside the exe)');
 
   assert.equal(embeddedAssets['/index.html'].mimeType, 'text/html; charset=utf-8');
   assert.equal(embeddedAssets['/css/style.css'].mimeType, 'text/css; charset=utf-8');

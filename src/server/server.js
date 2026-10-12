@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import QRCode from 'qrcode';
 
@@ -15,6 +16,21 @@ import { embeddedAssets } from './embedded-assets.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const SocketClientPath = '/vendor/socket.io.js';
+
+// Prefer the installed socket.io package (always matches the running server); fall back to the copy embedded
+// at build time, which is the only source inside the standalone executable (no node_modules there).
+function loadSocketClientScript() {
+  try {
+    const requireFromHere = createRequire(import.meta.url);
+    const clientFile = path.join(path.dirname(requireFromHere.resolve('socket.io')), '..', 'client-dist', 'socket.io.js');
+    return fs.readFileSync(clientFile);
+  } catch {
+    const embedded = embeddedAssets ? embeddedAssets[SocketClientPath] : null;
+    return embedded ? Buffer.from(embedded.content, 'utf8') : null;
+  }
+}
 
 function createHttpServer(app, config) {
   if (!config.useHttps) {
@@ -46,6 +62,21 @@ export function createServer(config, logger) {
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'no-referrer');
     next();
+  });
+
+  // Socket.IO browser client. Not under /socket.io/ because engine.io intercepts every request on that prefix.
+  const socketClientScript = loadSocketClientScript();
+  if (!socketClientScript) {
+    logger.error('Socket.IO browser client script is unavailable; sender and viewer pages cannot connect. Run "npm run build:assets".');
+  }
+  app.get(SocketClientPath, (req, res) => {
+    if (!socketClientScript) {
+      res.status(500).send('Socket.IO client script unavailable');
+      return;
+    }
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.send(socketClientScript);
   });
 
   // Health check endpoint

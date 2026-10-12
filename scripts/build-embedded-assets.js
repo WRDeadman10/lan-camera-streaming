@@ -46,8 +46,22 @@ function collectFiles(dir, baseDir = dir) {
   return files;
 }
 
+const socketClientPath = path.resolve(__dirname, '../node_modules/socket.io/client-dist/socket.io.js');
+
 const files = collectFiles(publicDir);
 const assetMap = {};
+
+// Socket.IO normally reads its browser client from node_modules at runtime, which does not exist inside the
+// standalone executable, so the client script is embedded and served by server.js instead.
+if (!fs.existsSync(socketClientPath)) {
+  throw new Error(`Socket.IO browser client not found at ${socketClientPath}. Run "npm install" first.`);
+}
+files.push({
+  path: '/vendor/socket.io.js',
+  mimeType: 'application/javascript; charset=utf-8',
+  content: fs.readFileSync(socketClientPath, 'utf8'),
+  isBinary: false
+});
 
 for (const file of files) {
   assetMap[file.path] = {

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { loadConfig } from '../src/server/config.js';
 import { Logger } from '../src/server/logger.js';
 import { createServer } from '../src/server/server.js';
+import { setupSignaling } from '../src/server/signaling.js';
 
 test('loadConfig validates default configuration', () => {
   const config = loadConfig({});
@@ -95,6 +96,27 @@ test('createServer responds to /health and /api/config', async () => {
     assert.ok(Array.isArray(configJson.iceServers));
     // Verify ACCESS_PIN is not leaked
     assert.equal(configJson.accessPin, undefined);
+  } finally {
+    await new Promise((resolve) => httpServer.close(resolve));
+  }
+});
+
+test('Socket.IO browser client script is served while signaling is attached', async () => {
+  const config = loadConfig({ PORT: '3003' });
+  const logger = new Logger('error');
+  const { httpServer } = createServer(config, logger);
+  setupSignaling(httpServer, config, logger);
+
+  await new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+  const address = httpServer.address();
+
+  try {
+    const res = await fetch(`http://127.0.0.1:${address.port}/vendor/socket.io.js`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type'), /javascript/);
+    const body = await res.text();
+    assert.ok(body.length > 50000);
+    assert.match(body, /Socket\.IO/);
   } finally {
     await new Promise((resolve) => httpServer.close(resolve));
   }

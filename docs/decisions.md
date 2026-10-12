@@ -210,12 +210,15 @@ High-resolution camera sensors operate at their full optical fidelity. The termi
 4. Provide a rich CLI interface (`src/server/cli.js`) featuring interactive console banner, automatic LAN IPv4 detection, terminal ASCII QR code generation via `qrcode-terminal`, command-line flags (`--port`, `--host`, `--pin`, `--local`, `--zrok`, `--env`, etc.), dynamic `.env` auto-loading, and optional automated zrok tunnel management with cleanup on shutdown.
 5. Expose `.env` and `.env.example` directly in `dist/` alongside the executable so users can configure settings (PORT, ACCESS_PIN, ZROK_TOKEN, etc.) in text without static baking. If launched without a `.env` file, the executable auto-generates a default template next to itself.
 6. Provide an icon identity (`assets/icon.ico`, `assets/icon.png`, `src/public/assets/icon.svg`, `src/public/favicon.ico`), integrated into all web UI headers/favicons and embedded directly into the Windows `.exe` resource table via `resedit`.
+7. Provide a root build script (`build.bat`) that automatically increments the patch/last digit of the application version in `package.json` and `package-lock.json` (`scripts/bump-version.js`), rebuilds embedded assets, updates Windows PE binary version info (`VersionInfo`), and produces the single executable.
 
 **Reasoning:**
-Distributing the application as a standalone `.exe` eliminates the need for end users to install Node.js, npm, or dependencies on target machines. Exposing `.env` in `dist/` allows users to edit their configuration using standard text editors while the `.exe` dynamically loads the values at runtime rather than having settings hardcoded into the binary.
+Distributing the application as a standalone `.exe` eliminates the need for end users to install Node.js, npm, or dependencies on target machines. Exposing `.env` in `dist/` allows users to edit their configuration using standard text editors while the `.exe` dynamically loads the values at runtime rather than having settings hardcoded into the binary. Automating version bumping in `build.bat` ensures every generated build has a distinct, traceable version number in both the CLI and Windows Explorer file properties.
 
 **Consequences:**
-A single command (`npm run build:exe`) compiles the full application and all assets into `dist/lan-camera-streaming.exe` and exposes `dist/.env`. Testing verifies that the executable runs in an isolated directory, dynamically loads custom `.env` values, auto-generates `.env` when missing, and serves all endpoints.
+A single click or command (`build.bat`) increments the version, bundles static assets, compiles the full application into `dist/lan-camera-streaming.exe`, stamps the PE icon and version info, and exposes `dist/.env`. Testing verifies that the executable runs in an isolated directory, dynamically loads custom `.env` values, auto-generates `.env` when missing, and serves all endpoints.
+
+**Correction (2026-10-12):** the browser Socket.IO client cannot come from `node_modules` inside the exe. `signaling.js` sets `serveClient: false`; `server.js` serves the client at `/vendor/socket.io.js` (installed package first, embedded copy as fallback) and the pages load it from there. It must not live under `/socket.io/` because engine.io intercepts every request on that prefix. Any new runtime file read from `node_modules` or the source tree needs the same embedding treatment.
 
 ## Open decisions to revisit after the first working stream
 

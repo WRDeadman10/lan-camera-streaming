@@ -12,6 +12,7 @@ export function setupSignaling(httpServer, config, logger) {
   const tunnelRelay = new TunnelRelay({ maxFrameSizeBytes: 600000, maxFps: 30 });
 
   const io = new Server(httpServer, {
+    serveClient: false, // the browser client is served by server.js at /vendor/socket.io.js so it also works inside the standalone exe
     cors: {
       origin: config.corsOrigin === '*' ? true : config.corsOrigin,
       methods: ['GET', 'POST']
