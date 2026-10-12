@@ -164,4 +164,35 @@ Decision: **ADR-017**.
 - [x] Create modern project icon (`assets/icon.ico`, `assets/icon.png`, `src/public/assets/icon.svg`, `src/public/favicon.ico`, `src/public/favicon.png`) and embed into web headers and PE `.exe` binary via `resedit`.
 - [x] Implement automated version incrementer (`scripts/bump-version.js`) to bump the last digit of the semantic version in `package.json` and `package-lock.json`.
 - [x] Create one-click Windows root build script (`build.bat`) to run the version bumper and produce a fully packaged `.exe` with PE file version metadata.
+ 
+## P7 — Orientation-Aware, Single-Screen Responsive UX (2026-10-12)
+
+Decision: **ADR-020**.
+
+- [x] Redesign CSS architecture (`src/public/css/style.css`) using `100dvh` viewport constraints and dynamic responsive grids.
+- [x] Implement landscape orientation two-column layout for Sender (Left: camera preview + floating HUD; Right: compact setup / broadcasting card).
+- [x] Implement landscape orientation 70/30 split for Viewer giving live remote video visual priority.
+- [x] Redesign Role Selection Hub (`src/public/index.html`) into single-screen orientation-aware dashboard with prominent Sender & Viewer role cards, instant QR mobile scan card, and collapsible protocol guide.
+- [x] Support ultra-short viewports (<=480px height, such as 667×320 and 844×390 mobile landscape) with localized sidebar scrolling and zero page-level scrollbars.
+- [x] Implement portrait orientation fluid stacking prioritizing active stream feeds using `.streaming-active` reordering.
+- [x] Provide state-driven UI transitions: idle, connecting, broadcasting (with dedicated share card & viewer count pill), connected, reconnecting, and stopped.
+- [x] Wire up inline password visibility toggles (`setupPasswordToggle`) and QR preview toggles.
+- [x] Collapse developer tools (Python OpenCV endpoints, direct PC links, WebRTC SDP/ICE diagnostics) by default.
+- [x] Synchronize embedded assets (`node scripts/build-embedded-assets.js`) and ensure 100% test pass rate (`npm test`).
+
+## P8 — DirectShow Virtual Camera Driver & Deeplink Integration (2026-10-12)
+
+Decision: **ADR-021**.
+
+- [x] Add submodule `vcam` referencing `https://github.com/WRDeadman10/DirectShow.git`.
+- [x] Implement in-process COM DirectShow source filter (`vcam/src/lancam_filter.cpp`, `vcam/src/dll_main.cpp`) registering as `"LAN Phone Camera"` under `CLSID_VideoInputDeviceCategory`.
+- [x] Implement MJPEG HTTP client using WinHTTP and Windows Imaging Component (WIC) decoding into uncompressed RGB24 samples.
+- [x] Implement protocol handler & installer executable (`vcam/src/lancam_setup.cpp`) handling `lancam://` URI schemes and COM driver registration via `regsvr32`.
+- [x] Create automated build script (`vcam/build.bat`) using MSVC x64 toolchain.
+- [x] Package setup binaries into `dist/lancam-vcam-setup.zip` and serve via `/download/lancam-vcam`.
+- [x] Add "Set as Webcam" action button to the browser viewer interface (`src/public/viewer.html`, `src/public/js/viewer.js`) that triggers the `lancam://` deeplink.
+- [x] All 35 automated tests pass (`npm test`).
+
+
+
 

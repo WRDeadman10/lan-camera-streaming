@@ -1,6 +1,29 @@
 # LAN Camera Streaming — AI Handoff
 
-## Ayurvedic Holistic Product Design & UI/UX Elevation (2026-10-12) — ADR-019
+## Orientation-Aware Single-Screen UX Overhaul (2026-10-12) — ADR-020
+
+- **Landscape Viewport Optimization (`100dvh`):**
+  - Eliminated document-level scrolling across desktop monitors, laptops, and rotated phones (tested on 1920×1080, 1366×768, 844×390, and 667×320).
+  - **Sender:** 2-column layout pairing a maximized camera viewfinder with a floating HUD (Facing flip, Torch, Snapshot, Fullscreen) on the left, and a compact session setup / broadcasting sharing panel on the right.
+  - **Viewer:** 70/30 split providing visual priority to the remote video (65–75% width) with floating HUD (PiP, Snapshot, Fullscreen) on the left, and a compact session / metrics sidebar on the right.
+  - Short viewport fallback: Set `overflow-y: auto; overflow-x: hidden;` on the sidebar pane so controls degrade gracefully without clipping on screens with height <= 480px.
+- **Portrait Orientation Stacking:**
+  - Single-column fluid stacking prioritizing active stream feeds using `.streaming-active` reordering (video viewports elevate above setup controls once broadcasting or joined).
+- **State-Driven Workflow Transitions:**
+  - **Sender:** Upon clicking Start Streaming, `#btnStart` is replaced by `#btnStop`, the setup form collapses on mobile, and a dedicated Share Stream card appears with 1-click link copying and an optional QR code reveal toggle.
+  - **Viewer:** Upon clicking Join Stream, `#joinCard` is collapsed into `#viewerSessionActivePanel` with a clean "CONNECTED" badge and 1-click Leave Stream action.
+  - **Role Selection Hub (`/`):** Redesigned into a responsive 2-column single-screen dashboard matching the dark charcoal/navy streaming aesthetic. Features prominent Sender & Viewer role cards with vector Lucide-style icons, an instant mobile QR scan & link copy card, and a collapsible protocol/guide drawer (`Mode A` WebRTC vs `Mode B` Fallback).
+  - **Developer Tools & Integrations:** Python OpenCV endpoints (`/stream/:roomId?pin=...`), direct localhost PC links, and SDP/ICE diagnostic logs are housed inside a collapsed drawer, eliminating cognitive clutter while maintaining 100% feature availability.
+- **Verification:** All 35 automated tests (`npm test`) pass. Embedded assets recompiled with `node scripts/build-embedded-assets.js`.
+
+## DirectShow Virtual Camera & Deeplink Integration (2026-10-12) — ADR-021
+
+- **Submodule Scaffold:** Submodule configured at `vcam/` referencing `https://github.com/WRDeadman10/DirectShow.git`.
+- **DirectShow Source Filter:** Built `vcam/build/LanCamFilter.dll`, an in-process COM capture filter registered under `CLSID_VideoInputDeviceCategory` as `"LAN Phone Camera"`. Connects via WinHTTP to `http://127.0.0.1:7777/stream/<roomId>?pin=<pin>`, decodes frames with WIC (Windows Imaging Component), and streams uncompressed RGB24 video samples.
+- **Deeplink Launcher (`lancam://`):** Built `vcam/build/lancam-setup.exe` to register the custom URI protocol and register the COM filter with Windows. Invoked via `lancam://stream?room=...&pin=...`, updating `%LOCALAPPDATA%\LanCamera\session.ini`.
+- **Packaging & Web Viewer Action:** Bundled into `dist/lancam-vcam-setup.zip` and served at `/download/lancam-vcam`. Added a "Set as Webcam" action to the viewer interface (`src/public/viewer.html`).
+
+
 
 - **Philosophy & Aesthetic:** Grounded in Ayurvedic Sattvic principles: replaced high-contrast clinical dark grey/blue with a calming dark herb-slate palette (`#0a1317`, `#121e24`, `#1f353d`), botanical emerald (`#10b981`), warm turmeric amber (`#f59e0b`), and pitta-cooling terracotta alert tones.
 - **Prāna Pulse Animation:** Live and connecting indicators feature a gentle, organic breathing CSS keyframe pulse (`prana-pulse-green`, `prana-pulse-amber`) rather than abrupt blinks.

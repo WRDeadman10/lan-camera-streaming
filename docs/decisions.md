@@ -261,6 +261,54 @@ Video streaming interfaces frequently inflict optical fatigue and sensory agitat
 **Consequences:**
 Substantially enhanced mobile thumb ergonomics, instant access to stream health vitals, still capture capabilities, and reduced cognitive overload across all platforms.
 
+## ADR-020 — Orientation-Aware Single-Screen UX Architecture
+
+**Status:** Accepted
+
+**Decision:**
+1. **Single-Screen Landscape Viewport (`100dvh`):**
+   - Eliminate document-level scrolling on desktop monitors, laptops, tablets, and rotated mobile devices (tested down to 667×320 and 844×390).
+   - In landscape orientation, use a CSS Grid / Flex workspace with a side-by-side layout:
+     - **Sender:** Left pane houses the camera preview viewfinder with floating HUD controls; right pane houses compact session setup / broadcasting sharing panel.
+     - **Viewer:** 70/30 split where the remote live video receives visual priority on the left (65–75% width), while session state and controls occupy the right pane.
+   - Constrain `.sidebar-pane` to `overflow-y: auto; overflow-x: hidden;` so controls degrade gracefully without clipping on ultra-short viewports while keeping the main video pinned in full view.
+2. **Portrait Fluid Stacking:**
+   - On vertical mobile/tablet orientations, switch to single-column stacking.
+   - When broadcasting or joined (`.streaming-active`), elevate the viewport pane above the setup controls (`order: 1` over `order: 2`) so the active video remains immediately visible upon session start.
+3. **State-Driven Workflow Transitions:**
+   - **Sender:** Collapse the setup form upon starting, surface an active broadcasting share card with quick link copy & optional QR reveal, and toggle primary Start button to Stop button.
+   - **Viewer:** Collapse the Room ID / PIN join form into a compact "CONNECTED" session status bar with one-click Leave Stream button.
+   - **Developer Tools & Integrations:** Move Python OpenCV stream endpoints (`/stream/:roomId?pin=...`), Direct PC viewer links, and SDP/ICE diagnostics into a collapsible drawer (`<details class="collapsible-section card-collapsible">`) collapsed by default.
+
+**Reasoning:**
+Video streaming is an active visual medium where operators and viewers need constant sight of the frame alongside immediate access to session actions. Indiscriminate vertical scrolling disconnects users from their live feeds.
+
+**Consequences:**
+Complete viewability on both mobile orientations and desktop displays without scroll fatigue, zero regressions to WebRTC signaling or Python endpoints, and graceful resilience on ultra-short screens.
+
+## ADR-021 — DirectShow Virtual Camera Driver & Deeplink Integration
+
+**Status:** Accepted
+
+**Decision:**
+1. **DirectShow Virtual Source Filter (`LanCamFilter.dll`):**
+   - Implement an in-process COM DirectShow source filter registered under `CLSID_VideoInputDeviceCategory` as `"LAN Phone Camera"`.
+   - The filter consumes the HTTP/MJPEG stream from `http://127.0.0.1:7777/stream/<roomId>?pin=<pin>` using WinHTTP and decodes frames using the Windows Imaging Component (WIC) into uncompressed RGB24 samples.
+   - Outputs standard DirectShow pins (`IPin`, `IAMStreamConfig`, `IKsPropertySet`) allowing the Windows Camera app, Zoom, Teams, OBS, and Unity to detect and stream it like a physical USB webcam.
+2. **Deeplink Protocol Scheme (`lancam://`):**
+   - Provide a companion launcher (`lancam-setup.exe`) that registers the custom protocol `lancam://` in Windows Registry.
+   - When the user clicks "Set as Webcam" in the browser viewer, the browser launches `lancam://stream?room=...&pin=...&host=...&port=...`.
+   - The launcher persists the active room and PIN into `%LOCALAPPDATA%\LanCamera\session.ini`, allowing the DirectShow filter to tune to the active room automatically without manual configuration.
+3. **Distribution & Packaging:**
+   - Package `LanCamFilter.dll` and `lancam-setup.exe` into `dist/lancam-vcam-setup.zip`.
+   - Serve the zip package directly from the server at `/download/lancam-vcam`.
+
+**Reasoning:**
+Eliminates third-party software dependencies (such as OBS Studio or Python scripts) when users want to treat their mobile camera feed as a native hardware webcam for desktop applications.
+
+**Consequences:**
+Users can view and use the phone camera stream inside native desktop apps like the Windows Camera app simply by downloading and registering the lightweight driver once.
+
 ## Open decisions to revisit after the first working stream
 
 - Whether TypeScript should replace plain JavaScript for stricter types.

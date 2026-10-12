@@ -178,6 +178,20 @@ export function createServer(config, logger) {
     }
   });
 
+  // Download virtual camera installer & DirectShow driver package
+  app.get(['/download/lancam-vcam', '/download/lancam-vcam.zip'], (req, res) => {
+    const candidatePaths = [
+      path.join(process.cwd(), 'dist', 'lancam-vcam-setup.zip'),
+      path.resolve(__dirname, '../../dist/lancam-vcam-setup.zip')
+    ];
+    const zipPath = candidatePaths.find((p) => fs.existsSync(p));
+    if (zipPath) {
+      res.download(zipPath, 'lancam-vcam-setup.zip');
+    } else {
+      res.status(404).send('Virtual camera package not found. Run vcam/build.bat to build it.');
+    }
+  });
+
   // Static files directory: check filesystem locations, fallback to embedded assets
   const candidateDirs = [
     path.resolve(__dirname, '../public'),

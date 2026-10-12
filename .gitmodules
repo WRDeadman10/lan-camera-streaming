@@ -1,0 +1,3 @@
+[submodule "vcam"]
+	path = vcam
+	url = https://github.com/WRDeadman10/DirectShow.git

@@ -4,7 +4,7 @@
  * WebRTC answer creation, remote track rendering, and connection statistics.
  */
 
-import { showError, clearError, showInfo, clearInfo, updateStatus, logDiagnostic, parseCandidateSummary, setupDiagnosticsControls, setPathIndicator, describePath, isLocalHostname, fetchLocalServerOrigin, updateVitals, captureFrameSnapshot, copyTextToClipboard, setupCollapsibleDrawer } from './ui-utils.js';
+import { showError, clearError, showInfo, clearInfo, updateStatus, logDiagnostic, parseCandidateSummary, setupDiagnosticsControls, setPathIndicator, describePath, isLocalHostname, fetchLocalServerOrigin, updateVitals, captureFrameSnapshot, copyTextToClipboard, setupCollapsibleDrawer, setupPasswordToggle } from './ui-utils.js';
 import { WebRtcPeer } from './webrtc-peer.js';
 
 let webrtcPeer = null;
@@ -35,6 +35,10 @@ const remoteVideo = document.getElementById('remoteVideo');
 const remoteCanvas = document.getElementById('remoteCanvas');
 const videoOverlay = document.getElementById('videoOverlay');
 const videoWrapper = document.getElementById('videoWrapper');
+const appWorkspace = document.getElementById('appWorkspace');
+const joinCard = document.getElementById('joinCard');
+const viewerSessionActivePanel = document.getElementById('viewerSessionActivePanel');
+const activeViewerRoomVal = document.getElementById('activeViewerRoomVal');
 const pythonLinkCard = document.getElementById('pythonLinkCard');
 const pythonStreamUrl = document.getElementById('pythonStreamUrl');
 const btnCopyPythonUrl = document.getElementById('btnCopyPythonUrl');
@@ -45,8 +49,38 @@ const btnHudSnapshot = document.getElementById('btnHudSnapshot');
 const btnHudFullscreen = document.getElementById('btnHudFullscreen');
 const btnOverlayReconnect = document.getElementById('btnOverlayReconnect');
 const roomHintBadge = document.getElementById('roomHintBadge');
+const btnSetWebcam = document.getElementById('btnSetWebcam');
 
 const canvasContext = remoteCanvas ? remoteCanvas.getContext('2d') : null;
+
+setupPasswordToggle('btnTogglePin', 'accessPin');
+
+if (btnSetWebcam) {
+  btnSetWebcam.addEventListener('click', () => {
+    const roomId = currentRoomId || (roomIdInput && roomIdInput.value.trim());
+    const pin = accessPinInput ? accessPinInput.value.trim() : '123456';
+    const host = window.location.hostname || '127.0.0.1';
+    const port = window.location.port || '7777';
+
+    if (!roomId) {
+      showError('Please join or enter a Room ID first.');
+      return;
+    }
+
+    const deeplink = `lancam://stream?room=${encodeURIComponent(roomId)}&pin=${encodeURIComponent(pin)}&host=${encodeURIComponent(host)}&port=${encodeURIComponent(port)}`;
+    logDiagnostic(`[VCAM] Triggering DirectShow webcam deeplink: ${deeplink}`, 'INFO');
+
+    // Trigger deeplink via hidden anchor or window.location
+    const tempA = document.createElement('a');
+    tempA.href = deeplink;
+    tempA.style.display = 'none';
+    document.body.appendChild(tempA);
+    tempA.click();
+    document.body.removeChild(tempA);
+
+    copyTextToClipboard(deeplink, btnSetWebcam, '✓ Sent to Webcam!');
+  });
+}
 
 if (btnCopyPythonUrl) {
   btnCopyPythonUrl.addEventListener('click', () => {
@@ -123,6 +157,19 @@ async function joinRoom() {
     currentRoomId = roomId;
     btnLeave.disabled = false;
     logDiagnostic(`Joined room "${roomId}" successfully [mode: ${response.mediaMode}].`);
+
+    if (appWorkspace) {
+      appWorkspace.classList.add('streaming-active');
+    }
+    if (joinCard) {
+      joinCard.style.display = 'none';
+    }
+    if (viewerSessionActivePanel) {
+      viewerSessionActivePanel.style.display = 'block';
+    }
+    if (activeViewerRoomVal) {
+      activeViewerRoomVal.textContent = `Room: ${roomId}`;
+    }
 
     if (btnOverlayReconnect) {
       btnOverlayReconnect.style.display = 'none';
@@ -516,6 +563,16 @@ function leaveRoom() {
 
   if (pythonLinkCard) {
     pythonLinkCard.style.display = 'none';
+  }
+
+  if (appWorkspace) {
+    appWorkspace.classList.remove('streaming-active');
+  }
+  if (joinCard) {
+    joinCard.style.display = 'block';
+  }
+  if (viewerSessionActivePanel) {
+    viewerSessionActivePanel.style.display = 'none';
   }
 
   btnJoin.disabled = false;

@@ -198,9 +198,22 @@ async function main() {
 
     let zrokProcess = null;
     let activeShareToken = null;
+    let isShuttingDown = false;
 
     const cleanupAndExit = () => {
+      if (isShuttingDown) {
+        return;
+      }
+      isShuttingDown = true;
       console.log('\nShutting down server and releasing resources...');
+
+      // Force exit safeguard if keep-alive sockets stall httpServer.close
+      const forceExitTimer = setTimeout(() => {
+        console.warn('Forcing process exit after timeout.');
+        process.exit(0);
+      }, 3000);
+      forceExitTimer.unref();
+
       if (zrokProcess) {
         try {
           zrokProcess.kill();
@@ -219,7 +232,16 @@ async function main() {
         }
       }
 
+      try {
+        io.close();
+      } catch {}
+
+      if (typeof httpServer.closeAllConnections === 'function') {
+        httpServer.closeAllConnections();
+      }
+
       httpServer.close(() => {
+        clearTimeout(forceExitTimer);
         console.log('Shutdown complete.');
         process.exit(0);
       });

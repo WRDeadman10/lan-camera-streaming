@@ -267,7 +267,7 @@ export function copyTextToClipboard(text, buttonElement, feedbackLabel = '✓ Co
   });
 }
 
-export function setupCollapsibleDrawer(toggleBtnId, contentId, expandText = '▼ Show Details', collapseText = '▲ Hide Details') {
+export function setupCollapsibleDrawer(toggleBtnId, contentId, expandText = 'Expand', collapseText = 'Collapse') {
   const btn = document.getElementById(toggleBtnId);
   const content = document.getElementById(contentId);
   if (!btn || !content) {
@@ -277,5 +277,18 @@ export function setupCollapsibleDrawer(toggleBtnId, contentId, expandText = '▼
     const isHidden = content.style.display === 'none' || !content.style.display;
     content.style.display = isHidden ? 'block' : 'none';
     btn.textContent = isHidden ? collapseText : expandText;
+  });
+}
+
+export function setupPasswordToggle(btnId, inputId) {
+  const btn = document.getElementById(btnId);
+  const input = document.getElementById(inputId);
+  if (!btn || !input) {
+    return;
+  }
+  btn.addEventListener('click', () => {
+    const isPass = input.type === 'password';
+    input.type = isPass ? 'text' : 'password';
+    btn.textContent = isPass ? 'Hide' : 'Show';
   });
 }

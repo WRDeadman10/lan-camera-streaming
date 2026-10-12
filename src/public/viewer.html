@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Viewer - LAN Camera Streaming</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico">
   <link rel="icon" type="image/png" href="/favicon.png">
@@ -10,154 +10,193 @@
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-  <div class="container">
-    <header>
-      <div class="brand-header">
-        <img src="/favicon.png" alt="LAN Camera Logo" class="brand-logo">
-        <h1>Camera Viewer</h1>
+  <div class="app-shell" id="appShell">
+    <!-- Slim Navigation Header -->
+    <header class="app-header">
+      <div class="header-brand">
+        <img src="/favicon.png" alt="Logo" class="brand-logo">
+        <span class="brand-title">LAN Camera <span class="brand-sub">Viewer</span></span>
       </div>
-      <p>Harmonious live camera reception with ultra low-latency WebRTC</p>
+      <div class="header-status">
+        <span id="statusBadge" class="status-badge status-disconnected">
+          <span class="status-indicator"></span>
+          <span id="statusText">Disconnected</span>
+        </span>
+        <div id="pathIndicator" class="path-indicator" role="status"></div>
+      </div>
+      <div class="header-nav">
+        <a href="/" class="header-link" title="Return to Role Selection">Role Selection</a>
+      </div>
     </header>
 
-    <main>
-      <div id="errorAlert" class="alert alert-danger" role="alert"></div>
-      <div id="infoAlert" class="alert alert-info" role="status"></div>
-      <div id="localViewerHint" class="alert alert-info" role="status">
-        💡 You opened this page through a public tunnel. Open
-        <a id="localViewerHintLink" href="#" style="color: inherit; font-family: monospace; font-weight: bold; text-decoration: underline;"></a>
-        on this PC instead so the video stays entirely inside your local network.
-      </div>
-
-      <!-- Join Session Card -->
-      <div class="card" id="joinCard">
-        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 16px;">
-          <h2 style="border-bottom: none; margin-bottom: 0; padding-bottom: 0;">🌿 Join Session</h2>
-          <span id="roomHintBadge" style="display: none; font-size: 0.8rem; background: rgba(16, 185, 129, 0.15); color: #34d399; padding: 4px 10px; border-radius: 9999px; border: 1px solid rgba(16, 185, 129, 0.3);">
-            Room prefilled
-          </span>
-        </div>
-
-        <div class="form-group">
-          <label for="accessPin">Access PIN</label>
-          <input type="password" id="accessPin" placeholder="Enter configured PIN" value="123456" autocomplete="current-password">
-        </div>
-
-        <div class="form-group">
-          <label for="roomId">Room ID</label>
-          <input type="text" id="roomId" placeholder="Enter Room ID provided by sender">
-        </div>
-
-        <div class="form-group">
-          <label for="mediaMode">Media Transport Mode</label>
-          <select id="mediaMode">
-            <option value="webrtc" selected>WebRTC — Direct/ICE media (Low Latency P2P)</option>
-            <option value="tunnel-relay">Fallback — Video through zrok (uses zrok quota)</option>
-          </select>
-        </div>
-
-        <div class="button-group" style="margin-top: 20px;">
-          <button type="button" id="btnJoin" class="btn btn-primary">▶️ Join Room</button>
-          <button type="button" id="btnLeave" class="btn btn-danger" disabled>⏹️ Leave Room</button>
-          <button type="button" id="btnFullscreen" class="btn btn-secondary">⛶ Fullscreen</button>
-        </div>
-      </div>
-
-      <!-- Direct Python AI Stream Card -->
-      <div class="card" id="pythonLinkCard" style="display: none; border-color: rgba(245, 158, 11, 0.4);">
-        <h2>🐍 Direct Python Inference Stream</h2>
-        <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 12px;">
-          OpenCV / PyTorch / YOLO direct video feed link:
-        </p>
-        <div style="display: flex; gap: 8px;">
-          <input type="text" id="pythonStreamUrl" readonly style="font-family: monospace; background-color: #070e12; flex: 1;">
-          <button type="button" id="btnCopyPythonUrl" class="btn btn-secondary" style="padding: 8px 14px; font-size: 0.85rem; white-space: nowrap;">Copy</button>
-        </div>
-      </div>
-
-      <!-- Live Stream Sanctuary Card -->
-      <div class="card">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <h2>📺 Live Stream Sanctuary</h2>
-          <span id="statusBadge" class="status-badge status-disconnected">
-            <span class="status-indicator"></span>
-            <span id="statusText">Disconnected</span>
-          </span>
-        </div>
-
-        <!-- Nāḍī Parīkṣā (Stream Health & Vitals Bar) -->
-        <div class="vitals-bar" id="streamVitalsBar">
-          <div class="vital-item">
-            <div class="vital-header">
-              <span class="vital-icon">⚡</span>
-              <span class="vital-label">Flow / FPS</span>
-            </div>
-            <div class="vital-value" id="vitalFps">--</div>
-          </div>
-          <div class="vital-item">
-            <div class="vital-header">
-              <span class="vital-icon">👁️</span>
-              <span class="vital-label">Acuity</span>
-            </div>
-            <div class="vital-value" id="vitalRes">--</div>
-          </div>
-          <div class="vital-item">
-            <div class="vital-header">
-              <span class="vital-icon">🌐</span>
-              <span class="vital-label">Mārga / Path</span>
-            </div>
-            <div class="vital-value" id="vitalPath">--</div>
-          </div>
-          <div class="vital-item">
-            <div class="vital-header">
-              <span class="vital-icon">⏱️</span>
-              <span class="vital-label">Pulse / Ping</span>
-            </div>
-            <div class="vital-value" id="vitalLatency">--</div>
-          </div>
-        </div>
-
-        <div id="pathIndicator" class="path-indicator" role="status"></div>
-
-        <!-- Video Viewport with Floating HUD -->
+    <!-- Main Workspace (70% video on left, 30% sidebar on right in landscape) -->
+    <main class="app-workspace viewer-workspace" id="appWorkspace">
+      <!-- Left: Remote Video Viewport (Takes visual priority) -->
+      <section class="viewport-pane" aria-label="Live Video Feed">
         <div class="video-container" id="videoWrapper">
           <video id="remoteVideo" autoplay playsinline style="display: block;"></video>
           <canvas id="remoteCanvas" style="display: none; width: 100%; height: 100%; object-fit: contain;"></canvas>
+
+          <!-- Status & Message Overlay -->
           <div id="videoOverlay" class="video-overlay-msg">
-            <div>Enter Room ID and click "Join Room" to view stream</div>
-            <div style="margin-top: 10px;">
-              <button type="button" id="btnOverlayReconnect" class="btn btn-secondary" style="display: none; padding: 6px 14px; font-size: 0.85rem;">
-                🔄 Recheck Stream
-              </button>
+            <svg class="overlay-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="5 3 19 12 5 21 5 3"/>
+            </svg>
+            <div class="overlay-title" id="overlayTitle">Stream Inactive</div>
+            <div class="overlay-subtitle" id="overlaySubtitle">Enter the Room ID and click Join Stream to watch live</div>
+            <div style="margin-top: 12px;">
+              <button type="button" id="btnOverlayReconnect" class="btn btn-primary btn-sm" style="display: none;">Reconnect Stream</button>
             </div>
           </div>
 
-          <!-- Floating Viewport HUD -->
+          <!-- Floating Viewport HUD Controls -->
           <div class="video-hud">
-            <button type="button" id="btnHudPip" class="hud-btn" title="Picture-in-Picture (Floating Window)">🗔</button>
-            <button type="button" id="btnHudSnapshot" class="hud-btn" title="Save Snapshot Image">📷</button>
-            <button type="button" id="btnHudFullscreen" class="hud-btn" title="Toggle Fullscreen">⛶</button>
+            <button type="button" id="btnHudPip" class="hud-btn" title="Picture-in-Picture">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="4" width="20" height="16" rx="2"/>
+                <rect x="12" y="10" width="8" height="6" rx="1"/>
+              </svg>
+            </button>
+            <button type="button" id="btnHudSnapshot" class="hud-btn" title="Save Snapshot Image">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                <circle cx="8.5" cy="8.5" r="1.5"/>
+                <polyline points="21 15 16 10 5 21"/>
+              </svg>
+            </button>
+            <button type="button" id="btnHudFullscreen" class="hud-btn" title="Toggle Fullscreen">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+              </svg>
+            </button>
           </div>
         </div>
 
-        <!-- Diagnostics Drawer -->
-        <div style="margin-top: 18px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <button type="button" id="btnToggleDiagnostics" class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.8rem;">
-              📋 Technical Diagnostics & WebRTC Vitals ▼
+        <!-- Real-time Stream Vitals / Metrics Strip -->
+        <div class="vitals-bar" id="streamVitalsBar">
+          <div class="vital-item">
+            <span class="vital-label">Flow</span>
+            <span class="vital-value" id="vitalFps">--</span>
+          </div>
+          <div class="vital-item">
+            <span class="vital-label">Acuity</span>
+            <span class="vital-value" id="vitalRes">--</span>
+          </div>
+          <div class="vital-item">
+            <span class="vital-label">Path</span>
+            <span class="vital-value" id="vitalPath">--</span>
+          </div>
+          <div class="vital-item">
+            <span class="vital-label">Latency</span>
+            <span class="vital-value" id="vitalLatency">--</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right: Compact Controls Sidebar -->
+      <aside class="sidebar-pane" aria-label="Viewer Controls">
+        <div id="errorAlert" class="alert alert-danger" role="alert"></div>
+        <div id="infoAlert" class="alert alert-info" role="status"></div>
+        <div id="localViewerHint" class="alert alert-info" role="status">
+          Opened via tunnel proxy. Open <a id="localViewerHintLink" href="#" style="color: inherit; font-weight: bold; text-decoration: underline;"></a> on this PC for direct LAN streaming.
+        </div>
+
+        <!-- Active Session Panel (Shown after joining) -->
+        <div class="card session-active-panel" id="viewerSessionActivePanel" style="display: none;">
+          <div class="session-active-header">
+            <span class="live-pill" id="viewerLivePill">CONNECTED</span>
+            <span class="detail-val" id="activeViewerRoomVal">Room: --</span>
+          </div>
+
+          <!-- Virtual Webcam Driver Integration Action -->
+          <div style="margin-top: 10px; display: flex; flex-direction: column; gap: 8px;">
+            <button type="button" id="btnSetWebcam" class="btn btn-primary btn-block" style="background: linear-gradient(135deg, #0284c7, #0369a1);" title="Tune the LAN Virtual Camera driver to this room">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px; vertical-align: middle;">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                <circle cx="12" cy="13" r="4"></circle>
+              </svg>
+              Set as Webcam
             </button>
-            <div style="display: flex; gap: 6px;">
-              <button type="button" id="btnCopyLogs" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem;">📋 Copy</button>
-              <button type="button" id="btnClearLogs" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem;">🗑️ Clear</button>
+            <div style="font-size: 0.72rem; color: var(--text-muted); text-align: center;">
+              Use in Windows Camera, Zoom, Teams, or Unity. 
+              <a href="/download/lancam-vcam" download style="color: var(--accent-cyan); text-decoration: underline;">Download Driver</a>
             </div>
           </div>
-          <div id="diagnosticsLog" class="diagnostics-panel" style="display: none;">Not connected.</div>
-        </div>
-      </div>
-    </main>
 
-    <footer class="footer">
-      <a href="/">&larr; Back to Role Selection</a> &bull; Production-grade WebRTC LAN Streaming
-    </footer>
+          <div class="action-buttons-group" style="margin-top: 10px;">
+            <button type="button" id="btnLeave" class="btn btn-danger btn-block" disabled>Leave Stream</button>
+          </div>
+        </div>
+
+        <!-- Join Session Card (Shown before joining) -->
+        <div class="card" id="joinCard">
+          <div class="card-header">
+            <h2 class="card-title">Join Stream</h2>
+            <span id="roomHintBadge" class="badge-hint" style="display: none;">Prefilled</span>
+          </div>
+
+          <div class="form-group">
+            <label for="roomId">Room ID</label>
+            <input type="text" id="roomId" placeholder="Enter Room ID provided by sender">
+          </div>
+
+          <div class="form-group">
+            <label for="accessPin">Access PIN</label>
+            <div class="input-action-group">
+              <input type="password" id="accessPin" value="123456" autocomplete="current-password">
+              <button type="button" id="btnTogglePin" class="btn-action-inline" title="Show or hide PIN">Show</button>
+            </div>
+          </div>
+
+          <!-- Expandable Transport Selection -->
+          <details class="collapsible-section" id="viewerAdvancedSection">
+            <summary class="collapsible-summary">Advanced Settings</summary>
+            <div class="collapsible-body">
+              <div class="form-group">
+                <label for="mediaMode">Transport Mode</label>
+                <select id="mediaMode">
+                  <option value="webrtc" selected>WebRTC — Direct/ICE media (Low Latency P2P)</option>
+                  <option value="tunnel-relay">Fallback — Video through zrok (uses zrok quota)</option>
+                </select>
+              </div>
+            </div>
+          </details>
+
+          <div class="action-buttons-group" style="margin-top: 14px;">
+            <button type="button" id="btnJoin" class="btn btn-primary btn-block btn-lg">Join Stream</button>
+            <button type="button" id="btnFullscreen" class="btn btn-secondary" style="display: none;">Fullscreen</button>
+          </div>
+        </div>
+
+        <!-- Developer Tools & Integrations (Collapsed by default) -->
+        <details class="collapsible-section card-collapsible" id="devToolsSection">
+          <summary class="collapsible-summary">Developer Tools & Diagnostics</summary>
+          <div class="collapsible-body">
+            <!-- Direct Python Inference -->
+            <div id="pythonLinkCard" class="integration-item" style="display: none;">
+              <div class="integration-title">Python OpenCV / YOLO Stream Link</div>
+              <div class="share-input-row">
+                <input type="text" id="pythonStreamUrl" readonly class="code-input">
+                <button type="button" id="btnCopyPythonUrl" class="btn btn-secondary btn-sm">Copy</button>
+              </div>
+            </div>
+
+            <!-- WebRTC Diagnostics -->
+            <div class="integration-item">
+              <div class="diagnostics-header">
+                <div class="integration-title">WebRTC Logs & Diagnostics</div>
+                <div class="diagnostics-actions">
+                  <button type="button" id="btnCopyLogs" class="btn-ghost-xs">Copy</button>
+                  <button type="button" id="btnClearLogs" class="btn-ghost-xs">Clear</button>
+                  <button type="button" id="btnToggleDiagnostics" class="btn-ghost-xs">Expand</button>
+                </div>
+              </div>
+              <div id="diagnosticsLog" class="diagnostics-panel" style="display: none;">Not connected.</div>
+            </div>
+          </div>
+        </details>
+      </aside>
+    </main>
   </div>
 
   <script src="/vendor/socket.io.js"></script>

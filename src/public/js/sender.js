@@ -4,7 +4,7 @@
  * and WebRTC peer connection to viewer.
  */
 
-import { showError, clearError, showInfo, clearInfo, updateStatus, logDiagnostic, parseCandidateSummary, setupDiagnosticsControls, setPathIndicator, describePath, isLocalHostname, fetchLocalServerOrigin, updateVitals, captureFrameSnapshot, copyTextToClipboard, setupCollapsibleDrawer } from './ui-utils.js';
+import { showError, clearError, showInfo, clearInfo, updateStatus, logDiagnostic, parseCandidateSummary, setupDiagnosticsControls, setPathIndicator, describePath, isLocalHostname, fetchLocalServerOrigin, updateVitals, captureFrameSnapshot, copyTextToClipboard, setupCollapsibleDrawer, setupPasswordToggle } from './ui-utils.js';
 import { CameraManager } from './camera-manager.js';
 import { WebRtcPeer } from './webrtc-peer.js';
 
@@ -51,11 +51,14 @@ const btnToggleFacing = document.getElementById('btnToggleFacing');
 const localVideo = document.getElementById('localVideo');
 const videoOverlay = document.getElementById('videoOverlay');
 const videoContainer = document.getElementById('videoContainer');
+const appWorkspace = document.getElementById('appWorkspace');
 const shareQrCard = document.getElementById('shareQrCard');
 const viewerQrImg = document.getElementById('viewerQrImg');
 const viewerQrLink = document.getElementById('viewerQrLink');
 const viewerQrLinkInput = document.getElementById('viewerQrLinkInput');
 const btnCopyViewerLink = document.getElementById('btnCopyViewerLink');
+const btnToggleQrPreview = document.getElementById('btnToggleQrPreview');
+const qrDropdownMount = document.getElementById('qrDropdownMount');
 const pythonLinkCard = document.getElementById('pythonLinkCard');
 const pythonStreamUrl = document.getElementById('pythonStreamUrl');
 const btnCopyPythonUrl = document.getElementById('btnCopyPythonUrl');
@@ -109,11 +112,21 @@ if (btnCopyLocalLink) {
   });
 }
 
+if (btnToggleQrPreview && qrDropdownMount) {
+  btnToggleQrPreview.addEventListener('click', () => {
+    const isHidden = qrDropdownMount.style.display === 'none' || !qrDropdownMount.style.display;
+    qrDropdownMount.style.display = isHidden ? 'block' : 'none';
+    btnToggleQrPreview.textContent = isHidden ? 'Hide QR' : 'Show QR';
+  });
+}
+
+setupPasswordToggle('btnTogglePin', 'accessPin');
+
 if (btnToggleSetup && setupFormBody) {
   btnToggleSetup.addEventListener('click', () => {
     const isHidden = setupFormBody.style.display === 'none';
     setupFormBody.style.display = isHidden ? 'block' : 'none';
-    btnToggleSetup.textContent = isHidden ? '▲ Collapse' : '⚙️ Expand Settings';
+    btnToggleSetup.textContent = isHidden ? 'Collapse' : 'Settings';
   });
 }
 
@@ -282,11 +295,18 @@ async function startSession() {
       path: currentMediaMode === 'tunnel-relay' ? 'tunnel-relay' : '--'
     });
 
+    if (appWorkspace) {
+      appWorkspace.classList.add('streaming-active');
+    }
+    btnStart.style.display = 'none';
+    btnStop.style.display = 'inline-flex';
+    btnStop.disabled = false;
+
     if (btnToggleSetup) {
       btnToggleSetup.style.display = 'inline-flex';
-      if (window.innerWidth <= 640 && setupFormBody) {
+      if (window.innerWidth <= 768 && setupFormBody) {
         setupFormBody.style.display = 'none';
-        btnToggleSetup.textContent = '⚙️ Expand Settings';
+        btnToggleSetup.textContent = 'Settings';
       }
     }
 
@@ -297,12 +317,13 @@ async function startSession() {
     showError(err.message);
     logDiagnostic(`Camera capture failed: ${err.message}`, 'ERROR');
     btnStart.disabled = false;
+    btnStart.style.display = 'inline-flex';
+    btnStop.style.display = 'none';
     return;
   }
 
   currentRoomId = roomId;
   currentMediaMode = mediaModeSelect ? mediaModeSelect.value : 'webrtc';
-  btnStop.disabled = false;
 
   // Initialize Socket.IO connection
   if (!socket) {
@@ -869,12 +890,16 @@ function stopSession() {
     rtt: null
   });
 
+  if (appWorkspace) {
+    appWorkspace.classList.remove('streaming-active');
+  }
+
   if (setupFormBody) {
     setupFormBody.style.display = 'block';
   }
   if (btnToggleSetup) {
     btnToggleSetup.style.display = 'none';
-    btnToggleSetup.textContent = '▲ Collapse';
+    btnToggleSetup.textContent = 'Collapse';
   }
   if (btnHudTorch) {
     btnHudTorch.style.display = 'none';
@@ -912,7 +937,9 @@ function stopSession() {
   videoOverlay.style.display = 'block';
 
   btnStart.disabled = false;
+  btnStart.style.display = 'inline-flex';
   btnStop.disabled = true;
+  btnStop.style.display = 'none';
   updateStatus('stopped', 'Stopped');
   logDiagnostic('Capture and session stopped.');
 }

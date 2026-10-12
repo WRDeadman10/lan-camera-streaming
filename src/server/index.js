@@ -26,9 +26,31 @@ httpServer.listen(config.port, config.host, () => {
   logger.info(`Health check available at ${scheme}://${config.host}:${config.port}/health`);
 });
 
+let isShuttingDown = false;
+
 function handleShutdown(signal) {
+  if (isShuttingDown) {
+    return;
+  }
+  isShuttingDown = true;
   logger.info(`Received ${signal}, closing server gracefully...`);
+
+  const forceExitTimer = setTimeout(() => {
+    logger.warn('Forcing process exit after shutdown timeout.');
+    process.exit(0);
+  }, 3000);
+  forceExitTimer.unref();
+
+  try {
+    io.close();
+  } catch {}
+
+  if (typeof httpServer.closeAllConnections === 'function') {
+    httpServer.closeAllConnections();
+  }
+
   httpServer.close(() => {
+    clearTimeout(forceExitTimer);
     logger.info('HTTP server closed.');
     process.exit(0);
   });
