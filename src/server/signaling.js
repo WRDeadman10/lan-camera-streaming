@@ -111,14 +111,32 @@ export function setupSignaling(httpServer, config, logger) {
         return;
       }
 
-      const peerSocketId = roomManager.getPeerSocketId(socket.id);
-      if (peerSocketId) {
-        logger.debug(`Relaying SDP offer from ${socket.id} to ${peerSocketId}`);
-        io.to(peerSocketId).emit('webrtc:offer', {
-          sdp: payload.sdp,
-          type: payload.type,
-          senderId: socket.id
-        });
+      const room = roomManager.getRoom(membership.roomId);
+      if (!room) {
+        return;
+      }
+
+      // If sender emitted offer with target viewerId (or payload.targetId)
+      if (membership.role === 'sender') {
+        const targetId = payload.targetId || payload.viewerId || roomManager.getPeerSocketId(socket.id);
+        if (targetId && room.viewerSocketIds.has(targetId)) {
+          logger.debug(`Relaying SDP offer from sender ${socket.id} to viewer ${targetId}`);
+          io.to(targetId).emit('webrtc:offer', {
+            sdp: payload.sdp,
+            type: payload.type,
+            senderId: socket.id
+          });
+        }
+      } else {
+        // If an external receiver offers to sender
+        if (room.senderSocketId) {
+          logger.debug(`Relaying SDP offer from receiver ${socket.id} to sender ${room.senderSocketId}`);
+          io.to(room.senderSocketId).emit('webrtc:offer', {
+            sdp: payload.sdp,
+            type: payload.type,
+            senderId: socket.id
+          });
+        }
       }
     });
 
@@ -135,14 +153,32 @@ export function setupSignaling(httpServer, config, logger) {
         return;
       }
 
-      const peerSocketId = roomManager.getPeerSocketId(socket.id);
-      if (peerSocketId) {
-        logger.debug(`Relaying SDP answer from ${socket.id} to ${peerSocketId}`);
-        io.to(peerSocketId).emit('webrtc:answer', {
-          sdp: payload.sdp,
-          type: payload.type,
-          senderId: socket.id
-        });
+      const room = roomManager.getRoom(membership.roomId);
+      if (!room) {
+        return;
+      }
+
+      if (membership.role === 'viewer') {
+        // Viewer answering sender
+        if (room.senderSocketId) {
+          logger.debug(`Relaying SDP answer from viewer ${socket.id} to sender ${room.senderSocketId}`);
+          io.to(room.senderSocketId).emit('webrtc:answer', {
+            sdp: payload.sdp,
+            type: payload.type,
+            senderId: socket.id
+          });
+        }
+      } else {
+        // Sender answering external receiver offer
+        const targetId = payload.targetId || payload.viewerId || roomManager.getPeerSocketId(socket.id);
+        if (targetId && room.viewerSocketIds.has(targetId)) {
+          logger.debug(`Relaying SDP answer from sender ${socket.id} to receiver ${targetId}`);
+          io.to(targetId).emit('webrtc:answer', {
+            sdp: payload.sdp,
+            type: payload.type,
+            senderId: socket.id
+          });
+        }
       }
     });
 
@@ -158,13 +194,41 @@ export function setupSignaling(httpServer, config, logger) {
         return;
       }
 
-      const peerSocketId = roomManager.getPeerSocketId(socket.id);
-      if (peerSocketId) {
-        io.to(peerSocketId).emit('webrtc:ice-candidate', {
-          candidate: payload.candidate,
-          sdpMid: payload.sdpMid,
-          sdpMLineIndex: payload.sdpMLineIndex
-        });
+      const room = roomManager.getRoom(membership.roomId);
+      if (!room) {
+        return;
+      }
+
+      if (membership.role === 'sender') {
+        const targetId = payload.targetId || payload.viewerId;
+        if (targetId && room.viewerSocketIds.has(targetId)) {
+          io.to(targetId).emit('webrtc:ice-candidate', {
+            candidate: payload.candidate,
+            sdpMid: payload.sdpMid,
+            sdpMLineIndex: payload.sdpMLineIndex,
+            senderId: socket.id
+          });
+        } else {
+          // If no specific targetId given, broadcast candidate to all viewers in room
+          for (const viewerId of room.viewerSocketIds) {
+            io.to(viewerId).emit('webrtc:ice-candidate', {
+              candidate: payload.candidate,
+              sdpMid: payload.sdpMid,
+              sdpMLineIndex: payload.sdpMLineIndex,
+              senderId: socket.id
+            });
+          }
+        }
+      } else {
+        // Viewer sending ICE candidate to sender
+        if (room.senderSocketId) {
+          io.to(room.senderSocketId).emit('webrtc:ice-candidate', {
+            candidate: payload.candidate,
+            sdpMid: payload.sdpMid,
+            sdpMLineIndex: payload.sdpMLineIndex,
+            senderId: socket.id
+          });
+        }
       }
     });
 
@@ -175,9 +239,9 @@ export function setupSignaling(httpServer, config, logger) {
         return;
       }
 
-      const peerSocketId = roomManager.getPeerSocketId(socket.id);
-      if (!peerSocketId) {
-        return; // No viewer connected to receive frame
+      const room = roomManager.getRoom(membership.roomId);
+      if (!room || room.viewerSocketIds.size === 0) {
+        return; // No viewers connected to receive frame
       }
 
       const result = tunnelRelay.processIncomingFrame(membership.roomId, data);
@@ -191,8 +255,10 @@ export function setupSignaling(httpServer, config, logger) {
         return;
       }
 
-      // Forward raw binary buffer directly to authorized viewer
-      io.to(peerSocketId).emit('tunnel:frame', result.buffer);
+      // Forward raw binary buffer directly to all authorized viewers
+      for (const viewerId of room.viewerSocketIds) {
+        io.to(viewerId).emit('tunnel:frame', result.buffer);
+      }
     });
 
     // Request tunnel relay stats
@@ -241,9 +307,11 @@ export function setupSignaling(httpServer, config, logger) {
         return;
       }
 
-      const peerSocketId = roomManager.getPeerSocketId(socket.id);
-      if (peerSocketId && payload && typeof payload.state === 'string') {
-        io.to(peerSocketId).emit('stream:state', { state: payload.state });
+      const room = roomManager.getRoom(membership.roomId);
+      if (room && payload && typeof payload.state === 'string') {
+        for (const viewerId of room.viewerSocketIds) {
+          io.to(viewerId).emit('stream:state', { state: payload.state });
+        }
       }
     });
 
@@ -253,12 +321,15 @@ export function setupSignaling(httpServer, config, logger) {
       if (leaveResult) {
         socket.leave(leaveResult.roomId);
         logger.info(`Socket ${socket.id} left room "${leaveResult.roomId}"`);
-        if (leaveResult.peerSocketId) {
-          io.to(leaveResult.peerSocketId).emit('peer:left', {
-            role: leaveResult.role
-          });
-        } else {
+        if (leaveResult.role === 'sender') {
+          for (const vId of leaveResult.peerSocketIds) {
+            io.to(vId).emit('peer:left', { role: leaveResult.role, peerId: socket.id });
+          }
           tunnelRelay.cleanRoom(leaveResult.roomId);
+        } else {
+          if (leaveResult.peerSocketId) {
+            io.to(leaveResult.peerSocketId).emit('peer:left', { role: leaveResult.role, peerId: socket.id });
+          }
         }
       }
     });
@@ -271,12 +342,15 @@ export function setupSignaling(httpServer, config, logger) {
       if (leaveResult) {
         socket.leave(leaveResult.roomId);
         logger.info(`Socket ${socket.id} disconnected from room "${leaveResult.roomId}"`);
-        if (leaveResult.peerSocketId) {
-          io.to(leaveResult.peerSocketId).emit('peer:left', {
-            role: leaveResult.role
-          });
-        } else {
+        if (leaveResult.role === 'sender') {
+          for (const vId of leaveResult.peerSocketIds) {
+            io.to(vId).emit('peer:left', { role: leaveResult.role, peerId: socket.id });
+          }
           tunnelRelay.cleanRoom(leaveResult.roomId);
+        } else {
+          if (leaveResult.peerSocketId) {
+            io.to(leaveResult.peerSocketId).emit('peer:left', { role: leaveResult.role, peerId: socket.id });
+          }
         }
       }
     });

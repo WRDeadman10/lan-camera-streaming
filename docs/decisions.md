@@ -220,10 +220,26 @@ A single click or command (`build.bat`) increments the version, bundles static a
 
 **Correction (2026-10-12):** the browser Socket.IO client cannot come from `node_modules` inside the exe. `signaling.js` sets `serveClient: false`; `server.js` serves the client at `/vendor/socket.io.js` (installed package first, embedded copy as fallback) and the pages load it from there. It must not live under `/socket.io/` because engine.io intercepts every request on that prefix. Any new runtime file read from `node_modules` or the source tree needs the same embedding treatment.
 
+## ADR-018 — Multi-viewer concurrent WebRTC mesh streaming
+
+**Status:** Accepted
+
+**Decision:**
+1. Transition from the 1-to-1 connection model to a 1-to-many multi-peer mesh model per room.
+2. In `RoomManager`, replace the single `viewerSocketId` with `viewerSocketIds: Set<string>`. Multiple viewers can join the same room simultaneously without throwing `"Room already has an active viewer/receiver."`. Exactly 1 sender remains enforced per room.
+3. In `signaling.js`, enhance `webrtc:offer`, `webrtc:answer`, and `webrtc:ice-candidate` to route targeted payloads between the sender and individual viewers using `targetId` / `viewerId` / `senderId`. Broadcast non-targeted sender candidates and tunnel frames (`tunnel:frame`) to all connected viewers in the room.
+4. On the sender client (`sender.js`), manage an individual `WebRtcPeer` instance for each connected viewer (`Map<viewerId, WebRtcPeer>`). When a viewer joins (`peer:joined`), the sender creates an offer specifically targeted to that viewer. When a viewer disconnects (`peer:left`), the sender closes only that viewer's peer connection without tearing down other viewers or stopping the camera.
+
+**Reasoning:**
+Eliminates user lockouts caused by duplicate browser tabs, reloading, or external receiver sidecars (e.g. Unity or Python) needing to stream concurrently with a PC browser preview.
+
+**Consequences:**
+Multiple viewers can watch the live camera stream concurrently over WebRTC or tunnel relay. Since the sender phone uploads an individual WebRTC track per viewer, performance depends on device encode power and local network bandwidth (typically 2–4 viewers on modern devices).
+
 ## Open decisions to revisit after the first working stream
 
 - Whether TypeScript should replace plain JavaScript for stricter types.
-- Whether the app needs multiple simultaneous viewers or camera sources.
+- Whether the app needs multiple simultaneous camera sources.
 - Whether TURN should be operated locally, on a server, or not at all for the intended networks.
 - Whether audio is required.
 - Whether the final deployment should use a trusted local CA/local DNS or continue using a tunnel.

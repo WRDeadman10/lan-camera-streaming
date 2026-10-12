@@ -7,9 +7,9 @@
 export class RoomManager {
   constructor(accessPin) {
     this.accessPin = accessPin;
-    // Map<roomId, { senderSocketId: string|null, viewerSocketId: string|null, createdAt: number, lastActiveAt: number }>
+    // Map<roomId, { senderSocketId: string|null, viewerSocketIds: Set<string>, mediaMode: string, createdAt: number, lastActiveAt: number }>
     this.rooms = new Map();
-    // Map<socketId, { roomId: string, role: 'sender'|'viewer' }>
+    // Map<socketId, { roomId: string, role: 'sender'|'viewer', mediaMode: string }>
     this.socketToRoom = new Map();
   }
 
@@ -59,7 +59,7 @@ export class RoomManager {
     if (!room) {
       room = {
         senderSocketId: null,
-        viewerSocketId: null,
+        viewerSocketIds: new Set(),
         mediaMode: normalizedMode,
         createdAt: Date.now(),
         lastActiveAt: Date.now()
@@ -81,22 +81,29 @@ export class RoomManager {
       }
       room.senderSocketId = socketId;
     } else {
-      if (room.viewerSocketId && room.viewerSocketId !== socketId) {
-        return { success: false, error: 'Room already has an active viewer/receiver.' };
-      }
-      room.viewerSocketId = socketId;
+      // Multiple concurrent viewers are allowed
+      room.viewerSocketIds.add(socketId);
     }
 
     room.lastActiveAt = Date.now();
     this.socketToRoom.set(socketId, { roomId, role: normalizedRole, mediaMode: room.mediaMode });
+
+    const hasPeer = normalizedRole === 'sender'
+      ? room.viewerSocketIds.size > 0
+      : Boolean(room.senderSocketId);
+
+    const peerSocketId = normalizedRole === 'sender'
+      ? (room.viewerSocketIds.size > 0 ? Array.from(room.viewerSocketIds)[0] : null)
+      : room.senderSocketId;
 
     return {
       success: true,
       roomId,
       role: normalizedRole,
       mediaMode: room.mediaMode,
-      hasPeer: Boolean(normalizedRole === 'sender' ? room.viewerSocketId : room.senderSocketId),
-      peerSocketId: normalizedRole === 'sender' ? room.viewerSocketId : room.senderSocketId
+      hasPeer,
+      peerSocketId,
+      peerSocketIds: normalizedRole === 'sender' ? Array.from(room.viewerSocketIds) : (room.senderSocketId ? [room.senderSocketId] : [])
     };
   }
 
@@ -119,7 +126,19 @@ export class RoomManager {
       return null;
     }
 
-    return membership.role === 'sender' ? room.viewerSocketId : room.senderSocketId;
+    if (membership.role === 'sender') {
+      return room.viewerSocketIds.size > 0 ? Array.from(room.viewerSocketIds)[0] : null;
+    }
+
+    return room.senderSocketId;
+  }
+
+  getViewerSocketIds(roomId) {
+    const room = this.rooms.get(roomId);
+    if (!room) {
+      return [];
+    }
+    return Array.from(room.viewerSocketIds);
   }
 
   leave(socketId) {
@@ -137,34 +156,41 @@ export class RoomManager {
     }
 
     let peerSocketId = null;
+    let peerSocketIds = [];
     if (role === 'sender') {
       room.senderSocketId = null;
-      peerSocketId = room.viewerSocketId;
+      peerSocketIds = Array.from(room.viewerSocketIds);
+      peerSocketId = peerSocketIds.length > 0 ? peerSocketIds[0] : null;
     } else {
-      room.viewerSocketId = null;
+      room.viewerSocketIds.delete(socketId);
       peerSocketId = room.senderSocketId;
+      if (peerSocketId) {
+        peerSocketIds = [peerSocketId];
+      }
     }
 
-    // If both left, delete room
-    if (!room.senderSocketId && !room.viewerSocketId) {
+    // If both sender and all viewers left, delete room
+    if (!room.senderSocketId && room.viewerSocketIds.size === 0) {
       this.rooms.delete(roomId);
     } else {
       room.lastActiveAt = Date.now();
     }
 
-    return { roomId, role, peerSocketId };
+    return { roomId, role, peerSocketId, peerSocketIds, socketId };
   }
 
   cleanStaleRooms(maxAgeMs = 24 * 60 * 60 * 1000) {
     const now = Date.now();
     let cleaned = 0;
     for (const [roomId, room] of this.rooms.entries()) {
-      if (!room.senderSocketId && !room.viewerSocketId) {
+      if (!room.senderSocketId && room.viewerSocketIds.size === 0) {
         this.rooms.delete(roomId);
         cleaned++;
       } else if (now - room.lastActiveAt > maxAgeMs) {
         if (room.senderSocketId) this.socketToRoom.delete(room.senderSocketId);
-        if (room.viewerSocketId) this.socketToRoom.delete(room.viewerSocketId);
+        for (const vId of room.viewerSocketIds) {
+          this.socketToRoom.delete(vId);
+        }
         this.rooms.delete(roomId);
         cleaned++;
       }
@@ -172,3 +198,4 @@ export class RoomManager {
     return cleaned;
   }
 }
+

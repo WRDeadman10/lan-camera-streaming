@@ -122,7 +122,7 @@ This contract defines the exact Socket.IO event protocol for any external client
 - **Join rate limit.** Five failed `room:join` attempts on one socket block that socket for 30 seconds.
 
 ### 4.2 Participant Roles
-The server enforces a 1-sender and 1-receiver model per room: a second receiver (including a browser viewer) is refused with `Room already has an active viewer/receiver.`, and the reverse. Canonical role identifiers:
+The server enforces a 1-sender model with support for **multiple concurrent viewers/receivers** per room. A second sender is refused (`Room already has an active sender.`), but multiple viewers (browser tabs, laptops, Python sidecars) can join concurrently and receive peer-to-peer WebRTC feeds from the camera sender via multi-peer mesh. Canonical role identifiers:
 - `camera-sender` (or `sender`): captures and publishes camera stream.
 - `webrtc-receiver` (or `viewer`): receives the remote camera stream.
 

@@ -36,7 +36,7 @@ tunnel URL avoids that for MJPEG when the receiver runs on the server's PC.
 | Auth | The access PIN (`ACCESS_PIN` in the server `.env`, at least 4 characters), sent in `room:join`, or as `?pin=` for MJPEG |
 | Room id | `^[a-zA-Z0-9_-]{3,32}$` |
 | Role for a receiver | `webrtc-receiver` (the server normalises it to `viewer`; `viewer` is accepted too) |
-| Capacity | **One sender and one viewer/receiver per room.** A browser viewer in the room blocks your receiver, and the reverse |
+| Capacity | **One sender and multiple concurrent viewers/receivers per room.** Multiple browser tabs or external receivers can watch the stream at the same time |
 | Viewer link a user sees | `http(s)://<host>/viewer?room=<room id>` (no PIN in it) |
 
 Events a receiver uses: `room:join` (with ack), `peer:joined`, `webrtc:offer`, `webrtc:answer`, `webrtc:ice-candidate`,

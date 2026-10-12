@@ -109,7 +109,8 @@ Use these checkboxes as the implementation source of truth. Move completed work 
 
 - [ ] Add TURN only if testing demonstrates a requirement for relayed connectivity.
 - [ ] Evaluate whether audio is required.
-- [ ] Evaluate multiple viewers or multiple camera senders.
+- [x] Support multiple concurrent viewers per room via WebRTC mesh (ADR-018).
+- [ ] Evaluate multiple camera senders per room.
 - [ ] Add QR-based pairing if it materially improves setup.
 - [x] Evaluate a stable local DNS name and locally trusted certificate for tunnel-free LAN operation (mkcert + `start.ps1 -LocalOnly`, see ADR-015).
 - [ ] Add a Windows service or auto-start setup only if explicitly required.

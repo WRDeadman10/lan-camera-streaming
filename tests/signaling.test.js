@@ -25,32 +25,39 @@ test('RoomManager validates PIN, capacity, and role constraints', () => {
   assert.equal(dupSenderRes.success, false);
   assert.match(dupSenderRes.error, /already has an active sender/);
 
-  // Valid Viewer Join
+  // Valid Viewer 1 Join
   const viewerRes = rm.createOrJoinRoom('test-room', 'viewer', 'sock3', 'secret123');
   assert.equal(viewerRes.success, true);
   assert.equal(viewerRes.hasPeer, true);
   assert.equal(viewerRes.peerSocketId, 'sock1');
 
-  // Duplicate Viewer rejected
-  const dupViewerRes = rm.createOrJoinRoom('test-room', 'viewer', 'sock4', 'secret123');
-  assert.equal(dupViewerRes.success, false);
-  assert.match(dupViewerRes.error, /already has an active viewer/);
+  // Second Viewer also allowed concurrently
+  const viewer2Res = rm.createOrJoinRoom('test-room', 'viewer', 'sock4', 'secret123');
+  assert.equal(viewer2Res.success, true);
+  assert.equal(viewer2Res.hasPeer, true);
+  assert.equal(viewer2Res.peerSocketId, 'sock1');
+  assert.equal(rm.getViewerSocketIds('test-room').length, 2);
 
   // Peer resolution
   assert.equal(rm.getPeerSocketId('sock1'), 'sock3');
   assert.equal(rm.getPeerSocketId('sock3'), 'sock1');
+  assert.equal(rm.getPeerSocketId('sock4'), 'sock1');
 
-  // Leave handling
+  // Leave handling: sender leaves
   const leaveRes = rm.leave('sock1');
   assert.equal(leaveRes.roomId, 'test-room');
   assert.equal(leaveRes.role, 'sender');
-  assert.equal(leaveRes.peerSocketId, 'sock3');
+  assert.equal(leaveRes.peerSocketIds.length, 2);
 
-  // Room still exists with viewer
+  // Room still exists with 2 viewers
   assert.ok(rm.getRoom('test-room'));
 
-  // Viewer leaves
+  // First viewer leaves
   rm.leave('sock3');
+  assert.ok(rm.getRoom('test-room'));
+
+  // Second viewer leaves -> room cleaned up
+  rm.leave('sock4');
   assert.equal(rm.getRoom('test-room'), null);
 });
 
@@ -141,3 +148,70 @@ test('RoomManager and Signaling support external receiver with canonical roles c
   assert.equal(receiverJoin.peerSocketId, 'sockA');
   assert.equal(rm.getPeerSocketId('sockA'), 'sockB');
 });
+
+test('Socket.IO signaling routes targeted offers to specific viewers in a multi-viewer room', async () => {
+  const config = loadConfig({ PORT: '3003', ACCESS_PIN: 'testpass' });
+  const logger = new Logger('error');
+  const { httpServer } = createServer(config, logger);
+  setupSignaling(httpServer, config, logger);
+
+  await new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+  const address = httpServer.address();
+  const socketUrl = `http://127.0.0.1:${address.port}`;
+
+  const sender = Client(socketUrl);
+  const viewer1 = Client(socketUrl);
+  const viewer2 = Client(socketUrl);
+
+  try {
+    await Promise.all([
+      new Promise((res) => sender.on('connect', res)),
+      new Promise((res) => viewer1.on('connect', res)),
+      new Promise((res) => viewer2.on('connect', res))
+    ]);
+
+    // Sender joins
+    const sAck = await new Promise((res) => {
+      sender.emit('room:join', { roomId: 'multi-room', role: 'sender', pin: 'testpass' }, res);
+    });
+    assert.equal(sAck.success, true);
+
+    // Viewer 1 joins
+    const v1Ack = await new Promise((res) => {
+      viewer1.emit('room:join', { roomId: 'multi-room', role: 'viewer', pin: 'testpass' }, res);
+    });
+    assert.equal(v1Ack.success, true);
+
+    // Viewer 2 joins
+    const v2Ack = await new Promise((res) => {
+      viewer2.emit('room:join', { roomId: 'multi-room', role: 'viewer', pin: 'testpass' }, res);
+    });
+    assert.equal(v2Ack.success, true);
+
+    // Sender emits offer targeted strictly to viewer 2
+    let viewer1GotOffer = false;
+    viewer1.on('webrtc:offer', () => {
+      viewer1GotOffer = true;
+    });
+
+    const v2OfferPromise = new Promise((res) => {
+      viewer2.on('webrtc:offer', res);
+    });
+
+    sender.emit('webrtc:offer', {
+      sdp: 'mock-offer-for-v2',
+      type: 'offer',
+      targetId: viewer2.id
+    });
+
+    const receivedV2Offer = await v2OfferPromise;
+    assert.equal(receivedV2Offer.sdp, 'mock-offer-for-v2');
+    assert.equal(viewer1GotOffer, false);
+  } finally {
+    sender.disconnect();
+    viewer1.disconnect();
+    viewer2.disconnect();
+    await new Promise((resolve) => httpServer.close(resolve));
+  }
+});
+

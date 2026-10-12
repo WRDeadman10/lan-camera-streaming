@@ -167,3 +167,115 @@ export function setupDiagnosticsControls(copyBtnId, clearBtnId, logElementId = '
     });
   }
 }
+
+export function updateVitals({ fps, resolution, path, viewers, rtt } = {}) {
+  const fpsEl = document.getElementById('vitalFps');
+  const resEl = document.getElementById('vitalRes');
+  const pathEl = document.getElementById('vitalPath');
+  const viewersEl = document.getElementById('vitalViewers');
+  const latencyEl = document.getElementById('vitalLatency');
+
+  if (fpsEl && fps !== undefined) {
+    fpsEl.textContent = fps ? `${fps} FPS` : '--';
+  }
+  if (resEl && resolution !== undefined) {
+    resEl.textContent = resolution || '--';
+  }
+  if (pathEl && path !== undefined) {
+    if (path === 'lan') {
+      pathEl.textContent = 'LAN Direct (0 B zrok)';
+      pathEl.className = 'vital-value vital-badge-lan';
+    } else if (path === 'internet') {
+      pathEl.textContent = 'STUN Direct (0 B zrok)';
+      pathEl.className = 'vital-value vital-badge-internet';
+    } else if (path === 'relay' || path === 'tunnel-relay') {
+      pathEl.textContent = 'zrok Relay (Uses Quota)';
+      pathEl.className = 'vital-value vital-badge-relay';
+    } else {
+      pathEl.textContent = path || '--';
+      pathEl.className = 'vital-value';
+    }
+  }
+  if (viewersEl && viewers !== undefined) {
+    if (typeof viewers === 'number') {
+      viewersEl.textContent = `${viewers} ${viewers === 1 ? 'Viewer' : 'Viewers'}`;
+    } else {
+      viewersEl.textContent = viewers || '--';
+    }
+  }
+  if (latencyEl && rtt !== undefined) {
+    latencyEl.textContent = rtt || '--';
+  }
+}
+
+export function captureFrameSnapshot(mediaElement, baseFilename = 'stream-snapshot') {
+  if (!mediaElement) {
+    return false;
+  }
+  const isVideo = mediaElement.tagName.toLowerCase() === 'video';
+  const width = isVideo ? (mediaElement.videoWidth || 1280) : mediaElement.width;
+  const height = isVideo ? (mediaElement.videoHeight || 720) : mediaElement.height;
+
+  if (width === 0 || height === 0) {
+    return false;
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    return false;
+  }
+
+  ctx.drawImage(mediaElement, 0, 0, width, height);
+  const now = new Date();
+  const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+  const filename = `${baseFilename}_${timestamp}.png`;
+
+  canvas.toBlob((blob) => {
+    if (!blob) {
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+    }, 1000);
+  }, 'image/png');
+
+  return true;
+}
+
+export function copyTextToClipboard(text, buttonElement, feedbackLabel = '✓ Copied!') {
+  if (!text || !buttonElement) {
+    return;
+  }
+  navigator.clipboard.writeText(text).then(() => {
+    const original = buttonElement.innerHTML;
+    buttonElement.innerHTML = feedbackLabel;
+    setTimeout(() => {
+      buttonElement.innerHTML = original;
+    }, 2000);
+  }).catch((err) => {
+    logDiagnostic(`Copy failed: ${err.message}`, 'WARN');
+  });
+}
+
+export function setupCollapsibleDrawer(toggleBtnId, contentId, expandText = '▼ Show Details', collapseText = '▲ Hide Details') {
+  const btn = document.getElementById(toggleBtnId);
+  const content = document.getElementById(contentId);
+  if (!btn || !content) {
+    return;
+  }
+  btn.addEventListener('click', () => {
+    const isHidden = content.style.display === 'none' || !content.style.display;
+    content.style.display = isHidden ? 'block' : 'none';
+    btn.textContent = isHidden ? collapseText : expandText;
+  });
+}

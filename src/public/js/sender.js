@@ -4,12 +4,11 @@
  * and WebRTC peer connection to viewer.
  */
 
-import { showError, clearError, showInfo, clearInfo, updateStatus, logDiagnostic, parseCandidateSummary, setupDiagnosticsControls, setPathIndicator, describePath, isLocalHostname, fetchLocalServerOrigin } from './ui-utils.js';
+import { showError, clearError, showInfo, clearInfo, updateStatus, logDiagnostic, parseCandidateSummary, setupDiagnosticsControls, setPathIndicator, describePath, isLocalHostname, fetchLocalServerOrigin, updateVitals, captureFrameSnapshot, copyTextToClipboard, setupCollapsibleDrawer } from './ui-utils.js';
 import { CameraManager } from './camera-manager.js';
 import { WebRtcPeer } from './webrtc-peer.js';
 
 const cameraManager = new CameraManager();
-let webrtcPeer = null;
 let socket = null;
 let currentRoomId = null;
 let currentMediaMode = 'webrtc';
@@ -22,9 +21,9 @@ let tunnelFramesSent = 0;
 let tunnelBytesSent = 0;
 let tunnelEncodeTimes = [];
 let cachedIceServers = null;
-let pendingRemoteCandidates = [];
 let mjpegIsEncoding = false;
 let lastLoggedPathKind = null;
+let torchActive = false;
 
 const MjpegMaxWidth = 1280;
 const MjpegMaxFrameBytes = 900000;
@@ -51,15 +50,26 @@ const btnStop = document.getElementById('btnStop');
 const btnToggleFacing = document.getElementById('btnToggleFacing');
 const localVideo = document.getElementById('localVideo');
 const videoOverlay = document.getElementById('videoOverlay');
+const videoContainer = document.getElementById('videoContainer');
 const shareQrCard = document.getElementById('shareQrCard');
 const viewerQrImg = document.getElementById('viewerQrImg');
 const viewerQrLink = document.getElementById('viewerQrLink');
+const viewerQrLinkInput = document.getElementById('viewerQrLinkInput');
+const btnCopyViewerLink = document.getElementById('btnCopyViewerLink');
 const pythonLinkCard = document.getElementById('pythonLinkCard');
 const pythonStreamUrl = document.getElementById('pythonStreamUrl');
 const btnCopyPythonUrl = document.getElementById('btnCopyPythonUrl');
 const localViewerCard = document.getElementById('localViewerCard');
 const localViewerLink = document.getElementById('localViewerLink');
+const localViewerLinkInput = document.getElementById('localViewerLinkInput');
+const btnCopyLocalLink = document.getElementById('btnCopyLocalLink');
 const tunnelQuotaWarning = document.getElementById('tunnelQuotaWarning');
+const btnToggleSetup = document.getElementById('btnToggleSetup');
+const setupFormBody = document.getElementById('setupFormBody');
+const btnHudFacing = document.getElementById('btnHudFacing');
+const btnHudTorch = document.getElementById('btnHudTorch');
+const btnHudSnapshot = document.getElementById('btnHudSnapshot');
+const btnHudFullscreen = document.getElementById('btnHudFullscreen');
 
 if (mediaModeSelect) {
   mediaModeSelect.addEventListener('change', () => {
@@ -76,11 +86,76 @@ if (mediaModeSelect) {
 if (btnCopyPythonUrl) {
   btnCopyPythonUrl.addEventListener('click', () => {
     if (pythonStreamUrl && pythonStreamUrl.value) {
-      navigator.clipboard.writeText(pythonStreamUrl.value);
-      btnCopyPythonUrl.textContent = 'Copied!';
-      setTimeout(() => {
-        btnCopyPythonUrl.textContent = 'Copy';
-      }, 2000);
+      copyTextToClipboard(pythonStreamUrl.value, btnCopyPythonUrl, '✓ Copied!');
+    }
+  });
+}
+
+if (btnCopyViewerLink) {
+  btnCopyViewerLink.addEventListener('click', () => {
+    const val = (viewerQrLinkInput && viewerQrLinkInput.value) || (viewerQrLink && viewerQrLink.href);
+    if (val) {
+      copyTextToClipboard(val, btnCopyViewerLink, '✓ Link Copied!');
+    }
+  });
+}
+
+if (btnCopyLocalLink) {
+  btnCopyLocalLink.addEventListener('click', () => {
+    const val = (localViewerLinkInput && localViewerLinkInput.value) || (localViewerLink && localViewerLink.href);
+    if (val) {
+      copyTextToClipboard(val, btnCopyLocalLink, '✓ PC Link Copied!');
+    }
+  });
+}
+
+if (btnToggleSetup && setupFormBody) {
+  btnToggleSetup.addEventListener('click', () => {
+    const isHidden = setupFormBody.style.display === 'none';
+    setupFormBody.style.display = isHidden ? 'block' : 'none';
+    btnToggleSetup.textContent = isHidden ? '▲ Collapse' : '⚙️ Expand Settings';
+  });
+}
+
+if (btnHudFacing) {
+  btnHudFacing.addEventListener('click', () => {
+    btnToggleFacing.click();
+  });
+}
+
+if (btnHudSnapshot) {
+  btnHudSnapshot.addEventListener('click', () => {
+    if (localVideo && localVideo.readyState >= 2) {
+      captureFrameSnapshot(localVideo, 'sender-stream-snapshot');
+      logDiagnostic('[HUD] Captured stream snapshot image.', 'INFO');
+    }
+  });
+}
+
+if (btnHudFullscreen && videoContainer) {
+  btnHudFullscreen.addEventListener('click', () => {
+    if (!document.fullscreenElement) {
+      videoContainer.requestFullscreen().catch(() => {});
+    } else {
+      document.exitFullscreen();
+    }
+  });
+}
+
+if (btnHudTorch) {
+  btnHudTorch.addEventListener('click', async () => {
+    if (cameraManager.currentStream) {
+      const track = cameraManager.currentStream.getVideoTracks()[0];
+      if (track && track.applyConstraints) {
+        try {
+          torchActive = !torchActive;
+          await track.applyConstraints({ advanced: [{ torch: torchActive }] });
+          btnHudTorch.style.color = torchActive ? '#facc15' : 'inherit';
+          logDiagnostic(`[HUD] Torch flashlight ${torchActive ? 'enabled' : 'disabled'}.`, 'INFO');
+        } catch (e) {
+          torchActive = false;
+        }
+      }
     }
   });
 }
@@ -182,14 +257,37 @@ async function startSession() {
     await localVideo.play().catch(() => {});
 
     const videoTrack = stream.getVideoTracks()[0];
+    let actualWidth = 0;
+    let actualHeight = 0;
+    let actualFps = 30;
     if (videoTrack) {
       const settings = videoTrack.getSettings ? videoTrack.getSettings() : {};
-      const actualWidth = settings.width || localVideo.videoWidth || 0;
-      const actualHeight = settings.height || localVideo.videoHeight || 0;
-      const actualFps = Math.round(settings.frameRate || 30);
+      actualWidth = settings.width || localVideo.videoWidth || 0;
+      actualHeight = settings.height || localVideo.videoHeight || 0;
+      actualFps = Math.round(settings.frameRate || 30);
       logDiagnostic(`Camera capture active: ${actualWidth}x${actualHeight} @ ${actualFps} FPS (${videoTrack.label || 'Default Camera'}).`, 'INFO');
+
+      const capabilities = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
+      if (capabilities.torch && btnHudTorch) {
+        btnHudTorch.style.display = 'inline-flex';
+      }
     } else {
       logDiagnostic('Camera capture started.', 'INFO');
+    }
+
+    updateVitals({
+      fps: actualFps,
+      resolution: (actualWidth && actualHeight) ? `${actualWidth} × ${actualHeight}` : null,
+      viewers: 0,
+      path: currentMediaMode === 'tunnel-relay' ? 'tunnel-relay' : '--'
+    });
+
+    if (btnToggleSetup) {
+      btnToggleSetup.style.display = 'inline-flex';
+      if (window.innerWidth <= 640 && setupFormBody) {
+        setupFormBody.style.display = 'none';
+        btnToggleSetup.textContent = '⚙️ Expand Settings';
+      }
     }
 
     // Once permission is granted, populate detailed device labels if available
@@ -232,8 +330,11 @@ async function startSession() {
       viewerQrLink.href = viewerUrl;
       viewerQrLink.textContent = viewerUrl;
     }
+    if (viewerQrLinkInput) {
+      viewerQrLinkInput.value = viewerUrl;
+    }
     if (shareQrCard) {
-      shareQrCard.style.display = 'block';
+      shareQrCard.style.display = 'flex';
     }
     fetch(`/api/qr?text=${encodeURIComponent(viewerUrl)}`)
       .then((res) => res.json())
@@ -267,8 +368,11 @@ async function startSession() {
       }
     } else {
       if (response.hasPeer) {
-        updateStatus('connecting', 'Viewer present. Connecting WebRTC...');
-        await initiateWebRtcConnection();
+        updateStatus('connecting', 'Viewers present. Connecting WebRTC...');
+        const peerList = response.peerSocketIds || (response.peerSocketId ? [response.peerSocketId] : []);
+        for (const pId of peerList) {
+          await initiateWebRtcConnectionForViewer(pId);
+        }
       } else {
         updateStatus('waiting', 'Waiting for Viewer / Python...');
         logDiagnostic('Waiting for viewer or Python consumer to connect.');
@@ -288,63 +392,93 @@ async function showLocalViewerLink(roomId) {
   const localViewerUrl = `${localOrigin}/viewer?room=${encodeURIComponent(roomId)}`;
   localViewerLink.href = localViewerUrl;
   localViewerLink.textContent = localViewerUrl;
+  if (localViewerLinkInput) {
+    localViewerLinkInput.value = localViewerUrl;
+  }
   localViewerCard.style.display = 'block';
   if (!isLocalHostname(window.location.hostname)) {
     logDiagnostic('[HINT] Open the viewer on the PC via the localhost link above so only the phone page and signaling use zrok.', 'INFO');
   }
 }
 
-function createSenderPeer(iceServers) {
-  if (webrtcPeer) {
-    webrtcPeer.close();
-    webrtcPeer = null;
+const viewerPeers = new Map(); // viewerId -> WebRtcPeer
+const pendingCandidatesByViewer = new Map(); // viewerId -> Array of candidates
+
+function getConnectedViewerCount() {
+  let count = 0;
+  for (const peer of viewerPeers.values()) {
+    if (peer.peerConnection && (peer.peerConnection.connectionState === 'connected' || peer.peerConnection.iceConnectionState === 'connected' || peer.peerConnection.iceConnectionState === 'completed')) {
+      count++;
+    }
+  }
+  return count;
+}
+
+function updateStreamingStatus() {
+  const count = getConnectedViewerCount();
+  const total = viewerPeers.size;
+  if (count > 0) {
+    updateStatus('live', `Live (${count} viewer${count > 1 ? 's' : ''})`);
+    socket.emit('stream:state', { state: 'live' });
+  } else if (total > 0) {
+    updateStatus('connecting', `Connecting (${total} viewer${total > 1 ? 's' : ''})...`);
+  } else {
+    updateStatus('waiting', 'Waiting for Viewers...');
+    setPathIndicator(null);
+    lastLoggedPathKind = null;
+  }
+  updateVitals({ viewers: count });
+}
+
+function createSenderPeerForViewer(viewerId, iceServers) {
+  if (viewerPeers.has(viewerId)) {
+    const existing = viewerPeers.get(viewerId);
+    existing.close();
+    viewerPeers.delete(viewerId);
   }
 
-  logDiagnostic('[P2P] Initializing RTCPeerConnection for sender...', 'INFO');
+  logDiagnostic(`[P2P] Initializing RTCPeerConnection for viewer ${viewerId}...`, 'INFO');
 
-  webrtcPeer = new WebRtcPeer({
+  const peer = new WebRtcPeer({
     iceServers,
     onIceCandidate: (candidate) => {
       if (candidate) {
-        logDiagnostic(`[ICE] Local candidate gathered: ${parseCandidateSummary(candidate)}`, 'INFO');
+        logDiagnostic(`[ICE:${viewerId}] Local candidate gathered: ${parseCandidateSummary(candidate)}`, 'INFO');
         socket.emit('webrtc:ice-candidate', {
           candidate: candidate.candidate,
           sdpMid: candidate.sdpMid,
-          sdpMLineIndex: candidate.sdpMLineIndex
+          sdpMLineIndex: candidate.sdpMLineIndex,
+          targetId: viewerId
         });
       } else {
-        logDiagnostic('[ICE] Local candidate gathering finished (null end-of-candidates).', 'INFO');
+        logDiagnostic(`[ICE:${viewerId}] Local candidate gathering finished (null end-of-candidates).`, 'INFO');
       }
     },
     onIceCandidateError: (event) => {
-      logDiagnostic(`[ICE] Candidate error (${event.errorCode}): ${event.errorText || 'STUN/TURN query error'} at ${event.url || 'host'}`, 'WARN');
+      logDiagnostic(`[ICE:${viewerId}] Candidate error (${event.errorCode}): ${event.errorText || 'STUN/TURN query error'} at ${event.url || 'host'}`, 'WARN');
     },
     onIceGatheringStateChange: (state) => {
-      logDiagnostic(`[ICE] Gathering state changed to: ${state}`, 'INFO');
+      logDiagnostic(`[ICE:${viewerId}] Gathering state changed to: ${state}`, 'INFO');
     },
     onSignalingStateChange: (state) => {
-      logDiagnostic(`[SDP] Signaling state changed to: ${state}`, 'INFO');
+      logDiagnostic(`[SDP:${viewerId}] Signaling state changed to: ${state}`, 'INFO');
     },
     onConnectionStateChange: (state) => {
-      logDiagnostic(`[P2P] Peer connection state: ${state}`, 'INFO');
+      logDiagnostic(`[P2P:${viewerId}] Peer connection state: ${state}`, 'INFO');
+      updateStreamingStatus();
       if (state === 'connected') {
-        updateStatus('live', 'Live Streaming');
-        socket.emit('stream:state', { state: 'live' });
         startStatsPolling();
-      } else if (state === 'disconnected') {
-        updateStatus('waiting', 'Viewer Disconnected');
-        stopStatsPolling();
       } else if (state === 'failed') {
-        updateStatus('error', 'P2P Connection Failed');
-        stopStatsPolling();
+        logDiagnostic(`[P2P:${viewerId}] Connection failed.`, 'ERROR');
       }
     },
     onIceConnectionStateChange: (state) => {
-      logDiagnostic(`[ICE] ICE Connection State: ${state}`, 'INFO');
+      logDiagnostic(`[ICE:${viewerId}] ICE Connection State: ${state}`, 'INFO');
       if (state === 'connected' || state === 'completed') {
-        logDiagnostic('[ICE] ✓ WebRTC media connection established successfully!', 'INFO');
+        logDiagnostic(`[ICE:${viewerId}] ✓ WebRTC media connection established successfully!`, 'INFO');
+        updateStreamingStatus();
       } else if (state === 'failed') {
-        logDiagnostic('[ICE] ❌ ICE connection failed! Direct P2P media could not connect.', 'ERROR');
+        logDiagnostic(`[ICE:${viewerId}] ❌ ICE connection failed! Direct P2P media could not connect.`, 'ERROR');
         logDiagnostic('[DIAGNOSIS] Most likely causes on the same Wi-Fi:', 'WARN');
         logDiagnostic('1. Router "AP / client isolation" (or a guest network) blocks phone-to-PC traffic.', 'WARN');
         logDiagnostic('2. Windows Firewall blocks inbound UDP for the viewer browser (Wi-Fi profile set to Public).', 'WARN');
@@ -354,43 +488,46 @@ function createSenderPeer(iceServers) {
     }
   });
 
-  webrtcPeer.createPeerConnection();
+  peer.createPeerConnection();
 
   // Add captured tracks
   if (cameraManager.currentStream) {
     cameraManager.currentStream.getTracks().forEach((track) => {
-      logDiagnostic(`[MEDIA] Added local ${track.kind} track to peer (${track.label || 'camera'}).`, 'INFO');
-      webrtcPeer.addTrack(track, cameraManager.currentStream);
+      logDiagnostic(`[MEDIA:${viewerId}] Added local ${track.kind} track to peer (${track.label || 'camera'}).`, 'INFO');
+      peer.addTrack(track, cameraManager.currentStream);
     });
   }
 
-  // Flush any remote candidates that arrived before peer was ready
-  if (pendingRemoteCandidates.length > 0) {
-    logDiagnostic(`[ICE] Flushing ${pendingRemoteCandidates.length} queued remote candidate(s)...`, 'INFO');
-    while (pendingRemoteCandidates.length > 0) {
-      const cand = pendingRemoteCandidates.shift();
-      webrtcPeer.addIceCandidate(cand);
+  // Flush any remote candidates that arrived before peer was ready for this viewer
+  const queuedCandidates = pendingCandidatesByViewer.get(viewerId);
+  if (queuedCandidates && queuedCandidates.length > 0) {
+    logDiagnostic(`[ICE:${viewerId}] Flushing ${queuedCandidates.length} queued remote candidate(s)...`, 'INFO');
+    while (queuedCandidates.length > 0) {
+      const cand = queuedCandidates.shift();
+      peer.addIceCandidate(cand);
     }
   }
 
-  return webrtcPeer;
+  viewerPeers.set(viewerId, peer);
+  return peer;
 }
 
-async function initiateWebRtcConnection() {
-  logDiagnostic('[SDP] Creating WebRTC peer connection and SDP offer...', 'INFO');
+async function initiateWebRtcConnectionForViewer(viewerId) {
+  logDiagnostic(`[SDP] Creating WebRTC offer for viewer ${viewerId}...`, 'INFO');
   const iceServers = await fetchIceServers();
-  createSenderPeer(iceServers);
+  const peer = createSenderPeerForViewer(viewerId, iceServers);
 
   try {
-    const offer = await webrtcPeer.createOffer();
-    logDiagnostic('[SDP] Local SDP offer created. Emitting to viewer via Socket.IO...', 'INFO');
+    const offer = await peer.createOffer();
+    logDiagnostic(`[SDP] Local SDP offer created for ${viewerId}. Emitting via Socket.IO...`, 'INFO');
     socket.emit('webrtc:offer', {
       sdp: offer.sdp,
-      type: offer.type
+      type: offer.type,
+      targetId: viewerId
     });
-    logDiagnostic('[SDP] Sent SDP offer to viewer.', 'INFO');
+    logDiagnostic(`[SDP] Sent SDP offer to viewer ${viewerId}.`, 'INFO');
   } catch (err) {
-    logDiagnostic(`[SDP] Error creating offer: ${err.message}`, 'ERROR');
+    logDiagnostic(`[SDP:${viewerId}] Error creating offer: ${err.message}`, 'ERROR');
   }
 }
 
@@ -420,67 +557,99 @@ function setupSocketListeners() {
   });
 
   socket.on('peer:joined', async (data) => {
-    logDiagnostic(`[ROOM] Viewer joined (${data.peerId}) [mode: ${data.mediaMode || currentMediaMode}].`, 'INFO');
+    const joinedId = data.peerId;
+    logDiagnostic(`[ROOM] Viewer joined (${joinedId}) [mode: ${data.mediaMode || currentMediaMode}].`, 'INFO');
     if (currentMediaMode === 'tunnel-relay') {
       updateStatus('live', 'Live (zrok Tunnel Relay)');
-      startTunnelFrameLoop();
+      if (!tunnelInterval) {
+        startTunnelFrameLoop();
+      }
     } else {
       updateStatus('connecting', 'Viewer Joined. Connecting WebRTC...');
-      await initiateWebRtcConnection();
+      await initiateWebRtcConnectionForViewer(joinedId);
     }
   });
 
   socket.on('webrtc:offer', async (data) => {
-    logDiagnostic('[SDP] Received SDP offer from external receiver. Creating answer...', 'INFO');
+    const senderId = data.senderId;
+    logDiagnostic(`[SDP] Received SDP offer from receiver ${senderId || 'unknown'}. Creating answer...`, 'INFO');
     const iceServers = await fetchIceServers();
-    createSenderPeer(iceServers);
+    const peer = createSenderPeerForViewer(senderId || 'default', iceServers);
 
     try {
-      const answer = await webrtcPeer.handleOffer(data);
+      const answer = await peer.handleOffer(data);
       socket.emit('webrtc:answer', {
         sdp: answer.sdp,
-        type: answer.type
+        type: answer.type,
+        targetId: senderId
       });
-      logDiagnostic('[SDP] Sent SDP answer to external receiver.', 'INFO');
+      logDiagnostic(`[SDP] Sent SDP answer to receiver ${senderId || 'unknown'}.`, 'INFO');
     } catch (err) {
-      logDiagnostic(`[SDP] Error answering external offer: ${err.message}`, 'ERROR');
+      logDiagnostic(`[SDP] Error answering offer: ${err.message}`, 'ERROR');
     }
   });
 
   socket.on('webrtc:answer', async (data) => {
-    logDiagnostic('[SDP] Received SDP answer from receiver. Setting remote description...', 'INFO');
-    if (webrtcPeer) {
+    const viewerId = data.senderId;
+    logDiagnostic(`[SDP] Received SDP answer from viewer ${viewerId || 'default'}. Setting remote description...`, 'INFO');
+    let peer = viewerId ? viewerPeers.get(viewerId) : null;
+    if (!peer && viewerPeers.size === 1) {
+      peer = viewerPeers.values().next().value;
+    }
+
+    if (peer) {
       try {
-        await webrtcPeer.handleAnswer(data);
-        logDiagnostic('[SDP] Remote description set successfully.', 'INFO');
+        await peer.handleAnswer(data);
+        logDiagnostic(`[SDP] Remote description set successfully for viewer ${viewerId || 'default'}.`, 'INFO');
       } catch (err) {
         logDiagnostic(`[SDP] Error setting remote answer: ${err.message}`, 'ERROR');
       }
     } else {
-      logDiagnostic('[SDP] Warning: received answer but no peer connection active.', 'WARN');
+      logDiagnostic('[SDP] Warning: received answer but no peer connection active for this viewer.', 'WARN');
     }
   });
 
   socket.on('webrtc:ice-candidate', async (data) => {
-    logDiagnostic(`[ICE] Received remote candidate: ${parseCandidateSummary(data.candidate)}`, 'INFO');
-    if (webrtcPeer) {
-      await webrtcPeer.addIceCandidate(data);
+    const viewerId = data.senderId;
+    logDiagnostic(`[ICE] Received remote candidate from ${viewerId || 'default'}: ${parseCandidateSummary(data.candidate)}`, 'INFO');
+    let peer = viewerId ? viewerPeers.get(viewerId) : null;
+    if (!peer && viewerPeers.size === 1) {
+      peer = viewerPeers.values().next().value;
+    }
+
+    if (peer) {
+      await peer.addIceCandidate(data);
     } else {
-      logDiagnostic(`[ICE] Queued remote candidate (peer initializing): ${parseCandidateSummary(data.candidate)}`, 'INFO');
-      pendingRemoteCandidates.push(data);
+      const key = viewerId || 'default';
+      if (!pendingCandidatesByViewer.has(key)) {
+        pendingCandidatesByViewer.set(key, []);
+      }
+      pendingCandidatesByViewer.get(key).push(data);
+      logDiagnostic(`[ICE] Queued remote candidate for viewer ${key}: ${parseCandidateSummary(data.candidate)}`, 'INFO');
     }
   });
 
-  socket.on('peer:left', () => {
-    logDiagnostic('[ROOM] Viewer left the room.', 'INFO');
-    updateStatus('waiting', 'Viewer Left. Waiting...');
-    stopStatsPolling();
-    setPathIndicator(null);
-    lastLoggedPathKind = null;
-    pendingRemoteCandidates = [];
-    if (webrtcPeer) {
-      webrtcPeer.close();
-      webrtcPeer = null;
+  socket.on('peer:left', (data) => {
+    const leftId = data ? data.peerId : null;
+    logDiagnostic(`[ROOM] Viewer ${leftId || ''} left the room.`, 'INFO');
+
+    if (leftId && viewerPeers.has(leftId)) {
+      const peer = viewerPeers.get(leftId);
+      peer.close();
+      viewerPeers.delete(leftId);
+      pendingCandidatesByViewer.delete(leftId);
+    } else if (!leftId) {
+      // Clear all
+      for (const peer of viewerPeers.values()) {
+        peer.close();
+      }
+      viewerPeers.clear();
+      pendingCandidatesByViewer.clear();
+    }
+
+    updateStreamingStatus();
+    if (viewerPeers.size === 0) {
+      stopStatsPolling();
     }
   });
 
@@ -493,22 +662,45 @@ function setupSocketListeners() {
 function startStatsPolling() {
   stopStatsPolling();
   statsInterval = setInterval(async () => {
-    if (webrtcPeer) {
-      const stats = await webrtcPeer.getStatsReport();
-      if (stats && stats.rtt) {
-        const pairInfo = `${stats.localCandidateType || '?'} (${stats.localAddress || '?'}) <-> ${stats.remoteCandidateType || '?'} (${stats.remoteAddress || '?'})`;
-        const fps = stats.framesPerSecond !== null && stats.framesPerSecond !== undefined ? `${stats.framesPerSecond} FPS` : 'active';
-        const res = stats.frameWidth ? ` (${stats.frameWidth}x${stats.frameHeight})` : '';
-        logDiagnostic(`[STATS] Pair: ${pairInfo} | RTT: ${stats.rtt} | Outbound: ${fps}${res}`, 'INFO');
-      }
-      if (stats && stats.pathKind) {
-        setPathIndicator(stats.pathKind);
-        if (stats.pathKind !== lastLoggedPathKind) {
-          lastLoggedPathKind = stats.pathKind;
-          const description = describePath(stats.pathKind);
-          logDiagnostic(`[PATH] ${description ? description.text : stats.pathKind}`, stats.pathKind === 'lan' ? 'INFO' : 'WARN');
+    if (viewerPeers.size > 0) {
+      let aggregatedFps = 0;
+      let primaryPath = null;
+      let primaryRtt = null;
+      for (const [vId, peer] of viewerPeers.entries()) {
+        const stats = await peer.getStatsReport();
+        if (stats) {
+          if (stats.framesPerSecond) {
+            aggregatedFps = Math.max(aggregatedFps, stats.framesPerSecond);
+          }
+          if (stats.pathKind && !primaryPath) {
+            primaryPath = stats.pathKind;
+          }
+          if (stats.rtt && !primaryRtt) {
+            primaryRtt = stats.rtt;
+          }
+          if (stats.rtt) {
+            const pairInfo = `${stats.localCandidateType || '?'} (${stats.localAddress || '?'}) <-> ${stats.remoteCandidateType || '?'} (${stats.remoteAddress || '?'})`;
+            logDiagnostic(`[STATS:${vId}] Pair: ${pairInfo} | RTT: ${stats.rtt} | FPS: ${stats.framesPerSecond || 'active'}`, 'INFO');
+          }
         }
       }
+
+      if (primaryPath) {
+        setPathIndicator(primaryPath);
+        if (primaryPath !== lastLoggedPathKind) {
+          lastLoggedPathKind = primaryPath;
+          const description = describePath(primaryPath);
+          logDiagnostic(`[PATH] ${description ? description.text : primaryPath}`, primaryPath === 'lan' ? 'INFO' : 'WARN');
+        }
+      }
+
+      updateVitals({
+        fps: aggregatedFps ? Math.round(aggregatedFps) : null,
+        resolution: (localVideo.videoWidth && localVideo.videoHeight) ? `${localVideo.videoWidth} × ${localVideo.videoHeight}` : null,
+        path: primaryPath,
+        viewers: getConnectedViewerCount(),
+        rtt: primaryRtt
+      });
     }
   }, 4000);
 }
@@ -571,6 +763,7 @@ function stopMjpegFrameLoop() {
 
 function startTunnelFrameLoop() {
   stopTunnelFrameLoop();
+  stopStatsPolling();
 
   tunnelStartTime = Date.now();
   tunnelFramesSent = 0;
@@ -644,6 +837,13 @@ function startTunnelFrameLoop() {
       `[Tunnel Stats] Elapsed: ${elapsedSecs}s | Sent: ${tunnelFramesSent} frames (${avgFps} FPS) | ` +
       `Data: ${mbSent} MB (Est: ${estMbPerHour} MB/hr) | Encode: ${avgEncodeMs}ms`
     );
+
+    updateVitals({
+      fps: Math.round(parseFloat(avgFps) || 0),
+      resolution: (tunnelResolutionSelect && tunnelResolutionSelect.value !== 'native') ? tunnelResolutionSelect.value : (localVideo ? `${localVideo.videoWidth} × ${localVideo.videoHeight}` : null),
+      path: 'tunnel-relay',
+      viewers: 1
+    });
   }, 4000);
 }
 
@@ -660,6 +860,27 @@ function stopSession() {
   stopStatsPolling();
   stopMjpegFrameLoop();
   stopTunnelFrameLoop();
+
+  updateVitals({
+    fps: null,
+    resolution: null,
+    path: null,
+    viewers: 0,
+    rtt: null
+  });
+
+  if (setupFormBody) {
+    setupFormBody.style.display = 'block';
+  }
+  if (btnToggleSetup) {
+    btnToggleSetup.style.display = 'none';
+    btnToggleSetup.textContent = '▲ Collapse';
+  }
+  if (btnHudTorch) {
+    btnHudTorch.style.display = 'none';
+    btnHudTorch.style.color = 'inherit';
+    torchActive = false;
+  }
 
   if (pythonLinkCard) {
     pythonLinkCard.style.display = 'none';
@@ -678,10 +899,11 @@ function stopSession() {
     socket.emit('room:leave');
   }
 
-  if (webrtcPeer) {
-    webrtcPeer.close();
-    webrtcPeer = null;
+  for (const peer of viewerPeers.values()) {
+    peer.close();
   }
+  viewerPeers.clear();
+  pendingCandidatesByViewer.clear();
 
   cameraManager.stopCapture();
   if (localVideo.srcObject) {
@@ -691,7 +913,6 @@ function stopSession() {
 
   btnStart.disabled = false;
   btnStop.disabled = true;
-  pendingRemoteCandidates = [];
   updateStatus('stopped', 'Stopped');
   logDiagnostic('Capture and session stopped.');
 }
@@ -715,6 +936,7 @@ window.addEventListener('beforeunload', () => {
 
 // Initialize default state
 setupDiagnosticsControls('btnCopyLogs', 'btnClearLogs', 'diagnosticsLog');
+setupCollapsibleDrawer('btnToggleDiagnostics', 'diagnosticsLog', '📋 Technical Vitals & Diagnostics ▼', '📋 Technical Vitals & Diagnostics ▲');
 roomIdInput.value = generateRandomRoomId();
 populateCameraDevices();
 fetchIceServers().catch(() => {});

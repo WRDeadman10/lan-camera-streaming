@@ -16,162 +16,233 @@
         <img src="/favicon.png" alt="LAN Camera Logo" class="brand-logo">
         <h1>Camera Sender</h1>
       </div>
-      <p>Stream your device camera to an authorized viewer</p>
+      <p>Stream live device camera with low-latency WebRTC peer-to-peer harmony</p>
     </header>
 
     <main>
       <div id="errorAlert" class="alert alert-danger" role="alert"></div>
       <div id="infoAlert" class="alert alert-info" role="status"></div>
 
-      <div class="card">
-        <h2>Session Setup</h2>
-
-        <div class="form-group">
-          <label for="accessPin">Access PIN</label>
-          <input type="password" id="accessPin" placeholder="Enter configured PIN" value="123456" autocomplete="current-password">
+      <!-- Session Setup Card -->
+      <div class="card" id="sessionSetupCard">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 16px;">
+          <h2 style="border-bottom: none; margin-bottom: 0; padding-bottom: 0;">⚙️ Session Setup</h2>
+          <button type="button" id="btnToggleSetup" class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.8rem; display: none;">▲ Collapse</button>
         </div>
 
-        <div class="form-group">
-          <label for="roomId">Room ID</label>
-          <div style="display: flex; gap: 8px;">
-            <input type="text" id="roomId" placeholder="Generate or enter Room ID" style="flex: 1;">
-            <button type="button" id="btnGenRoom" class="btn btn-secondary">Generate</button>
+        <div id="setupFormBody">
+          <div class="form-group">
+            <label for="accessPin">Access PIN</label>
+            <input type="password" id="accessPin" placeholder="Enter configured PIN" value="123456" autocomplete="current-password">
+          </div>
+
+          <div class="form-group">
+            <label for="roomId">Room ID</label>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" id="roomId" placeholder="Generate or enter Room ID" style="flex: 1;">
+              <button type="button" id="btnGenRoom" class="btn btn-secondary">🎲 Generate</button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="mediaMode">Media Transport Mode</label>
+            <select id="mediaMode">
+              <option value="webrtc" selected>WebRTC — Direct/ICE media (Low Latency P2P)</option>
+              <option value="tunnel-relay">Fallback — Video through zrok (uses zrok quota)</option>
+            </select>
+          </div>
+
+          <div id="tunnelQuotaWarning" class="alert alert-info visible" style="display: none; margin-bottom: 16px;">
+            ⚠️ This fallback mode sends video frames through the server tunnel and consumes your daily transfer quota. Use it only when direct local WebRTC is blocked.
+          </div>
+
+          <div id="tunnelConfigPanel" style="display: none; padding: 14px; margin-bottom: 16px; background-color: #081115; border-radius: var(--radius-sm); border: 1px dashed var(--border);">
+            <div style="font-size: 0.85rem; font-weight: 600; color: #facc15; margin-bottom: 10px;">Experimental Tunnel Settings</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+              <div>
+                <label for="tunnelResolution" style="font-size: 0.75rem;">Resolution</label>
+                <select id="tunnelResolution" style="font-size: 0.85rem; padding: 7px;">
+                  <option value="native">Native (Full Camera)</option>
+                  <option value="1280x720">1280 × 720 (HD)</option>
+                  <option value="854x480">854 × 480 (SD)</option>
+                  <option value="640x360" selected>640 × 360 (Default)</option>
+                  <option value="480x270">480 × 270 (Low Data)</option>
+                </select>
+              </div>
+              <div>
+                <label for="tunnelFps" style="font-size: 0.75rem;">Frame Rate</label>
+                <select id="tunnelFps" style="font-size: 0.85rem; padding: 7px;">
+                  <option value="10" selected>10 FPS</option>
+                  <option value="15">15 FPS</option>
+                  <option value="20">20 FPS</option>
+                  <option value="30">30 FPS</option>
+                </select>
+              </div>
+              <div>
+                <label for="tunnelQuality" style="font-size: 0.75rem;">JPEG Quality</label>
+                <select id="tunnelQuality" style="font-size: 0.85rem; padding: 7px;">
+                  <option value="0.5">0.5 (Low)</option>
+                  <option value="0.6" selected>0.6 (Default)</option>
+                  <option value="0.75">0.75 (Medium)</option>
+                  <option value="0.85">0.85 (High)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="cameraSelect">Select Camera</label>
+            <select id="cameraSelect">
+              <option value="">Default (Environment/Back camera)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="cameraResolution">Camera Capture Resolution</label>
+            <select id="cameraResolution">
+              <option value="max" selected>🌟 Full Maximum Resolution (Native 4K / 1080p Sensor)</option>
+              <option value="1080p">1080p Full HD (1920 × 1080)</option>
+              <option value="720p">720p HD (1280 × 720)</option>
+              <option value="480p">480p SD (854 × 480)</option>
+            </select>
           </div>
         </div>
 
-        <div class="form-group">
-          <label for="mediaMode">Media Transport Mode</label>
-          <select id="mediaMode">
-            <option value="webrtc" selected>WebRTC — Direct/ICE media (Low Latency P2P)</option>
-            <option value="tunnel-relay">Fallback — Video through zrok (uses zrok quota)</option>
-          </select>
-        </div>
-
-        <div id="tunnelQuotaWarning" class="alert alert-info visible" style="display: none; margin-bottom: 16px;">
-          This mode sends every video frame through the zrok tunnel and consumes your daily zrok transfer quota. Use it only if WebRTC cannot connect on your network.
-        </div>
-
-        <div id="tunnelConfigPanel" style="display: none; padding: 12px; margin-bottom: 16px; background-color: #0b1120; border-radius: 6px; border: 1px dashed var(--border);">
-          <div style="font-size: 0.85rem; font-weight: 600; color: #facc15; margin-bottom: 8px;">Experimental Tunnel Settings</div>
-          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
-            <div>
-              <label for="tunnelResolution" style="font-size: 0.75rem;">Resolution</label>
-              <select id="tunnelResolution" style="font-size: 0.85rem; padding: 6px;">
-                <option value="native">Native (Full Camera Resolution)</option>
-                <option value="1280x720">1280 × 720 (HD)</option>
-                <option value="854x480">854 × 480 (SD)</option>
-                <option value="640x360" selected>640 × 360 (Default)</option>
-                <option value="480x270">480 × 270 (Low Data)</option>
-              </select>
-            </div>
-            <div>
-              <label for="tunnelFps" style="font-size: 0.75rem;">Frame Rate</label>
-              <select id="tunnelFps" style="font-size: 0.85rem; padding: 6px;">
-                <option value="10" selected>10 FPS</option>
-                <option value="15">15 FPS</option>
-                <option value="20">20 FPS</option>
-                <option value="30">30 FPS</option>
-              </select>
-            </div>
-            <div>
-              <label for="tunnelQuality" style="font-size: 0.75rem;">JPEG Quality</label>
-              <select id="tunnelQuality" style="font-size: 0.85rem; padding: 6px;">
-                <option value="0.5">0.5 (Low)</option>
-                <option value="0.6" selected>0.6 (Default)</option>
-                <option value="0.75">0.75 (Medium)</option>
-                <option value="0.85">0.85 (High)</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label for="cameraSelect">Select Camera</label>
-          <select id="cameraSelect">
-            <option value="">Default (Environment/Back camera)</option>
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label for="cameraResolution">Camera Capture Resolution</label>
-          <select id="cameraResolution">
-            <option value="max" selected>🌟 Full Maximum Resolution (Native 4K / 1080p Sensor)</option>
-            <option value="1080p">1080p Full HD (1920 × 1080)</option>
-            <option value="720p">720p HD (1280 × 720)</option>
-            <option value="480p">480p SD (854 × 480)</option>
-          </select>
-        </div>
-
-        <div class="button-group" style="margin-top: 20px;">
-          <button type="button" id="btnStart" class="btn btn-primary">Start Streaming</button>
-          <button type="button" id="btnStop" class="btn btn-danger" disabled>Stop Streaming</button>
+        <div class="button-group" style="margin-top: 14px;">
+          <button type="button" id="btnStart" class="btn btn-primary">📹 Start Streaming</button>
+          <button type="button" id="btnStop" class="btn btn-danger" disabled>⏹️ Stop Streaming</button>
           <button type="button" id="btnToggleFacing" class="btn btn-secondary" title="Flip camera">🔄 Switch Camera</button>
         </div>
       </div>
 
-      <div class="card" id="shareQrCard" style="display: none; text-align: center; border-color: var(--primary);">
-        <h2>📱 Share Stream with Viewer</h2>
-        <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 12px;">
-          Scan on the viewing phone or laptop to instantly open the viewer in this room:
-        </p>
-        <div style="display: inline-block; padding: 12px; background: #fff; border-radius: 8px; margin-bottom: 8px;">
-          <img id="viewerQrImg" alt="Viewer QR Code" style="width: 180px; height: 180px; display: block;">
-        </div>
-        <div>
-          <a id="viewerQrLink" href="#" target="_blank" style="color: var(--primary); font-family: monospace; font-size: 0.85rem; word-break: break-all;"></a>
-        </div>
-      </div>
-
-      <div class="card" id="localViewerCard" style="display: none; border-color: var(--success);">
-        <h2>🖥️ Open Viewer on the PC (no zrok traffic)</h2>
-        <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 12px;">
-          Open this link in a browser on the Windows PC running the server. The video travels directly from this phone to the PC over Wi-Fi.
-        </p>
-        <a id="localViewerLink" href="#" target="_blank" style="color: var(--primary); font-family: monospace; font-size: 0.85rem; word-break: break-all;"></a>
-      </div>
-
-      <div class="card" id="pythonLinkCard" style="display: none; border-color: var(--primary);">
-        <h2>🐍 Direct Python Inference Stream</h2>
-        <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 12px;">
-          Use this direct URL in Python with OpenCV (<code>cv2.VideoCapture</code>) or PyTorch/YOLO. Frames are uploaded from this device only while a client is connected, and travel through the server (and zrok, if this page was opened through it).
-        </p>
-        <div style="display: flex; gap: 8px;">
-          <input type="text" id="pythonStreamUrl" readonly style="font-family: monospace; background-color: #050811;">
-          <button type="button" id="btnCopyPythonUrl" class="btn btn-secondary">Copy</button>
-        </div>
-      </div>
-
+      <!-- Live Stream Viewport & Vitals Card -->
       <div class="card">
         <div style="display: flex; justify-content: space-between; align-items: center;">
-          <h2>Camera Preview</h2>
+          <h2>📷 Live Viewfinder</h2>
           <span id="statusBadge" class="status-badge status-stopped">
             <span class="status-indicator"></span>
             <span id="statusText">Stopped</span>
           </span>
         </div>
 
-        <div id="pathIndicator" class="path-indicator" role="status"></div>
-
-        <div class="video-container">
-          <video id="localVideo" autoplay playsinline muted></video>
-          <div id="videoOverlay" class="video-overlay-msg">Click "Start Streaming" to begin camera capture</div>
+        <!-- Nāḍī Parīkṣā (Holistic Stream Vitals Bar) -->
+        <div class="vitals-bar" id="streamVitalsBar">
+          <div class="vital-item">
+            <div class="vital-header">
+              <span class="vital-icon">⚡</span>
+              <span class="vital-label">Flow / FPS</span>
+            </div>
+            <div class="vital-value" id="vitalFps">--</div>
+          </div>
+          <div class="vital-item">
+            <div class="vital-header">
+              <span class="vital-icon">👁️</span>
+              <span class="vital-label">Acuity</span>
+            </div>
+            <div class="vital-value" id="vitalRes">--</div>
+          </div>
+          <div class="vital-item">
+            <div class="vital-header">
+              <span class="vital-icon">👥</span>
+              <span class="vital-label">Viewers</span>
+            </div>
+            <div class="vital-value" id="vitalViewers">0 Viewers</div>
+          </div>
+          <div class="vital-item">
+            <div class="vital-header">
+              <span class="vital-icon">🌐</span>
+              <span class="vital-label">Mārga / Path</span>
+            </div>
+            <div class="vital-value" id="vitalPath">--</div>
+          </div>
+          <div class="vital-item">
+            <div class="vital-header">
+              <span class="vital-icon">⏱️</span>
+              <span class="vital-label">Pulse / Ping</span>
+            </div>
+            <div class="vital-value" id="vitalLatency">--</div>
+          </div>
         </div>
 
-        <div style="margin-top: 16px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-            <label style="margin-bottom: 0;">Diagnostics & WebRTC State</label>
+        <div id="pathIndicator" class="path-indicator" role="status"></div>
+
+        <!-- Video Viewport with HUD Controls -->
+        <div class="video-container" id="videoContainer">
+          <video id="localVideo" autoplay playsinline muted></video>
+          <div id="videoOverlay" class="video-overlay-msg">Click "Start Streaming" to begin camera capture</div>
+
+          <!-- Floating Viewport HUD -->
+          <div class="video-hud">
+            <button type="button" id="btnHudFacing" class="hud-btn" title="Switch Camera Facing">🔄</button>
+            <button type="button" id="btnHudTorch" class="hud-btn" title="Toggle Flashlight / Torch" style="display: none;">💡</button>
+            <button type="button" id="btnHudSnapshot" class="hud-btn" title="Capture Snapshot Still">📷</button>
+            <button type="button" id="btnHudFullscreen" class="hud-btn" title="Toggle Fullscreen">⛶</button>
+          </div>
+        </div>
+
+        <!-- Diagnostics Drawer -->
+        <div style="margin-top: 18px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <button type="button" id="btnToggleDiagnostics" class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.8rem;">
+              📋 Technical Vitals & Diagnostics ▼
+            </button>
             <div style="display: flex; gap: 6px;">
-              <button type="button" id="btnCopyLogs" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem;">📋 Copy Logs</button>
+              <button type="button" id="btnCopyLogs" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem;">📋 Copy</button>
               <button type="button" id="btnClearLogs" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem;">🗑️ Clear</button>
             </div>
           </div>
-          <div id="diagnosticsLog" class="diagnostics-panel">Ready.</div>
+          <div id="diagnosticsLog" class="diagnostics-panel" style="display: none;">Ready.</div>
+        </div>
+      </div>
+
+      <!-- Share QR Talisman Card -->
+      <div class="card share-talisman" id="shareQrCard" style="display: none;">
+        <h2>📱 Share Stream with Viewers</h2>
+        <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 4px;">
+          Scan with any mobile phone, tablet, or laptop to view this stream simultaneously.
+        </p>
+        <div class="qr-frame">
+          <img id="viewerQrImg" alt="Viewer QR Code">
+        </div>
+        <div style="display: flex; gap: 8px; max-width: 500px; width: 100%; margin-top: 6px;">
+          <input type="text" id="viewerQrLinkInput" readonly style="font-family: monospace; font-size: 0.85rem; background-color: #070e12;">
+          <button type="button" id="btnCopyViewerLink" class="btn btn-primary" style="padding: 8px 14px; font-size: 0.85rem; white-space: nowrap;">📋 Copy Link</button>
+        </div>
+        <div style="margin-top: 6px;">
+          <a id="viewerQrLink" href="#" target="_blank" style="color: var(--primary); font-family: monospace; font-size: 0.82rem; word-break: break-all; text-decoration: none;"></a>
+        </div>
+      </div>
+
+      <!-- Local PC Viewer Card -->
+      <div class="card" id="localViewerCard" style="display: none; border-color: rgba(16, 185, 129, 0.4);">
+        <h2>🖥️ Open Viewer on PC (Zero Tunnel Quota)</h2>
+        <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 12px;">
+          Open this link on the Windows host machine. Video flows straight peer-to-peer over your local Wi-Fi without using external bandwidth.
+        </p>
+        <div style="display: flex; gap: 8px;">
+          <input type="text" id="localViewerLinkInput" readonly style="font-family: monospace; font-size: 0.85rem; background-color: #070e12; flex: 1;">
+          <button type="button" id="btnCopyLocalLink" class="btn btn-secondary" style="padding: 8px 14px; font-size: 0.85rem; white-space: nowrap;">Copy PC Link</button>
+        </div>
+        <div style="margin-top: 6px;">
+          <a id="localViewerLink" href="#" target="_blank" style="color: var(--primary); font-family: monospace; font-size: 0.82rem; word-break: break-all; text-decoration: none;"></a>
+        </div>
+      </div>
+
+      <!-- Direct Python AI Stream Card -->
+      <div class="card" id="pythonLinkCard" style="display: none; border-color: rgba(245, 158, 11, 0.4);">
+        <h2>🐍 Direct Python Inference Stream</h2>
+        <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 12px;">
+          Use with OpenCV (<code>cv2.VideoCapture</code>), PyTorch, or YOLO for computer vision tasks:
+        </p>
+        <div style="display: flex; gap: 8px;">
+          <input type="text" id="pythonStreamUrl" readonly style="font-family: monospace; background-color: #070e12; flex: 1;">
+          <button type="button" id="btnCopyPythonUrl" class="btn btn-secondary" style="padding: 8px 14px; font-size: 0.85rem; white-space: nowrap;">Copy</button>
         </div>
       </div>
     </main>
 
     <footer class="footer">
-      <a href="/" style="color: var(--primary); text-decoration: none;">&larr; Back to Home</a>
+      <a href="/">&larr; Back to Role Selection</a> &bull; Production-grade WebRTC LAN Streaming
     </footer>
   </div>
 

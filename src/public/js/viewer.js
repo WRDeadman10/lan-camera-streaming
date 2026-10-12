@@ -4,7 +4,7 @@
  * WebRTC answer creation, remote track rendering, and connection statistics.
  */
 
-import { showError, clearError, showInfo, clearInfo, updateStatus, logDiagnostic, parseCandidateSummary, setupDiagnosticsControls, setPathIndicator, describePath, isLocalHostname, fetchLocalServerOrigin } from './ui-utils.js';
+import { showError, clearError, showInfo, clearInfo, updateStatus, logDiagnostic, parseCandidateSummary, setupDiagnosticsControls, setPathIndicator, describePath, isLocalHostname, fetchLocalServerOrigin, updateVitals, captureFrameSnapshot, copyTextToClipboard, setupCollapsibleDrawer } from './ui-utils.js';
 import { WebRtcPeer } from './webrtc-peer.js';
 
 let webrtcPeer = null;
@@ -40,17 +40,18 @@ const pythonStreamUrl = document.getElementById('pythonStreamUrl');
 const btnCopyPythonUrl = document.getElementById('btnCopyPythonUrl');
 const localViewerHint = document.getElementById('localViewerHint');
 const localViewerHintLink = document.getElementById('localViewerHintLink');
+const btnHudPip = document.getElementById('btnHudPip');
+const btnHudSnapshot = document.getElementById('btnHudSnapshot');
+const btnHudFullscreen = document.getElementById('btnHudFullscreen');
+const btnOverlayReconnect = document.getElementById('btnOverlayReconnect');
+const roomHintBadge = document.getElementById('roomHintBadge');
 
 const canvasContext = remoteCanvas ? remoteCanvas.getContext('2d') : null;
 
 if (btnCopyPythonUrl) {
   btnCopyPythonUrl.addEventListener('click', () => {
     if (pythonStreamUrl && pythonStreamUrl.value) {
-      navigator.clipboard.writeText(pythonStreamUrl.value);
-      btnCopyPythonUrl.textContent = 'Copied!';
-      setTimeout(() => {
-        btnCopyPythonUrl.textContent = 'Copy';
-      }, 2000);
+      copyTextToClipboard(pythonStreamUrl.value, btnCopyPythonUrl, '✓ Copied!');
     }
   });
 }
@@ -60,6 +61,10 @@ const urlParams = new URLSearchParams(window.location.search);
 const roomParam = urlParams.get('room');
 if (roomParam) {
   roomIdInput.value = roomParam;
+  if (roomHintBadge) {
+    roomHintBadge.textContent = `Room: ${roomParam}`;
+    roomHintBadge.style.display = 'inline-block';
+  }
 }
 
 async function fetchIceServers() {
@@ -118,6 +123,11 @@ async function joinRoom() {
     currentRoomId = roomId;
     btnLeave.disabled = false;
     logDiagnostic(`Joined room "${roomId}" successfully [mode: ${response.mediaMode}].`);
+
+    if (btnOverlayReconnect) {
+      btnOverlayReconnect.style.display = 'none';
+    }
+    updateVitals({ path: currentMediaMode === 'tunnel-relay' ? 'tunnel-relay' : '--' });
 
     // Switch visible video/canvas element according to mode
     if (currentMediaMode === 'tunnel-relay') {
@@ -318,6 +328,9 @@ function createViewerPeer(iceServers) {
       updateStatus('stopped', 'Stream Stopped by Sender');
       videoOverlay.textContent = 'Sender stopped the stream.';
       videoOverlay.style.display = 'block';
+      if (btnOverlayReconnect) {
+        btnOverlayReconnect.style.display = 'inline-flex';
+      }
     }
   });
 
@@ -332,6 +345,9 @@ function createViewerPeer(iceServers) {
     }
     videoOverlay.textContent = 'Sender left the room. Waiting for reconnection...';
     videoOverlay.style.display = 'block';
+    if (btnOverlayReconnect) {
+      btnOverlayReconnect.style.display = 'inline-flex';
+    }
     stopStatsPolling();
     if (webrtcPeer) {
       webrtcPeer.close();
@@ -378,6 +394,16 @@ function startStatsPolling() {
           logDiagnostic(`[PATH] ${description ? description.text : stats.pathKind}`, stats.pathKind === 'lan' ? 'INFO' : 'WARN');
         }
       }
+      if (stats) {
+        const fpsVal = (stats.framesPerSecond !== null && stats.framesPerSecond !== undefined) ? Math.round(stats.framesPerSecond) : null;
+        const resVal = (stats.frameWidth && stats.frameHeight) ? `${stats.frameWidth} × ${stats.frameHeight}` : (remoteVideo && remoteVideo.videoWidth ? `${remoteVideo.videoWidth} × ${remoteVideo.videoHeight}` : null);
+        updateVitals({
+          fps: fpsVal,
+          resolution: resVal,
+          path: stats.pathKind,
+          rtt: stats.rtt
+        });
+      }
     }
   }, 4000);
 }
@@ -398,6 +424,12 @@ function startTunnelViewerStats() {
       `[Tunnel Stats] Elapsed: ${elapsedSecs}s | Recv: ${tunnelFramesReceived} frames (${avgFps} FPS) | ` +
       `Dropped: ${tunnelFramesDropped} | Data: ${mbRecv} MB (Est: ${estMbPerHour} MB/hr)`
     );
+
+    updateVitals({
+      fps: Math.round(parseFloat(avgFps) || 0),
+      resolution: (remoteCanvas && remoteCanvas.width && remoteCanvas.height) ? `${remoteCanvas.width} × ${remoteCanvas.height}` : null,
+      path: 'tunnel-relay'
+    });
   }, 4000);
 }
 
@@ -471,6 +503,17 @@ function leaveRoom() {
   videoOverlay.textContent = 'Enter Room ID and click "Join Room" to view stream';
   videoOverlay.style.display = 'block';
 
+  if (btnOverlayReconnect) {
+    btnOverlayReconnect.style.display = 'none';
+  }
+
+  updateVitals({
+    fps: null,
+    resolution: null,
+    path: null,
+    rtt: null
+  });
+
   if (pythonLinkCard) {
     pythonLinkCard.style.display = 'none';
   }
@@ -497,6 +540,46 @@ btnFullscreen.addEventListener('click', () => {
   }
 });
 
+if (btnHudFullscreen) {
+  btnHudFullscreen.addEventListener('click', () => {
+    btnFullscreen.click();
+  });
+}
+
+if (btnHudSnapshot) {
+  btnHudSnapshot.addEventListener('click', () => {
+    const targetElement = currentMediaMode === 'tunnel-relay' ? remoteCanvas : remoteVideo;
+    if (targetElement) {
+      const ok = captureFrameSnapshot(targetElement, 'viewer-stream-snapshot');
+      if (ok) {
+        logDiagnostic('[HUD] Captured stream still snapshot image.', 'INFO');
+      }
+    }
+  });
+}
+
+if (btnHudPip) {
+  btnHudPip.addEventListener('click', async () => {
+    if (document.pictureInPictureEnabled && remoteVideo) {
+      try {
+        if (document.pictureInPictureElement) {
+          await document.exitPictureInPicture();
+        } else {
+          await remoteVideo.requestPictureInPicture();
+        }
+      } catch (err) {
+        logDiagnostic(`Picture-in-Picture error: ${err.message}`, 'WARN');
+      }
+    }
+  });
+}
+
+if (btnOverlayReconnect) {
+  btnOverlayReconnect.addEventListener('click', () => {
+    joinRoom();
+  });
+}
+
 // Window unload cleanup
 window.addEventListener('beforeunload', () => {
   leaveRoom();
@@ -520,6 +603,7 @@ async function showLocalViewerHint() {
 
 // Initialize default state
 setupDiagnosticsControls('btnCopyLogs', 'btnClearLogs', 'diagnosticsLog');
+setupCollapsibleDrawer('btnToggleDiagnostics', 'diagnosticsLog', '📋 Technical Diagnostics & WebRTC Vitals ▼', '📋 Technical Diagnostics & WebRTC Vitals ▲');
 showLocalViewerHint();
 fetchIceServers().catch(() => {});
 logDiagnostic('Viewer client ready.');

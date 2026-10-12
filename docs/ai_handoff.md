@@ -1,5 +1,13 @@
 # LAN Camera Streaming — AI Handoff
 
+## Multi-viewer check (2026-10-12)
+
+- **Result:** the ADR-018 multi-viewer implementation works. Verified live in the in-app browser (mock canvas camera, real WebRTC): 2 and 3 viewers on one sender; a viewer leaving and rejoining while the other keeps playing; sender Stop/Start with viewers already in the room; tunnel-relay with 2 viewers. The sender showed "Live (N viewers)" and every viewer rendered frames.
+- **Fixed:** `sender.js` leaked a stats timer: `startTunnelFrameLoop()` ran on every `peer:joined` and overwrote `statsInterval` without clearing it, so "[Tunnel Stats]" lines kept printing after Stop. It now clears the old timer and does not restart a running loop. Confirmed: no new stats lines after Stop.
+- **Test artifact, not a code bug:** when several viewer tabs share one Chrome with a mock camera (so both sides use mDNS `.local` candidates), a previously-used viewer tab could sit at "Negotiating connection..." (ICE `failed`) while a fresh tab connected; reloading that tab fixed it. A real phone sender exposes real LAN IPs, so this should not apply, but it is the first thing to rule out when testing with several tabs in one browser: reload the stuck viewer.
+- **Known limits, not changed:** each viewer costs the phone one more video encoder (the default "Full Maximum Resolution" 4K capture can overload a phone with 2+ viewers; use 720p/1080p); a viewer whose ICE fails is not retried automatically; a room's media mode is fixed by whoever created it, so viewers must use the same mode as the sender.
+- **Not verified:** a real phone camera with 2+ viewers; external (Python/Unity) receivers alongside a browser viewer.
+
 ## Exe fix (2026-10-12): pages could not connect
 
 - **Symptom:** the built `lan-camera-streaming.exe` served pages but nothing worked (Start/Join did nothing).
@@ -35,11 +43,18 @@ A single, self-contained Windows console `.exe` is now fully supported (`dist/la
   - `src/server/index.js` (`npm run dev` or `npm start`): Minimal web server entry point without tunnel or CLI supervision.
   - `src/server/cli.js` (`npm run cli -- --zrok` or standalone `.exe`): Full console application with interactive banner, QR code, LAN IP discovery, and automated zrok tunnel lifecycle.
   - `start.ps1`: Full PowerShell supervisor for development that manages zrok shares and starts the Node server.
-- **Automated test suite:** `npm test` now runs 33 tests (all 33 pass), including `tests/cli.test.js` covering argument flags, `.env` parsing, and custom env file loading.
+
+## Multi-Viewer Concurrent WebRTC Mesh Streaming (2026-10-12) — ADR-018
+
+- **Multi-peer capacity:** RoomManager replaces single `viewerSocketId` with `viewerSocketIds: Set<string>`. Multiple viewers/receivers can join the same room simultaneously without throwing `"Room already has an active viewer/receiver."`.
+- **Targeted WebRTC routing:** `signaling.js` routes `webrtc:offer`, `webrtc:answer`, and `webrtc:ice-candidate` to specific peers via `targetId` / `viewerId` / `senderId`.
+- **Sender multi-peer management:** `src/public/js/sender.js` tracks a `Map<viewerId, WebRtcPeer>`, creating dedicated P2P connections as new viewers join and closing connections individually when a viewer leaves.
+- **Tunnel relay broadcasting:** In `tunnel-relay` mode, frames are broadcast to all joined viewers in the room.
+- **Automated test suite:** `npm test` runs 35 tests (all 35 pass), including targeted multi-viewer offer routing and room capacity tests.
 
 ## Current status
 
-**Status:** Zero-zrok-quota LAN operation implemented (ADR-015) and Standalone Console Executable (.exe) + Build Automation implemented (ADR-017). Code and automated tests are done.
+**Status:** Zero-zrok-quota LAN operation implemented (ADR-015), Standalone Executable (.exe) + Build Automation implemented (ADR-017), and Multi-Viewer WebRTC Mesh implemented (ADR-018). Code and automated tests are done.
 
 - **Quota leak fixed:** the sender used to upload ~15 FPS JPEGs (`mjpeg:frame`) through Socket.IO (and zrok) unconditionally, even in WebRTC mode. It is now demand-driven: the server emits `mjpeg:demand { active }` to the sender only while an HTTP `/stream/:roomId` consumer or a `/snapshot/:roomId` request is waiting, and drops frames otherwise. Frames are capped at 1280 px width / 900 KB with one in-flight encode. `/snapshot` now asks for a fresh frame on demand.
 - **Viewer on the PC via localhost:** `/api/network-info` returns `{ protocol, port }` only (no LAN IPs, since the route is public through zrok). Sender page shows an "Open Viewer on the PC" localhost link; viewer page shows a hint banner when opened through a non-local hostname; `start.ps1` prints `http://localhost:<port>/viewer`.
