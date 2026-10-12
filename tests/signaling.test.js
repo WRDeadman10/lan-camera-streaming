@@ -215,3 +215,57 @@ test('Socket.IO signaling routes targeted offers to specific viewers in a multi-
   }
 });
 
+test('Socket.IO signaling rejects an untargeted sender offer when several viewers are in the room', async () => {
+  const config = loadConfig({ PORT: '3004', ACCESS_PIN: 'testpass' });
+  const logger = new Logger('error');
+  const { httpServer } = createServer(config, logger);
+  setupSignaling(httpServer, config, logger);
+
+  await new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+  const address = httpServer.address();
+  const socketUrl = `http://127.0.0.1:${address.port}`;
+
+  const sender = Client(socketUrl);
+  const viewer1 = Client(socketUrl);
+  const viewer2 = Client(socketUrl);
+
+  try {
+    await Promise.all([
+      new Promise((res) => sender.on('connect', res)),
+      new Promise((res) => viewer1.on('connect', res)),
+      new Promise((res) => viewer2.on('connect', res))
+    ]);
+
+    for (const [socket, role] of [[sender, 'sender'], [viewer1, 'viewer'], [viewer2, 'viewer']]) {
+      const ack = await new Promise((res) => {
+        socket.emit('room:join', { roomId: 'stale-sender-room', role, pin: 'testpass' }, res);
+      });
+      assert.equal(ack.success, true);
+    }
+
+    let viewerGotOffer = false;
+    viewer1.on('webrtc:offer', () => { viewerGotOffer = true; });
+    viewer2.on('webrtc:offer', () => { viewerGotOffer = true; });
+
+    const errorPromise = new Promise((res) => sender.on('room:error', res));
+    sender.emit('webrtc:offer', { sdp: 'untargeted-offer', type: 'offer' });
+
+    const error = await errorPromise;
+    assert.match(error.message, /outdated/);
+    // Acked event is processed after the preceding offer on the same socket
+    await new Promise((res) => viewer1.emit('tunnel:stats', res));
+    assert.equal(viewerGotOffer, false);
+
+    // A single viewer is still served without a target (backward compatible)
+    viewer2.disconnect();
+    await new Promise((res) => setTimeout(res, 100));
+    const soloOfferPromise = new Promise((res) => viewer1.on('webrtc:offer', res));
+    sender.emit('webrtc:offer', { sdp: 'untargeted-solo', type: 'offer' });
+    assert.equal((await soloOfferPromise).sdp, 'untargeted-solo');
+  } finally {
+    sender.disconnect();
+    viewer1.disconnect();
+    viewer2.disconnect();
+    await new Promise((resolve) => httpServer.close(resolve));
+  }
+});

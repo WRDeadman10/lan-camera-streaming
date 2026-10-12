@@ -125,7 +125,8 @@ if (btnSetWebcam) {
     }
     hiddenIframe.src = deeplink;
 
-    copyTextToClipboard(deeplink, btnSetWebcam, '✓ Opening Windows Camera...');
+    logDiagnostic('[VCAM] Webcam room saved. Choose "LAN Phone Camera" in the Windows Camera app, Teams, Zoom, Chrome, OBS or Unity (reopen the app if it was already open).', 'INFO');
+    copyTextToClipboard(deeplink, btnSetWebcam, '✓ Webcam room saved');
   });
 }
 

@@ -1,5 +1,24 @@
 # LAN Camera Streaming — AI Handoff
 
+## Windows Camera app now sees the phone camera (2026-10-12) — ADR-023
+
+- **Why the user still got "We can't find your camera":** reinstalling the DirectShow driver could not help; the Camera app only lists kernel-streaming / Media Foundation cameras. Confirmed with the same enumeration API the Camera app uses (`Windows.Devices.Enumeration`, VideoCapture): 0 devices before.
+- **Fix:** a Media Foundation virtual camera (`vcam/src/lancam_mfsource.cpp` -> `LanCamMfSource.dll`), registered by `lancam-setup.exe` via `MFCreateVirtualCamera`. Installed on this PC. Result: enumeration shows "LAN Phone Camera (Windows Virtual Camera)"; an MF Source Reader on that device through the Frame Server returned 30.0 fps, 1280x720, upright, live frames from a mock sender (room 123).
+- **Installer fixes found on the way:** `HKLM\SOFTWARE\Classes` cannot be opened for write even elevated here (use `HKEY_CLASSES_ROOT`); Chrome/Claude/Antigravity keep `LanCamFilter.dll` mapped, so in-use DLLs are renamed aside and replaced (old copies deleted at reboot, `*.old*` files in Program Files are expected); the Frame Server needs the session in `%ProgramData%\LanCamera` (ACL set by the installer); `--silent` skips the message box.
+- **Diagnostics:** `%ProgramData%\LanCamera\setup.log` (installer, HRESULTs) and `mfsource.log` (the source inside the Frame Server, including rejected interface IDs).
+- **Not verified:** the Windows Camera app window itself, Teams/Zoom/Unity, a real phone, Windows 10 (the API needs Windows 11).
+- **Housekeeping:** an elevated "LAN Camera Driver Setup" message box from an earlier test run (pid 13716) keeps `vcamuild\lancam-setup.exe` locked until it is closed; then run `build.bat`. `dist\lancam-vcam-setup.zip` was packaged from the verified installer build.
+- **Test tools (not in the repo):** in-process MF source test and Frame Server capture test were written in the session scratchpad.
+
+## Second viewer stuck + "Set as Webcam" error (2026-10-12)
+
+- **Second viewer never gets video (from the user's logs):** viewer 2 received the sender's ICE candidates (targeted/broadcast) but no offer, while viewer 1 received a new offer every time viewer 2 joined. That is the signature of a sender page still running the pre-multi-viewer `sender.js` (kept open on the phone): it sends offers with no `targetId`, and the server fell back to the first viewer. Fix for the user: hard-refresh the sender page. Code: the server now rejects an untargeted sender offer when more than one viewer is in the room (`room:error` "This sender page is outdated..."), embedded assets are served with `Cache-Control: no-cache`, test added (36/36).
+- **"Set as Webcam" -> UAC -> Camera app "We can't find your camera" (0xA00F4244 NoCamerasAreAttached):** two causes. (1) `lancam-setup.exe` had a `requireAdministrator` manifest, so every `lancam://` click prompted UAC; now `asInvoker` (installation still self-elevates). (2) The Windows Camera app cannot enumerate DirectShow virtual cameras (UWP / Media Foundation only), so it can never show "LAN Phone Camera"; the deeplink handler no longer launches it. The camera is registered correctly: ffmpeg lists it and receives live frames (verified with a live mock sender in room 123).
+- **Extra bug found and fixed:** the virtual camera output was upside down (top-down frames in a bottom-up RGB24 sample) and frames were not scaled to the negotiated 1280x720. `LanCamPin::StreamLoop` now flips and letterboxes (`BlitTopDownToBottomUp`; standalone test of the exact function: flip, portrait-into-landscape letterbox, 1080p->720p all pass).
+- **Rebuilt, not installed:** `vcam/build/*` and `dist/lancam-vcam-setup.zip` contain the fixes. The copy in `C:\Program Files\LanCamera` is the OLD driver until `lancam-setup.exe` is run again (one UAC prompt). The root exe was not rebuilt (run `build.bat`). The vcam folder is a git submodule: its changes are uncommitted inside it.
+- **Not verified:** the rebuilt DLL inside a live DirectShow graph (system registry edits are blocked in this environment, so only the blit function was tested in isolation); a real phone feeding the camera; Unity's device enumeration.
+- **Doc/code mismatch noticed (ADR-022):** the docs say the Node server streams frames to the `--bridge` daemon on 127.0.0.1:7779 and the filter reads shared memory, but `server.js` only forwards bridge frames into the MJPEG streamer; the filter in practice reads MJPEG over HTTP.
+
 ## Mobile Portrait & Samsung S21 Vertical Alignment Overhaul (2026-10-12)
 
 - **Issues Diagnosed on Samsung S21 (360×800 Viewport):**

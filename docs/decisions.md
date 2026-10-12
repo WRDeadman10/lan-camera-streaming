@@ -309,6 +309,8 @@ Eliminates third-party software dependencies (such as OBS Studio or Python scrip
 **Consequences:**
 Users can view and use the phone camera stream inside native desktop apps like the Windows Camera app simply by downloading and registering the lightweight driver once.
 
+**Correction (2026-10-12):** the Windows Camera app cannot list this camera. It is a UWP / Media Foundation app and only enumerates kernel-streaming cameras and Media Foundation virtual cameras, never DirectShow filters registered under `CLSID_VideoInputDeviceCategory` (OBS's DirectShow virtual camera has the same limitation). The camera appears in DirectShow-aware apps (OBS, Zoom, classic Teams, Chrome, ffmpeg; Unity depends on how it enumerates devices, untested). Clicking "Set as Webcam" therefore no longer launches the Windows Camera app. `lancam-setup.exe` is now `asInvoker` (a `requireAdministrator` manifest showed a UAC prompt on every `lancam://` click); it still self-elevates once for installation, because registration writes to HKLM and Program Files. Frames are now flipped to the bottom-up DIB order DirectShow expects and letterboxed to the pin's negotiated size. To get the camera into the Windows Camera app, a Media Foundation virtual camera (`MFCreateVirtualCamera`, Windows 11) would have to replace or accompany the DirectShow filter.
+
 ## ADR-022 — Pure WebRTC Shared-Memory Bridge for DirectShow Virtual Camera
 
 **Status:** Accepted
@@ -334,6 +336,20 @@ Prevents dual video encoding/decoding overhead and avoids stressing the phone or
 
 **Consequences:**
 Windows Camera, Zoom, Teams, and Unity receive the pure WebRTC feed with minimal latency and high frame fidelity without incurring server or network bandwidth penalties.
+
+## ADR-023 — Media Foundation virtual camera so the Windows Camera app can list the phone camera
+
+**Status:** Accepted
+
+**Decision:**
+1. Add `LanCamMfSource.dll` (`vcam/src/lancam_mfsource.cpp`): a Media Foundation media source (IMFMediaSourceEx, IMFMediaStream2, IKsControl, IMFGetService) behind an `IMFActivate` class factory. It reads the room's MJPEG stream (`MjpegDecoder`), letterboxes frames into 1280x720 and delivers NV12 at 30 fps, paced by `RequestSample` tokens.
+2. `lancam-setup.exe` registers the class under `HKEY_CLASSES_ROOT\CLSID` (merged view; writing through `HKLM\SOFTWARE\Classes` directly returned ACCESS_DENIED even when elevated), copies the DLLs to `C:\Program Files\LanCamera` (renaming mapped DLLs aside when Chrome/Claude/Electron apps or the Frame Server hold them), and calls `MFCreateVirtualCamera(SoftwareCameraSource, System, AllUsers, "LAN Phone Camera", CLSID, KSCATEGORY_VIDEO_CAMERA)` + `Start`. The camera then persists across reboots with no helper process. `lancam-setup.exe --remove-mf` removes it.
+3. The Frame Server hosts the source as LocalService, so the session file is also written to `%ProgramData%\LanCamera\session.ini` (folder ACL grants Users and LOCAL SERVICE modify; `lancam://` writes both copies). The source logs to `%ProgramData%\LanCamera\mfsource.log`; the installer logs to `setup.log`.
+4. The DirectShow filter stays for DirectShow-only apps (OBS, ffmpeg, older software).
+
+**Reasoning:** the Windows Camera app (UWP / Media Foundation) enumerates only kernel-streaming and Media Foundation virtual cameras, never DirectShow filters, so the first design (ADR-021) could never appear there.
+
+**Consequences:** requires Windows 11 (build 22000+) and one elevated install. Frame data still travels over loopback MJPEG, so the viewer/sender must be streaming into the configured room. Verified here: the Windows Runtime camera enumeration went from 0 to 1 device, and a Media Foundation capture of that device through the Frame Server returned 30 fps upright 1280x720 frames from a live mock sender. Not verified: the Windows Camera app UI itself, Teams/Zoom/Unity, and a real phone.
 
 ## Open decisions to revisit after the first working stream
 

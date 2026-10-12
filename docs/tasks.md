@@ -192,6 +192,13 @@ Decision: **ADR-021**.
 - [x] Package setup binaries into `dist/lancam-vcam-setup.zip` and serve via `/download/lancam-vcam`.
 - [x] Add "Set as Webcam" action button to the browser viewer interface (`src/public/viewer.html`, `src/public/js/viewer.js`) that triggers the `lancam://` deeplink.
 - [x] All 35 automated tests pass (`npm test`).
+- [x] Fix: "Set as Webcam" showed a UAC prompt on every click (`requireAdministrator` manifest) and then opened the Windows Camera app, which reported "We can't find your camera" because it cannot see DirectShow cameras. Manifest is now `asInvoker`, the Camera app is no longer launched, and the viewer text says where the camera does appear.
+- [x] Fix: virtual camera output was upside down and not scaled to the negotiated size; frames are now flipped and letterboxed (`BlitTopDownToBottomUp`, checked with a standalone test).
+- [x] Server rejects an untargeted sender offer when several viewers are in the room (outdated sender page), instead of giving every offer to the first viewer.
+- [x] Media Foundation virtual camera (`LanCamMfSource.dll`, ADR-023) so the Windows Camera app, Teams, Zoom, Chrome and Unity can list "LAN Phone Camera"; installer registers it with `MFCreateVirtualCamera` (System lifetime) and supports `--remove-mf` and `--silent`.
+- [x] Verified on this PC: WinRT video-capture enumeration lists "LAN Phone Camera (Windows Virtual Camera)" and a Frame Server capture returns 30 fps upright 1280x720 frames.
+- [ ] Open the Windows Camera app and confirm the live phone feed (UI not checked); try Teams/Zoom/Unity.
+- [ ] Run `build.bat` to rebuild the exe and driver zip (close any open "LAN Camera Driver Setup" message box first; it locks `vcamuild\lancam-setup.exe`).
 
 ## P9 — Pure WebRTC Shared-Memory Bridge for DirectShow Virtual Camera (2026-10-12)
 

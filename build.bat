@@ -29,7 +29,7 @@ if exist "vcam\build.bat" (
     )
     echo Packaging DirectShow driver setup zip...
     if not exist "dist" mkdir "dist"
-    tar.exe -a -c -f dist\lancam-vcam-setup.zip -C vcam\build lancam-setup.exe LanCamFilter.dll
+    tar.exe -a -c -f dist\lancam-vcam-setup.zip -C vcam\build lancam-setup.exe LanCamFilter.dll LanCamMfSource.dll
     if !ERRORLEVEL! neq 0 (
         echo [ERROR] Failed to package lancam-vcam-setup.zip.
         pause

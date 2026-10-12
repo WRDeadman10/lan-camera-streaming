@@ -262,6 +262,7 @@ export function createServer(config, logger) {
     if (embeddedAssets && embeddedAssets[reqPath]) {
       const asset = embeddedAssets[reqPath];
       res.setHeader('Content-Type', asset.mimeType);
+      res.setHeader('Cache-Control', 'no-cache');
       if (asset.isBinary) {
         res.send(Buffer.from(asset.content, 'base64'));
       } else {

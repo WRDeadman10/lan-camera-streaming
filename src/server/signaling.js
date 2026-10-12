@@ -125,7 +125,15 @@ export function setupSignaling(httpServer, config, logger) {
 
       // If sender emitted offer with target viewerId (or payload.targetId)
       if (membership.role === 'sender') {
-        const targetId = payload.targetId || payload.viewerId || roomManager.getPeerSocketId(socket.id);
+        const explicitTargetId = payload.targetId || payload.viewerId;
+        if (!explicitTargetId && room.viewerSocketIds.size > 1) {
+          // A sender page loaded before multi-viewer support never names a viewer; guessing would hand every
+          // offer to the first viewer and leave the others stuck on "Negotiating connection...".
+          logger.warn(`Rejected untargeted offer from sender ${socket.id}: ${room.viewerSocketIds.size} viewers in room`);
+          socket.emit('room:error', { message: 'This sender page is outdated and cannot serve several viewers. Reload the sender page (hard refresh) and start streaming again.' });
+          return;
+        }
+        const targetId = explicitTargetId || roomManager.getPeerSocketId(socket.id);
         if (targetId && room.viewerSocketIds.has(targetId)) {
           logger.debug(`Relaying SDP offer from sender ${socket.id} to viewer ${targetId}`);
           io.to(targetId).emit('webrtc:offer', {
