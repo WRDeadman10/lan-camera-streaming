@@ -110,6 +110,12 @@ Use these checkboxes as the implementation source of truth. Move completed work 
 - [ ] Add TURN only if testing demonstrates a requirement for relayed connectivity.
 - [ ] Evaluate whether audio is required.
 - [x] Support multiple concurrent viewers per room via WebRTC mesh (ADR-018).
+- [x] Elevate Sender and Viewer UI/UX with Ayurvedic Holistic Product Design (ADR-019).
+  - [x] Sattvic herb-slate palette with organic Prāna pulse indicator animations.
+  - [x] Nāḍī Parīkṣā (Stream Health & Vitals Dashboard) reporting FPS, acuity, path, viewers, and latency.
+  - [x] Viewport Heads-Up Display (HUD) overlay for Camera Flip, Torch/Flashlight, Snapshot still capture, PiP, and Fullscreen.
+  - [x] Mobile thumb ergonomics, 1-tap clipboard copying with visual feedback, and foldable session setup accordion.
+  - [x] Collapsible diagnostics drawer for decluttering technical WebRTC SDP logs.
 - [ ] Evaluate multiple camera senders per room.
 - [ ] Add QR-based pairing if it materially improves setup.
 - [x] Evaluate a stable local DNS name and locally trusted certificate for tunnel-free LAN operation (mkcert + `start.ps1 -LocalOnly`, see ADR-015).

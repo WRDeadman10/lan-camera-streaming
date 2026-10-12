@@ -1,5 +1,20 @@
 # LAN Camera Streaming — AI Handoff
 
+## Ayurvedic Holistic Product Design & UI/UX Elevation (2026-10-12) — ADR-019
+
+- **Philosophy & Aesthetic:** Grounded in Ayurvedic Sattvic principles: replaced high-contrast clinical dark grey/blue with a calming dark herb-slate palette (`#0a1317`, `#121e24`, `#1f353d`), botanical emerald (`#10b981`), warm turmeric amber (`#f59e0b`), and pitta-cooling terracotta alert tones.
+- **Prāna Pulse Animation:** Live and connecting indicators feature a gentle, organic breathing CSS keyframe pulse (`prana-pulse-green`, `prana-pulse-amber`) rather than abrupt blinks.
+- **Nāḍī Parīkṣā (Stream Health & Vitals Dashboard):** Both sender and viewer pages now include a real-time vitals bar displaying Flow / FPS, Acuity / Resolution, Sangha / Audience count, Mārga / Path harmony (Direct LAN, STUN Direct, or zrok Relay), and Pulse latency (RTT in ms).
+- **Viewport Heads-Up Display (HUD) Controls:**
+  - Sender: Floating viewport HUD overlay with one-tap camera flip (Facing), flashlight/torch toggle (when supported by browser media track constraints), still snapshot capture, and fullscreen view.
+  - Viewer: Floating viewport HUD overlay with Picture-in-Picture (PiP), high-resolution snapshot still grab to PNG, and fullscreen view.
+  - Interruption Recovery: A gentle "🔄 Recheck Stream" button appears directly on the video overlay when the sender stops or disconnects.
+- **Mobile Ergonomics & Decluttering:**
+  - On mobile senders, session setup collapses upon streaming start into an accordion, putting primary focus on the viewfinder and sharing pass.
+  - 1-tap clipboard copying with tactile visual feedback ("✓ Link Copied!") for QR codes, localhost PC URLs, and Python OpenCV endpoints.
+  - Technical diagnostics logs are tucked into a collapsible drawer (`📋 Technical Diagnostics & WebRTC Vitals ▼`), reducing cognitive noise for everyday users while keeping complete SDP and ICE debugging easily accessible.
+- **Embedded Asset Synchronization:** Rebuilt `embedded-assets.js` (`node scripts/build-embedded-assets.js`) to ensure standalone `.exe` distributions embed the new Ayurvedic UI/UX frontend. All 35 automated tests pass (`npm test`).
+
 ## Multi-viewer check (2026-10-12)
 
 - **Result:** the ADR-018 multi-viewer implementation works. Verified live in the in-app browser (mock canvas camera, real WebRTC): 2 and 3 viewers on one sender; a viewer leaving and rejoining while the other keeps playing; sender Stop/Start with viewers already in the room; tunnel-relay with 2 viewers. The sender showed "Live (N viewers)" and every viewer rendered frames.

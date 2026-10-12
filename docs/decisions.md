@@ -236,6 +236,31 @@ Eliminates user lockouts caused by duplicate browser tabs, reloading, or externa
 **Consequences:**
 Multiple viewers can watch the live camera stream concurrently over WebRTC or tunnel relay. Since the sender phone uploads an individual WebRTC track per viewer, performance depends on device encode power and local network bandwidth (typically 2–4 viewers on modern devices).
 
+## ADR-019 — Ayurvedic Holistic Product Design & UI/UX Elevation
+
+**Status:** Accepted
+
+**Decision:**
+1. Ground the frontend design philosophy in Ayurvedic principles of balance (Sattva), sensory clarity, and ergonomic vitality (Prāna):
+   - **Sattvic Botanical Theme:** Replace high-contrast, clinical dark themes with a soothing herb-slate palette (`#0a1317`, `#121e24`, `#1f353d`) accented by botanical emerald (`#10b981`), warm turmeric amber (`#f59e0b`), and pitta-cooling terracotta alert tones (`#ef4444`).
+   - **Prāna Pulse Animation:** Introduce organic breathing keyframes for live status and connection indicators rather than abrupt flashes.
+2. **Nāḍī Parīkṣā (Holistic Vitals Dashboard):**
+   - Provide a real-time, glanceable vitals bar on both sender and viewer displaying flow/pulse (FPS), acuity (Resolution), audience count (Viewers), path harmony (LAN Direct / Internet / Relay), and latency/ping (RTT).
+3. **Viewport Heads-Up Display (HUD) & Ergonomics:**
+   - Overlaid glassmorphism HUD on viewfinder and viewer:
+     - Sender: Quick camera flip, flashlight/torch toggle (when supported by device hardware constraints), snapshot still capture, and fullscreen view.
+     - Viewer: Picture-in-Picture (PiP) support (`requestPictureInPicture()`), full-frame snapshot download, fullscreen toggle, and instant reconnect recovery.
+   - Foldable session setup: Auto-minimize or collapse setup cards during streaming so the camera viewfinder and share passes remain focal.
+   - 1-tap clipboard copying with visual confirmation on QR codes, localhost links, and Python endpoints.
+4. **Collapsible Diagnostics Drawer:**
+   - House technical WebRTC stats, SDP logs, and candidate traces in a collapsible drawer to eliminate cognitive noise for regular users while keeping full diagnostic power one click away.
+
+**Reasoning:**
+Video streaming interfaces frequently inflict optical fatigue and sensory agitation (Rajas/Tamas). Applying Ayurvedic principles produces a calm, alert, and deeply ergonomic experience that empowers users to monitor and stream with ease.
+
+**Consequences:**
+Substantially enhanced mobile thumb ergonomics, instant access to stream health vitals, still capture capabilities, and reduced cognitive overload across all platforms.
+
 ## Open decisions to revisit after the first working stream
 
 - Whether TypeScript should replace plain JavaScript for stricter types.
@@ -244,3 +269,4 @@ Multiple viewers can watch the live camera stream concurrently over WebRTC or tu
 - Whether audio is required.
 - Whether the final deployment should use a trusted local CA/local DNS or continue using a tunnel.
 - What latency and quality targets the real deployment must meet, based on measurements from the target devices and Wi-Fi.
+
