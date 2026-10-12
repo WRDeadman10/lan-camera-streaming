@@ -371,24 +371,39 @@ video {
   min-width: 290px;
   max-width: 350px;
   height: 100%;
+  max-height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
   overflow-y: auto;
   overflow-x: hidden;
-  padding-right: 2px;
+  padding-right: 4px;
+  padding-bottom: 16px;
+  overscroll-behavior-y: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-medium) rgba(0, 0, 0, 0.15);
+}
+
+.sidebar-pane > * {
+  flex-shrink: 0;
 }
 
 /* Custom Scrollbar for Sidebar */
 .sidebar-pane::-webkit-scrollbar {
-  width: 5px;
+  width: 6px;
 }
 .sidebar-pane::-webkit-scrollbar-track {
-  background: transparent;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: var(--radius-pill);
 }
 .sidebar-pane::-webkit-scrollbar-thumb {
-  background: var(--border-subtle);
-  border-radius: 10px;
+  background: var(--border-medium);
+  border-radius: var(--radius-pill);
+  transition: background-color 0.15s ease;
+}
+.sidebar-pane::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
 }
 
 /* Cards */
@@ -466,6 +481,11 @@ input:focus, select:focus {
   outline: none;
   border-color: var(--border-focus);
   box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+}
+
+.pin-masked {
+  -webkit-text-security: disc;
+  text-security: disc;
 }
 
 /* Input Action Groups (Input + button attached) */
@@ -666,6 +686,17 @@ input:focus, select:focus {
   display: flex;
   gap: 6px;
   align-items: center;
+  width: 100%;
+}
+
+.share-input-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.share-input-row button {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .code-input {
@@ -834,13 +865,15 @@ input:focus, select:focus {
   flex: 3;
   width: auto;
   max-width: 380px;
+  min-height: 0;
+  max-height: 100%;
 }
 
 /* ========================================================= */
 /* Responsive & Orientation Behavior                         */
 /* ========================================================= */
 
-/* Portrait Mode (Phones, Tablets & Narrow Windows) */
+/* Portrait Mode (Phones, Tablets & Narrow Windows - e.g. Samsung S21) */
 @media (orientation: portrait), (max-width: 680px) {
   .app-shell {
     height: auto;
@@ -849,21 +882,105 @@ input:focus, select:focus {
     overflow-y: auto;
   }
 
+  /* Slim Mobile Header */
+  .app-header {
+    height: 42px;
+    min-height: 42px;
+    padding: 0 10px;
+    gap: 8px;
+  }
+
+  .header-brand {
+    min-width: 0;
+    flex-shrink: 1;
+    gap: 6px;
+  }
+
+  .brand-logo {
+    width: 20px;
+    height: 20px;
+  }
+
+  .brand-title {
+    font-size: 0.82rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .header-status {
+    flex-shrink: 0;
+    gap: 6px;
+  }
+
+  .status-badge {
+    font-size: 0.7rem;
+    padding: 2px 7px;
+    white-space: nowrap;
+  }
+
+  /* Path text is already prominently displayed in the vitals bar below the video */
+  .header-status .path-indicator {
+    display: none !important;
+  }
+
+  .header-nav .header-link {
+    font-size: 0.75rem;
+    padding: 3px 6px;
+    white-space: nowrap;
+  }
+
   .app-workspace {
     flex-direction: column;
     height: auto;
     min-height: 0;
     overflow: visible;
-    padding: 10px;
+    padding: 8px 10px;
     gap: 10px;
   }
 
+  /* Adapt Viewport for Portrait Cameras (Samsung S21 9:16 Feed) */
   .viewport-pane {
     width: 100%;
-    aspect-ratio: 16 / 9;
-    max-height: 45vh;
-    min-height: 190px;
+    height: 35vh;
+    min-height: 220px;
+    max-height: 42vh;
+    aspect-ratio: auto;
     flex: none;
+  }
+
+  /* Mobile Swipeable Vitals Strip with Zero Wrapping */
+  .vitals-bar {
+    display: flex;
+    overflow-x: auto;
+    overflow-y: hidden;
+    justify-content: flex-start;
+    padding: 6px 10px;
+    gap: 14px;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .vitals-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .vital-item {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.72rem;
+  }
+
+  .vital-label {
+    font-size: 0.65rem;
+  }
+
+  .vital-value {
+    font-size: 0.72rem;
+    white-space: nowrap;
   }
 
   .sidebar-pane {
@@ -872,6 +989,11 @@ input:focus, select:focus {
     max-width: none;
     height: auto;
     overflow: visible;
+    padding-bottom: 24px;
+  }
+
+  .card {
+    padding: 12px;
   }
 
   /* In streaming state on mobile portrait, lift viewport to top */
@@ -904,6 +1026,8 @@ input:focus, select:focus {
 
   .sidebar-pane {
     height: 100%;
+    max-height: 100%;
+    min-height: 0;
     overflow-y: auto;
   }
 }
@@ -935,6 +1059,10 @@ input:focus, select:focus {
     width: 270px;
     min-width: 250px;
     gap: 6px;
+    max-height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+    padding-bottom: 12px;
   }
 
   .card {

@@ -287,8 +287,12 @@ export function setupPasswordToggle(btnId, inputId) {
     return;
   }
   btn.addEventListener('click', () => {
-    const isPass = input.type === 'password';
-    input.type = isPass ? 'text' : 'password';
-    btn.textContent = isPass ? 'Hide' : 'Show';
+    if (input.classList.contains('pin-masked')) {
+      input.classList.remove('pin-masked');
+      btn.textContent = 'Hide';
+    } else {
+      input.classList.add('pin-masked');
+      btn.textContent = 'Show';
+    }
   });
 }

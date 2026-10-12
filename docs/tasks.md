@@ -206,7 +206,24 @@ Decision: **ADR-022**.
 - [x] Repackage setup archive (`dist/lancam-vcam-setup.zip`).
 - [x] Recompile embedded assets (`node scripts/build-embedded-assets.js`) and run test suite (`npm test`, 35/35 passing).
 
+## P10 — Controls Sidebar Panel Scrolling & Viewport Constraints (2026-10-12)
 
+- [x] Resolve CSS flexbox minimum height defect (`min-height: 0`, `max-height: 100%`) on `.sidebar-pane` so children do not overflow unscrollably past parent container.
+- [x] Prevent flex children shrinking (`.sidebar-pane > * { flex-shrink: 0; }`) to maintain natural component heights and trigger clean vertical scrolling.
+- [x] Enhance scrollbar visibility and ergonomics with `6px` width, contrasting thumb (`--border-medium` with hover highlight), and Firefox `scrollbar-width: thin`.
+- [x] Add generous bottom padding (`padding-bottom: 16px`) so all Developer Tools, Python OpenCV endpoints, and diagnostics remain fully reachable.
+- [x] Synchronize embedded assets (`node scripts/build-embedded-assets.js`) and run test suite (`npm test`, 35/35 passing).
 
+## P11 — Access PIN Credential Classification Removal (2026-10-12)
 
+- [x] Convert `accessPin` inputs in `sender.html` and `viewer.html` from `type="password"` to `type="text"` with `autocomplete="off"` and `data-lpignore="true"` to prevent browser password managers and data breach detectors from intercepting PIN entry.
+- [x] Implement CSS text security masking (`.pin-masked { -webkit-text-security: disc; text-security: disc; }`) so PIN digits are visually masked with bullets without triggering credential managers.
+- [x] Recompile embedded assets (`node scripts/build-embedded-assets.js`) and run test suite (`npm test`, 35/35 passing).
 
+## P12 — Mobile Portrait & Samsung S21 Vertical Alignment Overhaul (2026-10-12)
+
+- [x] Fix mobile header overcrowding: hide verbose 60-character `#pathIndicator` on mobile screens (`display: none !important`) since stream path is already shown in the vitals bar, keep brand title on a single line, and align live status badge cleanly.
+- [x] Adapt camera viewfinder for portrait aspect ratios (e.g. 1080×1920 phone camera on Samsung S21) using flexible height (`height: 35vh; min-height: 220px; max-height: 42vh; aspect-ratio: auto;`) instead of forced 16:9 landscape box.
+- [x] Convert vitals bar into smooth, horizontal swipeable ribbon with `white-space: nowrap` and zero multi-line metric wrapping.
+- [x] Optimize share input rows with `flex: 1; min-width: 0;` on inputs and `flex-shrink: 0;` on copy buttons to prevent awkward truncation.
+- [x] Recompile embedded assets (`node scripts/build-embedded-assets.js`) and run test suite (`npm test`, 35/35 passing).

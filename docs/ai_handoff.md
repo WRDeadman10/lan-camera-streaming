@@ -1,5 +1,48 @@
 # LAN Camera Streaming — AI Handoff
 
+## Mobile Portrait & Samsung S21 Vertical Alignment Overhaul (2026-10-12)
+
+- **Issues Diagnosed on Samsung S21 (360×800 Viewport):**
+  1. Header overcrowding: 60-character `#pathIndicator` ("LAN direct - video stays on your network, 0 bytes through zrok") combined with brand title, live status badge, and role link blew out the 44px header bar, causing ugly 2-line wraps and clipped elements.
+  2. Viewfinder forced 16:9 landscape aspect ratio box on a tall vertical phone screen, shrinking portrait video (1080×1920) into a tiny horizontal strip with massive black bars.
+  3. Stream vitals bar wrapped values across 3 vertical lines (e.g. `1080` \n `x` \n `1920` and `LAN Direct` \n `(0 B` \n `zrok)`), crowding metric values.
+  4. Link share rows clipped long tunnel URLs awkwardly.
+- **Resolution:**
+  - Header: Hides redundant `#pathIndicator` inside mobile header (`display: none !important`), keeps brand title on a single line, and balances status badge and navigation link cleanly.
+  - Viewfinder: Changed `.viewport-pane` on mobile portrait to flexible viewport height (`height: 35vh; min-height: 220px; max-height: 42vh; aspect-ratio: auto;`), granting portrait video feeds 2× larger vertical presence.
+  - Vitals ribbon: Replaced wrapping row with a single-line horizontal swipeable ribbon (`overflow-x: auto; white-space: nowrap; gap: 14px;`) with label and value side-by-side (`display: inline-flex`).
+  - Share input row: Added `flex: 1; min-width: 0;` to input and `flex-shrink: 0; white-space: nowrap;` to copy button.
+- **Verification & Assets:** Recompiled `embedded-assets.js` (`node scripts/build-embedded-assets.js`) and verified all 35 tests pass (`npm test`).
+- **Modified files:** `src/public/css/style.css`, `src/server/embedded-assets.js`, `docs/tasks.md`, `docs/ai_handoff.md`.
+- **Recommended next task:** Verify mobile viewports across Chrome and Samsung Internet.
+
+## Access PIN Credential Classification Removal (2026-10-12)
+
+- **Root Cause:** `#accessPin` in `sender.html` and `viewer.html` used `type="password"` with `autocomplete="current-password"`, preceded by `#roomId`. Browsers (specifically Chrome / Google Password Manager) identified this pairing as user credentials and checked default PINs (such as "123456") against known data breach databases, triggering intrusive "Change your password: The password you just used was found in a data breach" modal alerts.
+- **Resolution:**
+  - Converted `<input id="accessPin">` to `type="text"` with `autocomplete="off"`, `autocorrect="off"`, `autocapitalize="off"`, `spellcheck="false"`, `data-lpignore="true"`, and `data-1p-ignore="true"`.
+  - Implemented visual text masking via CSS property `.pin-masked { -webkit-text-security: disc; text-security: disc; }`.
+  - Updated `setupPasswordToggle` in `src/public/js/ui-utils.js` to toggle the `.pin-masked` class and change the button label ("Show" / "Hide") without changing the DOM input `type` to `"password"`.
+  - Preserved full functional security, PIN masking, and verification while eliminating all browser credential prompts and breach warnings.
+- **Verification & Assets:** Recompiled `embedded-assets.js` (`node scripts/build-embedded-assets.js`) and verified all 35 tests pass (`npm test`).
+- **Modified files:** `src/public/sender.html`, `src/public/viewer.html`, `src/public/css/style.css`, `src/public/js/ui-utils.js`, `src/server/embedded-assets.js`, `docs/tasks.md`, `docs/ai_handoff.md`.
+- **Recommended next task:** Verify end-to-end PIN entry in Chrome and Edge without browser credential prompts.
+
+## Controls Sidebar Panel Scrolling & Overflow Constraints (2026-10-12)
+
+- **Root Cause:** In flexbox layouts, `.sidebar-pane` defaulted to `min-height: auto`. When child cards (Session Setup, Share Stream, and expanded Developer Tools / Python endpoints) exceeded the viewport height, `.sidebar-pane` expanded past parent boundaries instead of shrinking and scrolling. Because `.app-workspace` was set to `overflow: hidden`, content below the fold was clipped offscreen and completely unreachable. Furthermore, custom scrollbar thumb styling had low contrast and narrow width.
+- **Flexbox & Viewport Height Constraints:**
+  - Added `min-height: 0; max-height: 100%;` to `.sidebar-pane` (and `.viewer-workspace .sidebar-pane`), ensuring the sidebar strictly respects parent viewport bounds.
+  - Added `.sidebar-pane > * { flex-shrink: 0; }` so child cards do not collapse awkwardly and instead cleanly trigger vertical scrolling when content exceeds available space.
+  - Added `padding-bottom: 16px;` and `overscroll-behavior-y: contain;` to ensure bottom controls (OpenCV endpoint, Direct PC link, WebRTC diagnostics) are comfortably accessible.
+- **Scrollbar Ergonomics & Cross-Browser Styling:**
+  - Increased scrollbar width to `6px` with a subtle rounded track.
+  - Set thumb to `--border-medium` with `--text-muted` on hover for clear visual affordance.
+  - Configured standard CSS `scrollbar-width: thin` and `scrollbar-color: var(--border-medium) rgba(0, 0, 0, 0.15)` for Firefox.
+- **Verification & Assets:** Recompiled `embedded-assets.js` (`node scripts/build-embedded-assets.js`) and verified all 35 tests pass (`npm test`).
+- **Modified files:** `src/public/css/style.css`, `src/server/embedded-assets.js`, `docs/tasks.md`, `docs/ai_handoff.md`.
+- **Recommended next task:** Test the scroll behavior with Developer Tools expanded on various monitor resolutions and scale factors.
+
 ## Orientation-Aware Single-Screen UX Overhaul (2026-10-12) — ADR-020
 
 - **Landscape Viewport Optimization (`100dvh`):**
