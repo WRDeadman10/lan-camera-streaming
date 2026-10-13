@@ -90,12 +90,17 @@ export function setupSignaling(httpServer, config, logger) {
         }
 
         // Notify client and peer if peer is present
-        if (result.hasPeer && result.peerSocketId) {
-          io.to(result.peerSocketId).emit('peer:joined', {
-            role,
-            mediaMode: result.mediaMode,
-            peerId: socket.id
-          });
+        if (result.hasPeer) {
+          const targetPeers = Array.isArray(result.peerSocketIds) && result.peerSocketIds.length > 0
+            ? result.peerSocketIds
+            : (result.peerSocketId ? [result.peerSocketId] : []);
+          for (const peerId of targetPeers) {
+            io.to(peerId).emit('peer:joined', {
+              role,
+              mediaMode: result.mediaMode,
+              peerId: socket.id
+            });
+          }
         }
       } catch (err) {
         logger.error(`Error in room:join: ${err.message}`);

@@ -272,3 +272,17 @@ Decision: **ADR-018**.
 - [ ] Real phone with 2+ viewers (each viewer adds an encoder; the default "Full Maximum Resolution" 4K capture may overload a phone).
 - [ ] Optional: per-peer bitrate/resolution caps; automatic retry for a viewer whose ICE fails.
 - [ ] Evaluate multiple camera senders per room.
+
+## P15 — Dynamic Media Source Switching & Multi-Viewer Reconnection Fixes (2026-10-13)
+
+Decision: **ADR-025**.
+
+- [x] Dynamic track replacement in `src/public/js/sender.js`: `obtainStreamForCurrentSource()` and `applyDynamicSourceChange()` hot-swap video tracks across all existing `viewerPeers` via `RTCRtpSender.replaceTrack()` without leaving or rejoining the room.
+- [x] Wire dynamic switching to UI events: `sourceSelect`, `fileInput`, `urlInput`, `cameraSelect`, `cameraResolutionSelect`, and `btnToggleFacing`.
+- [x] Fix sender room re-entry: restore full `room:join` response callback in `src/public/js/sender.js` so sender immediately connects to all waiting viewers (`response.peerSocketIds`) upon rejoining.
+- [x] Fix signaling broadcast on sender re-entry: broadcast `peer:joined` to all peers in `result.peerSocketIds` in `src/server/signaling.js`.
+- [x] Update viewer to handle dynamic track updates and dismiss reconnect overlays upon `stream:state` ('source-changed', 'live') and `onTrack` events in `src/public/js/viewer.js`.
+- [x] Fix Node.js ESM module resolution in `src/server/server.js` using `createRequire(import.meta.url)` with fallback.
+- [x] Fix boolean parsing in `src/server/config.js` (`parseBool`).
+- [x] Automated tests added for sender source selection UI and sender leaving/rejoining with waiting viewers (41/41 passing).
+

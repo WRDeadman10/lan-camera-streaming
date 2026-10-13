@@ -369,7 +369,30 @@ Intended: DirectShow clients receive the WebRTC feed with minimal latency and no
 
 **Consequences:** building the driver needs Visual Studio 2022 (C++) and Inno Setup 6; the installer and DLLs are not code-signed, so SmartScreen or antivirus may warn; the Windows camera needs Windows 11. Verified on the dev PC: silent install, uninstall (camera list empty, DirectShow class removed, data folder removed) and reinstall. Not verified: a clean machine/VM, the visible wizard, Windows 10, N editions (need the Media Feature Pack).
 
+## ADR-025 — Dynamic Media Source Switching via Track Replacement & Reliable Viewer Reconnect
+
+**Status:** Accepted
+
+**Decision:**
+1. **Dynamic Media Source Switching (`RTCRtpSender.replaceTrack`):**
+   - Media source switches (between camera devices, facing modes, resolutions, video files, and remote video URLs) must not trigger room departures or full SDP renegotiation.
+   - The sender acquires the new `MediaStream` first, iterates all active `viewerPeers` (`RTCPeerConnection`), locates the video sender (`peer.getSenders().find(s => s.track && s.track.kind === 'video')`), and invokes `sender.replaceTrack(newTrack)`.
+   - The sender updates `localVideo.srcObject` and stops previous media tracks only *after* the new track is successfully placed into the sender pipeline.
+   - The sender broadcasts `stream:state` with `{ state: 'source-changed' }` so viewers can update UI indicators without disrupting ongoing media playback.
+2. **Deterministic Multi-Viewer Re-entry:**
+   - When a sender leaves and re-enters an active room, the server's `RoomManager` includes all currently connected viewers in `response.peerSocketIds`.
+   - The sender's `room:join` response handler iterates every `peerId` in `peerSocketIds` and actively initiates WebRTC peer connections.
+   - In `signaling.js`, `room:join` broadcasts `peer:joined` with `{ peerSocketId: socket.id, role: 'camera-sender' }` to all waiting viewers in the room (not just the first peer), ensuring all waiting viewers immediately prepare for the incoming offer.
+   - The viewer's `stream:state` and `onTrack` event handlers automatically dismiss reconnect prompts and resume playback.
+
+**Reasoning:**
+Tearing down and recreating rooms or peer connections causes user-visible stutter, requires manual coordination between sender and receiver users, and fails completely if callbacks are dropped. `replaceTrack()` allows in-place seamless source switching without SDP renegotiation.
+
+**Consequences:**
+Source switching takes effect immediately on all connected receivers. Senders rejoining occupied rooms instantly reconnect to all waiting viewers without requiring viewers to refresh or leave the room.
+
 ## Open decisions to revisit after the first working stream
+
 
 - Whether TypeScript should replace plain JavaScript for stricter types.
 - Whether the app needs multiple simultaneous camera sources.

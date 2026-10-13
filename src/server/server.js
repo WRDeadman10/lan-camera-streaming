@@ -21,15 +21,20 @@ const __dirname = path.dirname(__filename);
 const SocketClientPath = '/vendor/socket.io.js';
 
 // Prefer the installed socket.io package (always matches the running server); fall back to the copy embedded
-// at build time, which is the only source inside the standalone executable (no node_modules there).
 function loadSocketClientScript() {
   try {
     const requireFromHere = createRequire(import.meta.url);
-    const clientFile = path.join(path.dirname(requireFromHere.resolve('socket.io')), '..', 'client-dist', 'socket.io.js');
-    return fs.readFileSync(clientFile);
+    const clientPath = requireFromHere.resolve('socket.io-client/dist/socket.io.js');
+    return fs.readFileSync(clientPath);
   } catch {
-    const embedded = embeddedAssets ? embeddedAssets[SocketClientPath] : null;
-    return embedded ? Buffer.from(embedded.content, 'utf8') : null;
+    try {
+      const requireFromHere = createRequire(import.meta.url);
+      const clientFile = path.join(path.dirname(requireFromHere.resolve('socket.io')), '..', 'client-dist', 'socket.io.js');
+      return fs.readFileSync(clientFile);
+    } catch {
+      const embedded = embeddedAssets ? embeddedAssets[SocketClientPath] : null;
+      return embedded ? Buffer.from(embedded.content, 'utf8') : null;
+    }
   }
 }
 
@@ -57,11 +62,12 @@ export function createServer(config, logger) {
     app.set('trust proxy', 1);
   }
 
-  // Security headers
+  // Security headers (including CSP)
   app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline';");
     next();
   });
 

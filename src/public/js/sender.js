@@ -65,19 +65,62 @@ const fileInput = document.getElementById('fileInput');
 const urlInput = document.getElementById('urlInput');
 const fileInputGroup = document.getElementById('fileInputGroup');
 const urlInputGroup = document.getElementById('urlInputGroup');
-// Show/hide appropriate input based on selected source
+// Show/hide appropriate input based on selected source and apply dynamic switch
 if (sourceSelect) {
-  sourceSelect.addEventListener('change', () => {
+  sourceSelect.addEventListener('change', async () => {
     const value = sourceSelect.value;
     if (value === 'file') {
-      fileInputGroup.style.display = 'block';
-      urlInputGroup.style.display = 'none';
+      if (fileInputGroup) { fileInputGroup.style.display = 'block'; }
+      if (urlInputGroup) { urlInputGroup.style.display = 'none'; }
     } else if (value === 'url') {
-      fileInputGroup.style.display = 'none';
-      urlInputGroup.style.display = 'block';
+      if (fileInputGroup) { fileInputGroup.style.display = 'none'; }
+      if (urlInputGroup) { urlInputGroup.style.display = 'block'; }
     } else {
-      fileInputGroup.style.display = 'none';
-      urlInputGroup.style.display = 'none';
+      if (fileInputGroup) { fileInputGroup.style.display = 'none'; }
+      if (urlInputGroup) { urlInputGroup.style.display = 'none'; }
+    }
+    if (isStreamingActive()) {
+      await applyDynamicSourceChange();
+    }
+  });
+}
+
+if (fileInput) {
+  fileInput.addEventListener('change', async () => {
+    if (isStreamingActive() && sourceSelect && sourceSelect.value === 'file') {
+      await applyDynamicSourceChange();
+    }
+  });
+}
+
+if (urlInput) {
+  urlInput.addEventListener('change', async () => {
+    if (isStreamingActive() && sourceSelect && sourceSelect.value === 'url') {
+      await applyDynamicSourceChange();
+    }
+  });
+  urlInput.addEventListener('keydown', async (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (isStreamingActive() && sourceSelect && sourceSelect.value === 'url') {
+        await applyDynamicSourceChange();
+      }
+    }
+  });
+}
+
+if (cameraSelect) {
+  cameraSelect.addEventListener('change', async () => {
+    if (isStreamingActive() && (!sourceSelect || sourceSelect.value === 'webcam')) {
+      await applyDynamicSourceChange();
+    }
+  });
+}
+
+if (cameraResolutionSelect) {
+  cameraResolutionSelect.addEventListener('change', async () => {
+    if (isStreamingActive() && (!sourceSelect || sourceSelect.value === 'webcam')) {
+      await applyDynamicSourceChange();
     }
   });
 }
@@ -204,9 +247,13 @@ function generateRandomRoomId() {
   return result;
 }
 
-btnGenRoom.addEventListener('click', () => {
-  roomIdInput.value = generateRandomRoomId();
-});
+if (btnGenRoom) {
+  btnGenRoom.addEventListener('click', () => {
+    if (roomIdInput) {
+      roomIdInput.value = generateRandomRoomId();
+    }
+  });
+}
 
 async function populateCameraDevices() {
   try {
@@ -242,44 +289,229 @@ async function fetchIceServers() {
   return undefined;
 }
 
+let isSwitchingSource = false;
+let currentSourceVideoElement = null;
+
+function isStreamingActive() {
+  return Boolean(cameraManager.currentStream && btnStop && btnStop.style.display !== 'none');
+}
+
+function cleanupSourceVideoElement() {
+  if (currentSourceVideoElement) {
+    try {
+      currentSourceVideoElement.pause();
+      if (currentSourceVideoElement.src && currentSourceVideoElement.src.startsWith('blob:')) {
+        URL.revokeObjectURL(currentSourceVideoElement.src);
+      }
+      currentSourceVideoElement.src = '';
+      currentSourceVideoElement.load();
+    } catch {
+      // Ignore cleanup error
+    }
+    currentSourceVideoElement = null;
+  }
+}
+
 // Helper to obtain stream from a local video file
 async function getLocalFileStream(file) {
+  cleanupSourceVideoElement();
   return new Promise((resolve, reject) => {
     const video = document.createElement('video');
     video.src = URL.createObjectURL(file);
     video.muted = true;
     video.playsInline = true;
-    video.loop = true; // enable looping
+    video.loop = true;
     video.onloadedmetadata = () => {
-      // Preserve original video resolution
       video.width = video.videoWidth;
       video.height = video.videoHeight;
       video.play().then(() => {
-        const stream = video.captureStream();
+        currentSourceVideoElement = video;
+        const captureFn = video.captureStream || video.mozCaptureStream;
+        if (!captureFn) {
+          reject(new Error('captureStream() is not supported in this browser.'));
+          return;
+        }
+        const stream = captureFn.call(video);
         resolve(stream);
       }).catch(reject);
     };
-    video.onerror = (e) => reject(new Error('Failed to load local video file'));
+    video.onerror = () => reject(new Error('Failed to load local video file.'));
   });
 }
 
 // Helper to obtain stream from a remote video URL
 async function getRemoteUrlStream(url) {
+  cleanupSourceVideoElement();
   return new Promise((resolve, reject) => {
     const video = document.createElement('video');
     video.src = url;
     video.crossOrigin = 'anonymous';
     video.muted = true;
     video.playsInline = true;
-    video.loop = true; // enable looping
+    video.loop = true;
     video.onloadedmetadata = () => {
       video.play().then(() => {
-        const stream = video.captureStream();
+        currentSourceVideoElement = video;
+        const captureFn = video.captureStream || video.mozCaptureStream;
+        if (!captureFn) {
+          reject(new Error('captureStream() is not supported in this browser.'));
+          return;
+        }
+        const stream = captureFn.call(video);
         resolve(stream);
       }).catch(reject);
     };
-    video.onerror = (e) => reject(new Error('Failed to load remote video URL'));
+    video.onerror = () => reject(new Error('Failed to load remote video URL.'));
   });
+}
+
+async function obtainStreamForCurrentSource() {
+  const sourceChoice = sourceSelect ? sourceSelect.value : 'webcam';
+  if (sourceChoice === 'webcam') {
+    const selectedDeviceId = (cameraSelect && cameraSelect.value) || null;
+    const resChoice = cameraResolutionSelect ? cameraResolutionSelect.value : 'max';
+    let targetWidth = 'max';
+    let targetHeight = 'max';
+    if (resChoice === '1080p') {
+      targetWidth = 1920;
+      targetHeight = 1080;
+    } else if (resChoice === '720p') {
+      targetWidth = 1280;
+      targetHeight = 720;
+    } else if (resChoice === '480p') {
+      targetWidth = 854;
+      targetHeight = 480;
+    }
+    logDiagnostic(`Requesting camera capture (mode: ${resChoice})...`, 'INFO');
+    return await cameraManager.startCapture({
+      deviceId: selectedDeviceId,
+      width: targetWidth,
+      height: targetHeight,
+      frameRate: 30
+    });
+  } else if (sourceChoice === 'file') {
+    const file = fileInput && fileInput.files && fileInput.files[0];
+    if (!file) {
+      throw new Error('No video file selected. Please select a file.');
+    }
+    return await getLocalFileStream(file);
+  } else if (sourceChoice === 'url') {
+    const url = urlInput ? urlInput.value.trim() : '';
+    if (!url) {
+      throw new Error('No video URL provided. Please enter a URL.');
+    }
+    return await getRemoteUrlStream(url);
+  }
+  throw new Error(`Unknown source choice: ${sourceChoice}`);
+}
+
+async function applyDynamicSourceChange() {
+  if (!isStreamingActive() || isSwitchingSource) {
+    return;
+  }
+
+  const sourceChoice = sourceSelect ? sourceSelect.value : 'webcam';
+  if (sourceChoice === 'file' && (!fileInput || !fileInput.files || !fileInput.files[0])) {
+    return;
+  }
+  if (sourceChoice === 'url' && (!urlInput || !urlInput.value.trim())) {
+    return;
+  }
+
+  isSwitchingSource = true;
+  clearError();
+  logDiagnostic(`Applying media source change to "${sourceChoice}"...`, 'INFO');
+
+  const prevStream = cameraManager.currentStream;
+  try {
+    const newStream = await obtainStreamForCurrentSource();
+
+    if (sourceChoice === 'webcam') {
+      cleanupSourceVideoElement();
+    }
+
+    localVideo.srcObject = newStream;
+    videoOverlay.style.display = 'none';
+    await localVideo.play().catch(() => {});
+
+    cameraManager.currentStream = newStream;
+
+    const newVideoTrack = newStream.getVideoTracks()[0];
+    const newAudioTrack = newStream.getAudioTracks()[0];
+
+    // Replace tracks on all active viewer peer connections
+    if (viewerPeers.size > 0 && newVideoTrack) {
+      for (const [viewerId, peer] of viewerPeers.entries()) {
+        if (peer && peer.peerConnection) {
+          const senders = peer.peerConnection.getSenders();
+          const videoSender = senders.find((s) => s.track && s.track.kind === 'video') ||
+                              senders.find((s) => s.track === null);
+          if (videoSender) {
+            try {
+              await videoSender.replaceTrack(newVideoTrack);
+              logDiagnostic(`[MEDIA:${viewerId}] Successfully replaced video track with new source.`, 'INFO');
+            } catch (err) {
+              logDiagnostic(`[MEDIA:${viewerId}] Failed to replace video track: ${err.message}`, 'WARN');
+            }
+          } else {
+            peer.addTrack(newVideoTrack, newStream);
+          }
+
+          if (newAudioTrack) {
+            const audioSender = senders.find((s) => s.track && s.track.kind === 'audio');
+            if (audioSender) {
+              audioSender.replaceTrack(newAudioTrack).catch(() => {});
+            }
+          }
+        }
+      }
+    }
+
+    // Safely stop old tracks after replacement
+    if (prevStream && prevStream !== newStream) {
+      prevStream.getTracks().forEach((track) => {
+        try {
+          track.stop();
+        } catch {
+          // Ignore
+        }
+      });
+    }
+
+    let actualWidth = 0;
+    let actualHeight = 0;
+    let actualFps = 30;
+    if (newVideoTrack) {
+      const settings = newVideoTrack.getSettings ? newVideoTrack.getSettings() : {};
+      actualWidth = settings.width || localVideo.videoWidth || 0;
+      actualHeight = settings.height || localVideo.videoHeight || 0;
+      actualFps = Math.round(settings.frameRate || 30);
+      logDiagnostic(`Media source active: ${actualWidth}x${actualHeight} @ ${actualFps} FPS.`, 'INFO');
+
+      const capabilities = newVideoTrack.getCapabilities ? newVideoTrack.getCapabilities() : {};
+      if (capabilities.torch && btnHudTorch) {
+        btnHudTorch.style.display = 'inline-flex';
+      } else if (btnHudTorch) {
+        btnHudTorch.style.display = 'none';
+      }
+    }
+
+    updateVitals({
+      fps: actualFps,
+      resolution: (actualWidth && actualHeight) ? `${actualWidth} × ${actualHeight}` : null
+    });
+
+    if (socket) {
+      socket.emit('stream:state', { state: 'source-changed' });
+    }
+
+    showInfo(`Stream source changed to ${sourceChoice}.`);
+  } catch (err) {
+    showError(`Failed to switch source: ${err.message}`);
+    logDiagnostic(`Source switch failed: ${err.message}`, 'ERROR');
+  } finally {
+    isSwitchingSource = false;
+  }
 }
 
 // Modified startSession to use selected source
@@ -451,14 +683,69 @@ if (viewerPeers.size > 0) {
     if (!response || !response.success) {
       const errMsg = response ? response.error : 'Connection to room failed';
       showError(errMsg);
-      // Additional error handling omitted for brevity
+      logDiagnostic(`Join failed: ${errMsg}`);
+      stopSession();
+      return;
+    }
+
+    logDiagnostic(`Joined room "${roomId}" as sender [mode: ${response.mediaMode}].`);
+
+    // Display Share QR Code for Viewer
+    const viewerUrl = `${window.location.origin}/viewer?room=${encodeURIComponent(roomId)}`;
+    if (viewerQrLink) {
+      viewerQrLink.href = viewerUrl;
+      viewerQrLink.textContent = viewerUrl;
+    }
+    if (viewerQrLinkInput) {
+      viewerQrLinkInput.value = viewerUrl;
+    }
+    if (shareQrCard) {
+      shareQrCard.style.display = 'flex';
+    }
+    fetch(`/api/qr?text=${encodeURIComponent(viewerUrl)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (viewerQrImg && data.dataUrl) {
+          viewerQrImg.src = data.dataUrl;
+        }
+      })
+      .catch(() => {});
+
+    showLocalViewerLink(roomId);
+
+    // Display Direct Python Stream Link
+    const streamUrl = `${window.location.origin}/stream/${roomId}?pin=${encodeURIComponent(pin)}`;
+    if (pythonStreamUrl) {
+      pythonStreamUrl.value = streamUrl;
+    }
+    if (pythonLinkCard) {
+      pythonLinkCard.style.display = 'block';
+    }
+    logDiagnostic(`Python stream available at: ${streamUrl} (frames are uploaded only while a client is connected to it)`);
+
+    if (currentMediaMode === 'tunnel-relay') {
+      logDiagnostic('Operating in Mode B: Experimental zrok-tunneled binary video.');
+      if (response.hasPeer) {
+        updateStatus('live', 'Live (zrok Tunnel Relay)');
+        startTunnelFrameLoop();
+      } else {
+        updateStatus('waiting', 'Waiting for Viewer (Tunnel Mode)...');
+        logDiagnostic('Waiting for viewer to connect in tunnel mode.');
+      }
     } else {
-      // Success handling omitted for brevity
+      if (response.hasPeer) {
+        updateStatus('connecting', 'Viewers present. Connecting WebRTC...');
+        const peerList = response.peerSocketIds || (response.peerSocketId ? [response.peerSocketId] : []);
+        for (const pId of peerList) {
+          await initiateWebRtcConnectionForViewer(pId);
+        }
+      } else {
+        updateStatus('waiting', 'Waiting for Viewer / Python...');
+        logDiagnostic('Waiting for viewer or Python consumer to connect.');
+      }
     }
   });
 }
-
-// Duplicate validation block removed – original code moved into startSession
 
 
 
@@ -1006,31 +1293,43 @@ function stopSession() {
   viewerPeers.clear();
   pendingCandidatesByViewer.clear();
 
+  cleanupSourceVideoElement();
   cameraManager.stopCapture();
-  if (localVideo.srcObject) {
+  if (localVideo && localVideo.srcObject) {
     localVideo.srcObject = null;
   }
-  videoOverlay.style.display = 'block';
+  if (videoOverlay) {
+    videoOverlay.style.display = 'block';
+  }
 
-  btnStart.disabled = false;
-  btnStart.style.display = 'inline-flex';
-  btnStop.disabled = true;
-  btnStop.style.display = 'none';
+  if (btnStart) {
+    btnStart.disabled = false;
+    btnStart.style.display = 'inline-flex';
+  }
+  if (btnStop) {
+    btnStop.disabled = true;
+    btnStop.style.display = 'none';
+  }
   updateStatus('stopped', 'Stopped');
   logDiagnostic('Capture and session stopped.');
 }
 
-btnStart.addEventListener('click', startSession);
-btnStop.addEventListener('click', stopSession);
+if (btnStart) {
+  btnStart.addEventListener('click', startSession);
+}
+if (btnStop) {
+  btnStop.addEventListener('click', stopSession);
+}
 
-btnToggleFacing.addEventListener('click', async () => {
-  const newFacing = cameraManager.toggleFacingMode();
-  logDiagnostic(`Switched facing mode to ${newFacing}`);
-  if (cameraManager.currentStream) {
-    // Restart active capture with new facing mode
-    await startSession();
-  }
-});
+if (btnToggleFacing) {
+  btnToggleFacing.addEventListener('click', async () => {
+    const newFacing = cameraManager.toggleFacingMode();
+    logDiagnostic(`Switched facing mode to ${newFacing}`);
+    if (isStreamingActive() && (!sourceSelect || sourceSelect.value === 'webcam')) {
+      await applyDynamicSourceChange();
+    }
+  });
+}
 
 // Window unload cleanup
 window.addEventListener('beforeunload', () => {
@@ -1040,7 +1339,9 @@ window.addEventListener('beforeunload', () => {
 // Initialize default state
 setupDiagnosticsControls('btnCopyLogs', 'btnClearLogs', 'diagnosticsLog');
 setupCollapsibleDrawer('btnToggleDiagnostics', 'diagnosticsLog', '📋 Technical Vitals & Diagnostics ▼', '📋 Technical Vitals & Diagnostics ▲');
-roomIdInput.value = generateRandomRoomId();
+if (roomIdInput) {
+  roomIdInput.value = generateRandomRoomId();
+}
 populateCameraDevices();
 fetchIceServers().catch(() => {});
 logDiagnostic('Sender client ready. Click "Start Streaming" to begin.');

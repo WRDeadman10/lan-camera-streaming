@@ -17,7 +17,8 @@ The project is feature-complete for its current scope and has been verified on o
 | Windows virtual webcam "LAN Phone Camera" (DirectShow + Media Foundation) | Implemented and verified on one PC: Windows lists it, Frame Server capture returns live upright 1280x720 at 30 fps (ADR-021/023) |
 | One-file installer `lan-camera-setupv<version>.exe` (Inno Setup) | Install, uninstall, reinstall verified silently on this PC (ADR-024) |
 | Shared-memory bridge for the DirectShow camera (ADR-022) | **Not wired** (dead code); the real path is viewer page -> JPEG POST -> MJPEG stream |
-| Automated tests | 37/37 pass (`npm test`) |
+| Dynamic media source switching & multi-viewer reconnect (ADR-025) | Implemented and verified; `replaceTrack()` hot-swaps tracks without renegotiation; sender re-entry reconnects all waiting viewers |
+| Automated tests | 41/41 pass (`npm test`) |
 
 Version: `package.json` is 1.0.20. The files currently in `dist/` were built as 1.0.19, so rebuild (`build.bat`, which bumps to 1.0.21) before distributing.
 
@@ -26,7 +27,7 @@ Version: `package.json` is 1.0.20. The files currently in `dist/` were built as 
 1. `AGENTS.md` — agent behavior, code style and documentation rules (section 16).
 2. `docs/architecture.md` — components, routes (§3), receiver signaling contract (§4), multi-viewer (§11), virtual webcam (§12), build and distribution (§13).
 3. `docs/roadmap.md` and `docs/tasks.md` — plan and backlog (open items are the unchecked boxes).
-4. `docs/decisions.md` — ADR-001 to ADR-024 and the open decisions at the end.
+4. `docs/decisions.md` — ADR-001 to ADR-025 and the open decisions at the end.
 5. `docs/project-overview.md` — goals, scope, MVP definition.
 6. `docs/receiver-guide.md` — how to connect any receiver.
 7. `vcam/docs/` — the driver repository (overview, architecture, decisions, tasks, handoff).
@@ -55,14 +56,16 @@ Version: `package.json` is 1.0.20. The files currently in `dist/` were built as 
 
 ## Verified and not verified
 
-- **Verified (2026-10-12/13):** all 37 tests; exe pages, Socket.IO client and signaling round trip from an empty folder; 2-3 browser viewers, leave/rejoin, sender restart, tunnel relay with 2 viewers; driver download from the exe in `dist/` and in an empty folder (byte-identical installer); Windows camera enumeration (0 -> 1 device after install, empty after uninstall); Frame Server capture 30 fps upright live frames; DirectShow capture through ffmpeg; silent install/uninstall/reinstall via Inno Setup; `lancam://` deeplink writes both session files without UAC.
+- **Verified (2026-10-12/13):** all 41 tests (`npm test`); dynamic source switching with in-place `RTCRtpSender.replaceTrack()`; sender leaving and rejoining notifies waiting viewers and provides peer list to sender; exe pages, Socket.IO client and signaling round trip from an empty folder; 2-3 browser viewers, leave/rejoin, sender restart, tunnel relay with 2 viewers; driver download from the exe in `dist/` and in an empty folder (byte-identical installer); Windows camera enumeration (0 -> 1 device after install, empty after uninstall); Frame Server capture 30 fps upright live frames; DirectShow capture through ffmpeg; silent install/uninstall/reinstall via Inno Setup; `lancam://` deeplink writes both session files without UAC.
 - **Not verified:** a real phone for the virtual webcam and for 2+ viewers; the Windows Camera app window itself, Teams, Zoom, Unity; a clean machine/VM and the visible installer wizard; Windows 10; zrok mode of the exe; the full root `build.bat` (it bumps the version and ends with `pause`; its steps were run individually); a receiver in a language other than Python; real-phone latency.
 
 ## Modified files (last iteration, 2026-10-13)
 
-- Main repo docs: `README.md`, `docs/architecture.md`, `docs/project-overview.md`, `docs/roadmap.md`, `docs/tasks.md`, `docs/decisions.md`, `docs/receiver-guide.md`, `docs/ai_handoff.md` (rewritten and structured).
-- Main repo code: `src/public/viewer.html`, `src/public/js/viewer.js` (driver link and log text now name the installer), `src/server/embedded-assets.js` (regenerated).
-- `vcam/docs/*` (new: project-overview, architecture, roadmap, tasks, decisions, ai_handoff). Earlier in the same period: `vcam/src/lancam_setup.cpp`, `vcam/src/lancam_mfsource.cpp` (new), `vcam/installer/lan-camera.iss` (new), `vcam/build.bat`, `vcam/include/config_manager.h`; root `build.bat`, `scripts/build-embedded-assets.js`, `src/server/server.js`, `src/server/signaling.js`, `src/server/mjpeg-streamer.js`, `src/public/js/sender.js`, `tests/*`.
+- Web app clients: `src/public/js/sender.js` (dynamic track replacement via `replaceTrack()`, restored `room:join` response callback for waiting viewers, input change wiring), `src/public/js/viewer.js` (dynamic track update & reconnect overlay dismissal).
+- Server & config: `src/server/signaling.js` (broadcast `peer:joined` to all waiting viewers), `src/server/server.js` (fixed ESM `require.resolve` with `createRequire`), `src/server/config.js` (`parseBool`).
+- Build & assets: `src/server/embedded-assets.js` (regenerated via `node scripts/build-embedded-assets.js`).
+- Tests: `tests/sender-source.test.js`, `tests/signaling.test.js` (41 tests passing).
+- Documentation: `docs/tasks.md` (P15 added), `docs/decisions.md` (ADR-025 added), `docs/ai_handoff.md` (updated), `audit_report.md` (updated artifact).
 
 ## Next recommended task
 
@@ -73,7 +76,8 @@ Version: `package.json` is 1.0.20. The files currently in `dist/` were built as 
 
 ## Commands run and results (latest)
 
-- `npm test`: 37/37 passed.
+- `npm test`: 41/41 passed.
+- `node scripts/build-embedded-assets.js`: embedded assets updated and verified.
 - `vcam/build.bat`: builds `lancam-setup.exe`, `LanCamFilter.dll`, `LanCamMfSource.dll` (static runtime) and `dist/lan-camera-setupv1.0.19.exe`.
 - `npm run build:exe`: exe v1.0.19 with the installer embedded.
 - Silent install/uninstall/reinstall of the installer: exit code 0 each time; `setup.log` shows `directshow=1 mf=0x0 listed=1`.
@@ -82,6 +86,7 @@ Version: `package.json` is 1.0.20. The files currently in `dist/` were built as 
 
 Details live in `docs/decisions.md` (ADRs) and `docs/tasks.md`; this is the short history.
 
+- **2026-10-13 — Dynamic Media Source Switching & Multi-Viewer Reconnect (ADR-025).** Dynamic source changes (webcam, file, URL, resolution, camera device, facing mode) hot-swap active tracks via `replaceTrack()` across all active peer connections without leaving/rejoining. Restored sender `room:join` response callback to automatically connect to all waiting viewers (`response.peerSocketIds`), and broadcast `peer:joined` across all waiting viewers in `signaling.js`. Fixed ESM `createRequire` and `parseBool`. 41/41 tests passing.
 - **2026-10-13 — Installer (ADR-024).** One Inno Setup file replaces the zip. Fresh-machine fixes: `MFCreateVirtualCamera` is looked up in `mfsensorgroup.dll` (the old lookup in `mfplat.dll` skipped the Windows camera on every machine); static C++ runtime; honest installer report. "Download Driver" no longer navigates away from a live stream (hidden iframe) and downloads the installer.
 - **2026-10-12 — Media Foundation camera (ADR-023).** Windows Camera app can list the phone camera (WinRT enumeration 0 -> 1). Second-viewer failure traced to an old sender page; the server now rejects untargeted offers with several viewers. Virtual camera output fixed (upright, letterboxed); `lancam-setup.exe` no longer asks for UAC on every "Set as Webcam".
 - **2026-10-12 — Multi-viewer check.** Verified 2-3 viewers; fixed a leaked tunnel-stats timer.
@@ -90,3 +95,4 @@ Details live in `docs/decisions.md` (ADRs) and `docs/tasks.md`; this is the shor
 - **2026-10-12 — Virtual camera first versions (ADR-021/022), multi-viewer (ADR-018), standalone exe (ADR-017).**
 - **2026-10-10 — External receivers documented (ADR-016).** `docs/receiver-guide.md`; the Viitorx Unity + Python sidecar is the reference integration (other repository: `python-sidecar~/tools/video/lan_camera.py`, tests start THIS server via `CAMERA_SERVER_DIR`).
 - **Earlier —** quota-safe LAN operation (ADR-015: on-demand MJPEG, localhost viewer, LAN-direct indicator, optional local HTTPS, single `start.ps1`), tunnel relay and diagnostics (ADR-012/013/014), WebRTC MVP (ADR-001 to ADR-011).
+

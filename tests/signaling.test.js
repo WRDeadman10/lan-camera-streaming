@@ -269,3 +269,78 @@ test('Socket.IO signaling rejects an untargeted sender offer when several viewer
     await new Promise((resolve) => httpServer.close(resolve));
   }
 });
+
+test('Sender leaving and rejoining notifies waiting viewers and provides peer list to sender', async () => {
+  const config = loadConfig({ PORT: '3005', ACCESS_PIN: 'testpass' });
+  const logger = new Logger('error');
+  const { httpServer } = createServer(config, logger);
+  setupSignaling(httpServer, config, logger);
+
+  await new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+  const address = httpServer.address();
+  const socketUrl = `http://127.0.0.1:${address.port}`;
+
+  const sender = Client(socketUrl);
+  const viewer1 = Client(socketUrl);
+
+  try {
+    await Promise.all([
+      new Promise((res) => sender.on('connect', res)),
+      new Promise((res) => viewer1.on('connect', res))
+    ]);
+
+    // Viewer joins first and waits in room
+    const vJoin = await new Promise((res) => {
+      viewer1.emit('room:join', { roomId: 'rejoin-room', role: 'viewer', pin: 'testpass' }, res);
+    });
+    assert.equal(vJoin.success, true);
+    assert.equal(vJoin.hasPeer, false);
+
+    // Setup listener on viewer for peer:joined
+    let viewerSawPeer = null;
+    viewer1.on('peer:joined', (evt) => {
+      viewerSawPeer = evt;
+    });
+
+    // Sender joins room
+    const sJoin = await new Promise((res) => {
+      sender.emit('room:join', { roomId: 'rejoin-room', role: 'sender', pin: 'testpass' }, res);
+    });
+    assert.equal(sJoin.success, true);
+    assert.equal(sJoin.hasPeer, true);
+    assert.ok(sJoin.peerSocketIds.includes(viewer1.id));
+
+    // Wait briefly for event to deliver
+    await new Promise((res) => setTimeout(res, 50));
+    assert.ok(viewerSawPeer);
+    assert.equal(viewerSawPeer.role, 'sender');
+    assert.equal(viewerSawPeer.peerId, sender.id);
+
+    // Sender leaves room
+    let viewerSawLeave = false;
+    viewer1.on('peer:left', () => {
+      viewerSawLeave = true;
+    });
+    sender.emit('room:leave');
+    await new Promise((res) => setTimeout(res, 50));
+    assert.equal(viewerSawLeave, true);
+
+    // Sender rejoins room
+    viewerSawPeer = null;
+    const sRejoin = await new Promise((res) => {
+      sender.emit('room:join', { roomId: 'rejoin-room', role: 'sender', pin: 'testpass' }, res);
+    });
+    assert.equal(sRejoin.success, true);
+    assert.equal(sRejoin.hasPeer, true);
+    assert.ok(sRejoin.peerSocketIds.includes(viewer1.id));
+
+    await new Promise((res) => setTimeout(res, 50));
+    assert.ok(viewerSawPeer);
+    assert.equal(viewerSawPeer.role, 'sender');
+  } finally {
+    sender.disconnect();
+    viewer1.disconnect();
+    await new Promise((resolve) => httpServer.close(resolve));
+  }
+});
+

@@ -119,6 +119,14 @@ function parseInteger(val, defaultVal, min = 1, max = 65535) {
   return parsed;
 }
 
+function parseBool(val, defaultVal = false) {
+  if (val === undefined || val === null || val === '') {
+    return defaultVal;
+  }
+  const str = String(val).trim().toLowerCase();
+  return str === 'true' || str === '1' || str === 'yes';
+}
+
 function parseString(val, defaultVal) {
   if (val === undefined || val === null || val === '') {
     return defaultVal;
@@ -169,7 +177,7 @@ export function loadConfig(env = process.env) {
   const host = parseString(env.HOST, '0.0.0.0');
   const accessPin = parseString(env.ACCESS_PIN, '123456');
   const corsOrigin = parseString(env.CORS_ORIGIN, '*');
-  const trustProxy = env.TRUST_PROXY === 'true' || env.TRUST_PROXY === '1';
+  const trustProxy = parseBool(env.TRUST_PROXY, false);
   const logLevel = parseString(env.LOG_LEVEL, 'info').toLowerCase();
   const zrokToken = parseString(env.ZROK_TOKEN, '');
   const httpsCertPath = parseString(env.HTTPS_CERT_PATH, '');

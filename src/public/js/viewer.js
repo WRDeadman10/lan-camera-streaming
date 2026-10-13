@@ -349,6 +349,9 @@ function createViewerPeer(iceServers) {
       logDiagnostic(`[MEDIA] Remote video track received (${remoteStream.getTracks().length} track(s)). Attaching to player...`, 'INFO');
       remoteVideo.srcObject = remoteStream;
       videoOverlay.style.display = 'none';
+      if (btnOverlayReconnect) {
+        btnOverlayReconnect.style.display = 'none';
+      }
       remoteVideo.play().then(() => {
         updateStatus('live', 'Live Feed');
         logDiagnostic('[MEDIA] Playback started successfully.', 'INFO');
@@ -441,6 +444,15 @@ function createViewerPeer(iceServers) {
       videoOverlay.style.display = 'block';
       if (btnOverlayReconnect) {
         btnOverlayReconnect.style.display = 'inline-flex';
+      }
+    } else if (data.state === 'source-changed' || data.state === 'live') {
+      updateStatus('live', 'Live Feed');
+      videoOverlay.style.display = 'none';
+      if (btnOverlayReconnect) {
+        btnOverlayReconnect.style.display = 'none';
+      }
+      if (remoteVideo) {
+        remoteVideo.play().catch(() => {});
       }
     }
   });

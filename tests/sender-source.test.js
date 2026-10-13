@@ -1,7 +1,7 @@
 // Tests for source selection UI in sender.js using Node's built-in test runner
 
 import { JSDOM } from 'jsdom';
-import { describe, beforeEach, test } from 'node:test';
+import { describe, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 
 // Helper to create a minimal DOM required by sender.js
@@ -30,7 +30,7 @@ function setupDom() {
 }
 
 describe('Sender source selection UI', () => {
-  beforeEach(() => {
+  before(() => {
     setupDom();
     // Load the sender module after globals are set
     return import('../src/public/js/sender.js');
@@ -54,5 +54,15 @@ describe('Sender source selection UI', () => {
     sourceSelect.dispatchEvent(new Event('change'));
     assert.strictEqual(fileGroup.style.display, 'none');
     assert.strictEqual(urlGroup.style.display, 'block');
+  });
+
+  test('Changing source to webcam hides both file and url groups', () => {
+    const sourceSelect = document.getElementById('sourceSelect');
+    const fileGroup = document.getElementById('fileInputGroup');
+    const urlGroup = document.getElementById('urlInputGroup');
+    sourceSelect.value = 'webcam';
+    sourceSelect.dispatchEvent(new Event('change'));
+    assert.strictEqual(fileGroup.style.display, 'none');
+    assert.strictEqual(urlGroup.style.display, 'none');
   });
 });
