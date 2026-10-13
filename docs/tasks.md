@@ -234,3 +234,10 @@ Decision: **ADR-022**.
 - [x] Convert vitals bar into smooth, horizontal swipeable ribbon with `white-space: nowrap` and zero multi-line metric wrapping.
 - [x] Optimize share input rows with `flex: 1; min-width: 0;` on inputs and `flex-shrink: 0;` on copy buttons to prevent awkward truncation.
 - [x] Recompile embedded assets (`node scripts/build-embedded-assets.js`) and run test suite (`npm test`, 35/35 passing).
+
+## P13 — Prevent Web Viewer Room Disconnection on Driver Download (2026-10-13)
+
+- [x] In `src/public/viewer.html`, add `id="btnDownloadDriver"`, `download="lancam-vcam-setup.zip"`, and `target="_blank" rel="noopener noreferrer"` to the driver download link.
+- [x] In `src/public/js/viewer.js`, intercept click event on `#btnDownloadDriver` with `event.preventDefault()` and initiate download via hidden iframe (`iframe.src = '/download/lancam-vcam'`) to guarantee `beforeunload` never fires and WebRTC/Socket.IO connections remain active.
+- [x] Rebuild embedded assets (`node scripts/build-embedded-assets.js`) and run test suite (`npm test`, 37/37 passing).
+

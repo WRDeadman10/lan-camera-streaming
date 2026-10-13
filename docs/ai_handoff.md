@@ -1,5 +1,15 @@
 # LAN Camera Streaming — AI Handoff
 
+## "Download Driver" disconnected the active WebRTC stream in the viewer (2026-10-13)
+
+- **Cause:** In `src/public/viewer.html`, the driver download link was an unadorned anchor tag `<a href="/download/lancam-vcam">`. When clicked during an active stream, the browser treated it as top-level page navigation before receiving the HTTP `Content-Disposition: attachment` response header. This triggered the window's `beforeunload` event handler in `src/public/js/viewer.js`, which called `leaveRoom()`, abruptly tearing down the Socket.IO connection and WebRTC peer connection.
+- **Fix:**
+  1. Updated `src/public/viewer.html` to add `id="btnDownloadDriver"`, `download="lancam-vcam-setup.zip"`, and `target="_blank" rel="noopener noreferrer"`.
+  2. In `src/public/js/viewer.js`, attached a click listener to `#btnDownloadDriver` that calls `event.preventDefault()` and assigns the download route (`/download/lancam-vcam`) to a hidden DOM `<iframe>`. This initiates the installer download immediately while completely preventing window navigation and `beforeunload` triggers.
+  3. Recompiled embedded assets (`node scripts/build-embedded-assets.js`).
+- **Modified files:** `src/public/viewer.html`, `src/public/js/viewer.js`, `docs/tasks.md`, `docs/ai_handoff.md`.
+- **Recommended next task:** Verify end-to-end driver download on a live stream in the web viewer.
+
 ## "Download Driver" returned a .txt (2026-10-12)
 
 - **Cause:** `/download/lancam-vcam` looked for the zip only at `<cwd>/dist/` and a bundle-relative path, so the exe started from `dist\` returned a 404 text message, which the `<a download>` link saved as `lancam-vcam.txt`.
