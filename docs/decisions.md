@@ -346,6 +346,7 @@ Windows Camera, Zoom, Teams, and Unity receive the pure WebRTC feed with minimal
 2. `lancam-setup.exe` registers the class under `HKEY_CLASSES_ROOT\CLSID` (merged view; writing through `HKLM\SOFTWARE\Classes` directly returned ACCESS_DENIED even when elevated), copies the DLLs to `C:\Program Files\LanCamera` (renaming mapped DLLs aside when Chrome/Claude/Electron apps or the Frame Server hold them), and calls `MFCreateVirtualCamera(SoftwareCameraSource, System, AllUsers, "LAN Phone Camera", CLSID, KSCATEGORY_VIDEO_CAMERA)` + `Start`. The camera then persists across reboots with no helper process. `lancam-setup.exe --remove-mf` removes it.
 3. The Frame Server hosts the source as LocalService, so the session file is also written to `%ProgramData%\LanCamera\session.ini` (folder ACL grants Users and LOCAL SERVICE modify; `lancam://` writes both copies). The source logs to `%ProgramData%\LanCamera\mfsource.log`; the installer logs to `setup.log`.
 4. The DirectShow filter stays for DirectShow-only apps (OBS, ffmpeg, older software).
+5. Distribution is a single Inno Setup installer, `lan-camera-setupv<version>.exe` (see `vcam/installer/lan-camera.iss`), served from `/download/lan-camera-setup`; it replaced the zip because a zip needed extracting and manual `lancam-setup.exe` runs, and failed silently when run from inside the archive.
 
 **Reasoning:** the Windows Camera app (UWP / Media Foundation) enumerates only kernel-streaming and Media Foundation virtual cameras, never DirectShow filters, so the first design (ADR-021) could never appear there.
 

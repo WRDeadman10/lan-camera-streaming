@@ -205,33 +205,60 @@ export function createServer(config, logger) {
     }
   });
 
-  // Download virtual camera installer & DirectShow driver package
-  app.get(['/download/lancam-vcam', '/download/lancam-vcam.zip'], (req, res) => {
+  // Download the virtual camera driver installer (lan-camera-setupv<version>.exe, built by vcam/build.bat)
+  const driverInstallerRoutes = [
+    '/download/lan-camera-setup',
+    '/download/lan-camera-setup.exe',
+    '/download/lancam-vcam',
+    '/download/lancam-vcam.zip'
+  ];
+  app.get(driverInstallerRoutes, (req, res) => {
     const exeDir = path.dirname(process.execPath);
-    const candidatePaths = [
-      path.join(exeDir, 'lancam-vcam-setup.zip'),
-      path.join(exeDir, 'dist', 'lancam-vcam-setup.zip'),
-      path.join(process.cwd(), 'lancam-vcam-setup.zip'),
-      path.join(process.cwd(), 'dist', 'lancam-vcam-setup.zip'),
-      path.resolve(__dirname, '../../dist/lancam-vcam-setup.zip')
+    const searchDirs = [
+      exeDir,
+      path.join(exeDir, 'dist'),
+      process.cwd(),
+      path.join(process.cwd(), 'dist'),
+      path.resolve(__dirname, '../../dist')
     ];
-    const zipPath = candidatePaths.find((p) => fs.existsSync(p));
-    if (zipPath) {
-      res.download(zipPath, 'lancam-vcam-setup.zip');
+
+    // Newest lan-camera-setupv*.exe wins when several versions are lying around
+    let newest = null;
+    for (const dir of searchDirs) {
+      let names = [];
+      try {
+        names = fs.readdirSync(dir);
+      } catch {
+        continue;
+      }
+      for (const name of names) {
+        if (!/^lan-camera-setupv.+\.exe$/i.test(name)) {
+          continue;
+        }
+        const fullPath = path.join(dir, name);
+        const modified = fs.statSync(fullPath).mtimeMs;
+        if (!newest || modified > newest.modified) {
+          newest = { fullPath, name, modified };
+        }
+      }
+    }
+
+    if (newest) {
+      res.download(newest.fullPath, newest.name);
       return;
     }
 
     // The standalone exe carries a copy embedded at build time, so it works from any folder.
-    const embeddedZip = embeddedAssets ? embeddedAssets['/download/lancam-vcam-setup.zip'] : null;
-    if (embeddedZip) {
-      res.setHeader('Content-Type', 'application/zip');
-      res.setHeader('Content-Disposition', 'attachment; filename="lancam-vcam-setup.zip"');
-      res.send(Buffer.from(embeddedZip.content, 'base64'));
+    const embeddedInstaller = embeddedAssets ? embeddedAssets['/download/lan-camera-setup.exe'] : null;
+    if (embeddedInstaller) {
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Content-Disposition', `attachment; filename="${embeddedInstaller.fileName || 'lan-camera-setup.exe'}"`);
+      res.send(Buffer.from(embeddedInstaller.content, 'base64'));
       return;
     }
 
-    logger.warn('Virtual camera package requested but lancam-vcam-setup.zip was not found next to the exe, in dist/, or embedded.');
-    res.status(404).send('Virtual camera package not found. Run build.bat to build it.');
+    logger.warn('Driver installer requested but no lan-camera-setupv*.exe was found next to the exe, in dist/, or embedded.');
+    res.status(404).send('Driver installer not found. Run build.bat to build it.');
   });
 
   // Static files directory: check filesystem locations, fallback to embedded assets

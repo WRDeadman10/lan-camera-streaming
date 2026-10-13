@@ -56,15 +56,21 @@ const assetMap = {};
 if (!fs.existsSync(socketClientPath)) {
   throw new Error(`Socket.IO browser client not found at ${socketClientPath}. Run "npm install" first.`);
 }
-// The virtual camera installer zip (built by vcam/build.bat before this step in build.bat) is embedded too, so the
-// standalone exe can serve /download/lancam-vcam from any folder.
-const vcamZipPath = path.resolve(__dirname, '../dist/lancam-vcam-setup.zip');
-if (fs.existsSync(vcamZipPath)) {
+// The virtual camera driver installer (lan-camera-setupv<version>.exe, built by vcam/build.bat before this step in
+// build.bat) is embedded too, so the standalone exe can serve /download/lan-camera-setup from any folder.
+const distDir = path.resolve(__dirname, '../dist');
+const installerNames = fs.existsSync(distDir)
+  ? fs.readdirSync(distDir).filter((name) => /^lan-camera-setupv.+\.exe$/i.test(name))
+  : [];
+if (installerNames.length > 0) {
+  installerNames.sort((a, b) => fs.statSync(path.join(distDir, b)).mtimeMs - fs.statSync(path.join(distDir, a)).mtimeMs);
+  const installerName = installerNames[0];
   files.push({
-    path: '/download/lancam-vcam-setup.zip',
-    mimeType: 'application/zip',
-    content: fs.readFileSync(vcamZipPath).toString('base64'),
-    isBinary: true
+    path: '/download/lan-camera-setup.exe',
+    mimeType: 'application/octet-stream',
+    content: fs.readFileSync(path.join(distDir, installerName)).toString('base64'),
+    isBinary: true,
+    fileName: installerName
   });
 }
 files.push({
@@ -78,7 +84,8 @@ for (const file of files) {
   assetMap[file.path] = {
     content: file.content,
     mimeType: file.mimeType,
-    isBinary: file.isBinary
+    isBinary: file.isBinary,
+    ...(file.fileName ? { fileName: file.fileName } : {})
   };
 }
 

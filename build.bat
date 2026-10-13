@@ -19,19 +19,11 @@ if %ERRORLEVEL% neq 0 (
 echo.
 
 :: 2. Build C++ DirectShow Virtual Camera Driver
-echo [2/3] Building C++ DirectShow Virtual Camera Driver...
+echo [2/3] Building C++ virtual camera driver + Inno Setup installer...
 if exist "vcam\build.bat" (
     call "vcam\build.bat"
     if !ERRORLEVEL! neq 0 (
         echo [ERROR] DirectShow C++ driver build failed.
-        pause
-        exit /b !ERRORLEVEL!
-    )
-    echo Packaging DirectShow driver setup zip...
-    if not exist "dist" mkdir "dist"
-    tar.exe -a -c -f dist\lancam-vcam-setup.zip -C vcam\build lancam-setup.exe LanCamFilter.dll LanCamMfSource.dll
-    if !ERRORLEVEL! neq 0 (
-        echo [ERROR] Failed to package lancam-vcam-setup.zip.
         pause
         exit /b !ERRORLEVEL!
     )
@@ -53,7 +45,7 @@ echo.
 echo ===================================================
 echo  BUILD SUCCEEDED!
 echo  Executable: dist\lan-camera-streaming.exe
-echo  Driver Zip: dist\lancam-vcam-setup.zip
+echo  Driver Setup: dist\lan-camera-setupv^<version^>.exe
 echo  Config:     dist\.env
 echo ===================================================
 echo.

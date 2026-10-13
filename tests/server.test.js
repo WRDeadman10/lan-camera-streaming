@@ -124,10 +124,11 @@ test('Socket.IO browser client script is served while signaling is attached', as
   }
 });
 
-test('virtual camera driver zip is downloadable when it has been built', async (t) => {
-  const hasZip = fs.existsSync('dist/lancam-vcam-setup.zip') || Boolean(embeddedAssets['/download/lancam-vcam-setup.zip']);
-  if (!hasZip) {
-    t.skip('lancam-vcam-setup.zip has not been built (run build.bat)');
+test('virtual camera driver installer is downloadable when it has been built', async (t) => {
+  const hasInstaller = (fs.existsSync('dist') && fs.readdirSync('dist').some((name) => /^lan-camera-setupv.+\.exe$/i.test(name))) ||
+    Boolean(embeddedAssets['/download/lan-camera-setup.exe']);
+  if (!hasInstaller) {
+    t.skip('lan-camera-setupv<version>.exe has not been built (run build.bat)');
     return;
   }
 
@@ -138,11 +139,14 @@ test('virtual camera driver zip is downloadable when it has been built', async (
   const address = httpServer.address();
 
   try {
-    const res = await fetch(`http://127.0.0.1:${address.port}/download/lancam-vcam`);
-    assert.equal(res.status, 200);
-    assert.match(res.headers.get('content-type'), /zip/);
-    const bytes = Buffer.from(await res.arrayBuffer());
-    assert.equal(bytes.subarray(0, 2).toString('latin1'), 'PK');
+    for (const route of ['/download/lan-camera-setup', '/download/lancam-vcam']) {
+      const res = await fetch(`http://127.0.0.1:${address.port}${route}`);
+      assert.equal(res.status, 200);
+      assert.match(res.headers.get('content-disposition'), /lan-camera-setupv.+\.exe/i);
+      const bytes = Buffer.from(await res.arrayBuffer());
+      assert.equal(bytes.subarray(0, 2).toString('latin1'), 'MZ');
+      assert.ok(bytes.length > 500000);
+    }
   } finally {
     await new Promise((resolve) => httpServer.close(resolve));
   }
