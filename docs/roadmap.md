@@ -29,7 +29,7 @@ Tasks:
 
 ## Phase 2 — WebRTC signaling and first live feed
 
-**Objective:** Make one sender stream to one viewer.
+**Objective:** Make one sender stream to one viewer. (Several viewers: Phase 8.)
 
 Tasks:
 - Implement validated room creation/join and one-sender/one-viewer capacity.
@@ -48,7 +48,7 @@ Tasks:
 Tasks:
 - Generate unpredictable room IDs and a pairing secret/PIN.
 - Validate room membership for all signaling events.
-- Reject extra senders/viewers beyond the MVP capacity.
+- Reject extra senders/viewers beyond the MVP capacity. (Viewer capacity was later lifted: Phase 8.)
 - Add expiry for abandoned rooms and cleanup for disconnected sockets.
 - Rate-limit room creation/join attempts and validate/limit payloads.
 - Add safe error messages and redact secrets from logs.
@@ -146,3 +146,44 @@ Delivered (ADR-017):
 
 **Exit criteria:** The standalone executable launches and serves all endpoints and static assets in an isolated environment without Node.js or `src/` files present. Running `build.bat` increments the version and creates a release-ready executable.
 
+## Phase 8 — Multiple viewers per room (delivered, ADR-018)
+
+**Objective:** Let several viewers (browser tabs, laptops, external receivers) watch one sender at once.
+
+Delivered:
+- `RoomManager` tracks a set of viewers; one sender stays enforced.
+- Targeted signaling: the sender makes one offer per viewer with `targetId`; answers and candidates are matched by the viewer's socket id; `peer:left` carries `peerId`.
+- The sender page keeps one `RTCPeerConnection` per viewer and shows "Live (N viewers)".
+- The server rejects an untargeted offer when several viewers are present (a stale sender page) with a clear `room:error`.
+- Tunnel frames and `stream:state` are broadcast to all viewers.
+
+**Exit criteria (met on one PC with a mock camera):** 2 and 3 viewers live at once; a viewer can leave and rejoin; the sender can stop and restart with viewers present; tunnel relay works with 2 viewers. **Open:** real phone with 2+ viewers (encoder load), see tasks P4.7.
+
+## Phase 9 — Single-screen responsive UX (delivered, ADR-019/020)
+
+Delivered: orientation-aware layouts for phone portrait and landscape and desktop, a role-selection hub, state-driven sender/viewer panels, collapsed developer tools, PIN masking without password-manager prompts. Open: nothing recorded.
+
+## Phase 10 — Windows virtual webcam (delivered, ADR-021/022/023; verified on one PC)
+
+**Objective:** The phone camera appears as a normal Windows camera.
+
+Delivered:
+- DirectShow source filter (`LanCamFilter.dll`) and a Media Foundation virtual camera source (`LanCamMfSource.dll`), both reading the room's MJPEG stream and delivering 1280x720 at 30 FPS.
+- `lancam://` deeplink ("Set as Webcam") that stores the room/PIN for both cameras; `POST /api/vcam/bridge-frame` so the PC viewer page feeds the camera with its WebRTC frames.
+- Setup tool `lancam-setup.exe` (register, `--uninstall`, `--remove-mf`, `--silent`) with logs in `%ProgramData%/LanCamera`.
+
+**Exit criteria:** Windows lists the camera (WinRT enumeration) and a capture through the Frame Server returns live upright frames: met. **Open:** Windows Camera app window, Teams/Zoom/Unity, a real phone, Windows 10 behavior. ADR-022's shared-memory path is not wired (see decisions).
+
+## Phase 11 — One-file driver installer (delivered, ADR-024)
+
+Delivered: Inno Setup installer `lan-camera-setupv<version>.exe` (install, upgrade, uninstall verified silently), built by `vcam/build.bat` from the root `build.bat`, served at `/download/lan-camera-setup` and embedded in the server exe.
+
+**Open:** clean-machine/VM run, visible wizard click-through, code signing (SmartScreen), full root `build.bat` run end to end.
+
+## Phase 12 — Proposed next work
+
+1. Verify the virtual webcam with a real phone, the Windows Camera app, Teams/Zoom and Unity; run the installer on a clean Windows 11 VM.
+2. Real-phone test of 2+ viewers; consider per-peer bitrate/resolution caps (`RTCRtpSender.setParameters`) so the phone is not overloaded.
+3. Decide whether to wire or delete the unused shared-memory bridge (ADR-022).
+4. Code-sign the installer and executables if distribution widens.
+5. TURN for cross-network use if that becomes a requirement (Phase 5).

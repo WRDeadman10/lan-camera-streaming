@@ -40,6 +40,8 @@ Any external receiving application (such as an external Python `aiortc` client r
 1. **WebRTC (`aiortc`)**: Negotiates directly through Socket.IO signaling to receive the camera media track peer-to-peer.
 2. **HTTP MJPEG**: Reads standard multipart/x-mixed-replace stream from `/stream/:roomId?pin=...`.
 
+A room supports one sender and several viewers at once (section 11), and the phone camera can also be exposed to Windows applications as a virtual webcam (section 12).
+
 ## 2. Components and responsibilities
 
 ### 2.1 Node.js application server
@@ -96,14 +98,22 @@ To allow zero-dependency portable deployment on Windows, the application can be 
 - **CLI & Supervision**: The console executable (`src/server/cli.js`) handles flag parsing, private LAN IP detection, terminal QR code rendering, and automated zrok lifecycle management.
 
 
-## 3. Proposed routes and pages
+## 3. Routes and pages
 
 | Path | Purpose |
 |---|---|
-| `/` | Minimal landing page with links to sender/viewer |
-| `/sender` | Camera preview, room creation/join, Start/Stop controls |
-| `/viewer` | Room join form and remote video player |
+| `/` | Role selection hub (sender / viewer), mobile QR card, protocol guide |
+| `/sender` | Camera preview, room creation/join, Start/Stop controls, share links |
+| `/viewer` | Room join form, remote video player, "Set as Webcam" and "Download Driver" actions |
 | `/health` | Simple server health check; do not return secrets or internal details |
+| `/api/config` | ICE servers (STUN, and TURN when configured); never returns the PIN |
+| `/api/network-info` | `{ protocol, port }` only, so a page can build a `localhost` viewer link (no LAN IPs: the route is public through a tunnel) |
+| `/api/qr?text=` | QR code data URL for share links |
+| `/vendor/socket.io.js` | Socket.IO browser client, served by the app so it also works inside the exe |
+| `/stream/:roomId?pin=` | MJPEG stream for OpenCV/ffmpeg and the Windows virtual camera (section 4.5) |
+| `/snapshot/:roomId?pin=` | One fresh JPEG; asks the sender for a frame if none is recent |
+| `POST /api/vcam/bridge-frame?room=` | Viewer page uploads JPEG frames for the virtual camera (section 12) |
+| `/download/lan-camera-setup` | The driver installer `lan-camera-setupv<version>.exe` (aliases `/download/lancam-vcam`, `.exe`, `.zip`) |
 
 The public tunnel should expose only the intended app routes. The MVP has no unauthenticated admin dashboard.
 
@@ -148,9 +158,12 @@ Requests room registration and authentication.
   "role": "viewer",
   "mediaMode": "webrtc",
   "hasPeer": true,
-  "peerSocketId": "socket_xyz"
+  "peerSocketId": "socket_xyz",
+  "peerSocketIds": ["socket_xyz"]
 }
 ```
+For a viewer, `peerSocketId` is the sender. For a sender, `peerSocketIds` lists every viewer already in the room and `peerSocketId` is the first of them (see section 11).
+
 If failed:
 ```json
 {
@@ -158,10 +171,10 @@ If failed:
   "error": "Invalid access PIN"
 }
 ```
-Error strings (see [`receiver-guide.md` section 5](receiver-guide.md#5-errors-and-limits) for which can be retried): `Invalid access PIN`; `Invalid Room ID. Must be 3-32 alphanumeric characters.`; `Invalid role. ...`; `Media mode mismatch. This room is configured for "<mode>" mode.`; `Room already has an active sender.`; `Room already has an active viewer/receiver.`; `Too many failed attempts. Please wait N seconds before retrying.`; `Invalid payload format.`; `Internal server error`.
+Error strings (see [`receiver-guide.md` section 5](receiver-guide.md#5-errors-and-limits) for which can be retried): `Invalid access PIN`; `Invalid Room ID. Must be 3-32 alphanumeric characters.`; `Invalid role. ...`; `Media mode mismatch. This room is configured for "<mode>" mode.`; `Room already has an active sender.`; `Too many failed attempts. Please wait N seconds before retrying.`; `Invalid payload format.`; `Internal server error`.
 
 #### 2. `peer:joined` (Server → Peer)
-Emitted **only to the participant who was already in the room**, when the other one joins. The participant who joins second does **not** receive it; it learns the peer is present from `hasPeer` in its own join ack. (So the sender creates its offer either on `peer:joined` or, when it joins second, on `hasPeer: true`.)
+Emitted to a participant **already in the room** when another joins: the sender is told about each new viewer (`peerId` = that viewer's socket id), and, when a sender joins a room that already has viewers, the **first** viewer is told the sender arrived. A participant that joins second does **not** receive it; it learns who is present from its own join ack (`hasPeer`, `peerSocketId`, and for a sender `peerSocketIds`). The sender creates one offer per viewer, on `peer:joined` or from its ack when it joined second.
 ```json
 {
   "role": "viewer",
@@ -171,7 +184,7 @@ Emitted **only to the participant who was already in the room**, when the other 
 ```
 
 #### 3. `webrtc:offer` (Bidirectional: Peer ↔ Server ↔ Peer)
-Relays standard SDP offer payload to the peer in the room. The sender creates the offer; the relayed event also carries the sender's socket id:
+Relays an SDP offer. The sender creates one offer per viewer and names the recipient with `targetId` (the viewer's socket id; section 11). The relayed event carries the id of the socket that sent it:
 ```json
 {
   "sdp": "v=0\r\no=- 1234567 2 IN IP4 127.0.0.1...",
@@ -182,7 +195,7 @@ Relays standard SDP offer payload to the peer in the room. The sender creates th
 The offer has one video m-line and no audio. A receiver builds a **new** peer connection for every offer. (The shipped sender page also answers an offer it receives, i.e. a receiver-initiated flow, but no test here exercises it.)
 
 #### 4. `webrtc:answer` (Bidirectional: Peer ↔ Server ↔ Peer)
-Relays standard SDP answer payload to the peer in the room:
+A viewer's answer goes to the sender; the relayed event carries `senderId` = the answering **viewer's** socket id so the sender can match it to the right peer connection:
 ```json
 {
   "sdp": "v=0\r\no=- 7654321 2 IN IP4 127.0.0.1...",
@@ -191,7 +204,7 @@ Relays standard SDP answer payload to the peer in the room:
 ```
 
 #### 5. `webrtc:ice-candidate` (Bidirectional: Peer ↔ Server ↔ Peer)
-Relays an ICE candidate:
+Relays an ICE candidate. From the sender, `targetId` selects one viewer (without it the candidate is broadcast to all viewers); from a viewer it goes to the sender with `senderId` = the viewer's socket id:
 ```json
 {
   "candidate": "candidate:1 1 UDP 2130706431 ...",
@@ -210,10 +223,11 @@ Notifies of explicit stream lifecycle changes:
 ```
 
 #### 7. `peer:left` (Server → Peer)
-Notifies when the counterpart leaves or disconnects:
+Notifies when a counterpart leaves or disconnects. A leaving viewer notifies the sender; a leaving sender notifies every viewer. `peerId` is the socket id that left:
 ```json
 {
-  "role": "sender" | "viewer"
+  "role": "sender" | "viewer",
+  "peerId": "socket_abc"
 }
 ```
 
@@ -305,28 +319,25 @@ Both sender and viewer clients incorporate a live on-screen diagnostics panel wi
 
 Never report `Live` simply because a room was joined. Confirm that a remote track is received and rendered.
 
-## 9. Suggested project layout
+## 9. Project layout
 
 ```text
 lan-camera-streaming/
-├── docs/
-│   ├── project-overview.md
-│   ├── architecture.md
-│   ├── roadmap.md
-│   ├── tasks.md
-│   ├── decisions.md
-│   └── ai_handoff.md
+├── AGENTS.md               # agent rules (read first)
+├── docs/                   # project-overview, architecture, roadmap, tasks, decisions, ai_handoff, receiver-guide
 ├── src/
-│   ├── server/             # Express, Socket.IO, room/session services
-│   └── public/             # sender/viewer UI assets
-├── tests/                  # signaling and room authorization tests
+│   ├── server/             # Express, Socket.IO, rooms, MJPEG streamer, tunnel relay, CLI, embedded-assets (generated)
+│   └── public/             # sender/viewer/index pages, css, js modules
+├── scripts/                # build-embedded-assets, build-exe, bump-version
+├── tests/                  # node:test suites (signaling, rooms, MJPEG, CLI, server routes, path classification)
+├── vcam/                   # git submodule: Windows virtual camera driver + Inno Setup installer (own docs/)
+├── assets/                 # icon.ico / icon.png
+├── dist/                   # build output (git-ignored): exe, driver installer, .env
+├── start.ps1               # development supervisor (zrok mode)
+├── build.bat               # version bump + vcam driver/installer + exe
 ├── .env.example            # non-secret configuration template
-├── .gitignore
-├── package.json
-└── README.md
+└── package.json
 ```
-
-Adjust the layout if the repository already has established conventions; do not duplicate an existing server or project structure.
 
 ## 10. Failure handling
 
@@ -342,3 +353,58 @@ Adjust the layout if the repository already has established conventions; do not 
   - *Mitigation*: Client directs the user to **Mode B (Fallback zrok Tunnel Relay)** as a last resort; it transmits frames through the authenticated server WebSocket, works on any topology, and consumes zrok quota.
 - **Server restarts**: all in-memory rooms are lost in the MVP; both peers must create/join a new room.
 - **Tunnel URL changes**: clients must reopen the current URL; document this development limitation.
+
+## 11. Multiple viewers per room (ADR-018)
+
+A room has exactly one sender and any number of viewers/receivers. The sender page keeps one `RTCPeerConnection` per viewer (a mesh, not an SFU), so every extra viewer costs the camera device one more video encoder and upload.
+
+| Concern | Behavior |
+|---|---|
+| Capacity | One sender (`Room already has an active sender.` for a second one). Viewers are unlimited by the server; practical limit is the phone's encode power (about 2-4 viewers). |
+| Room state | `RoomManager` keeps `senderSocketId` and `viewerSocketIds: Set`. The room is deleted when the sender and every viewer have left. |
+| Join ack | A viewer gets `peerSocketId` = the sender. A sender gets `peerSocketIds` = every viewer already present (and `peerSocketId` = the first one for old clients). |
+| `peer:joined` | A new viewer: the sender receives `{ role: "viewer", peerId: <viewer socket id> }` and creates one offer **for that viewer**. A sender joining a room that already has viewers: only the **first** viewer receives `{ role: "sender" }`; the sender offers to every viewer in `peerSocketIds` from its own ack. |
+| Offers | The sender must name the recipient: `webrtc:offer` carries `targetId` (the viewer socket id). The server forwards it to that viewer only. An offer with no `targetId` is accepted only while exactly one viewer is present; with two or more the server answers the sender with `room:error` "This sender page is outdated and cannot serve several viewers. Reload the sender page..." and drops it (a sender page loaded before multi-viewer support would otherwise give every offer to the first viewer). |
+| Answers and candidates (viewer to sender) | Forwarded to the sender. The relayed event carries `senderId` = the **viewer's** socket id (the name is historical), which the sender uses to find the right peer connection. |
+| Candidates (sender to viewer) | `webrtc:ice-candidate` with `targetId` goes to that viewer; without it, it is broadcast to all viewers. |
+| `peer:left` | Viewer leaves: the sender receives `{ role: "viewer", peerId }` and closes only that peer connection. Sender leaves: every viewer receives `{ role: "sender", peerId }`. |
+| `stream:state`, `tunnel:frame` | Broadcast to every viewer in the room. |
+| Media mode | Still one per room, fixed by its creator; every participant must use the same mode. |
+
+Receivers written against the contract need no changes: they still wait for an offer and answer it; only the sender side changed.
+
+## 12. Windows virtual webcam (ADR-021, ADR-022, ADR-023)
+
+Goal: a phone camera that appears as a normal camera ("LAN Phone Camera") to Windows applications. The driver lives in its own repository, mounted as the git submodule `vcam/` (documented in `vcam/docs/`).
+
+```mermaid
+flowchart LR
+    Phone[Phone browser sender] -- WebRTC, LAN direct --> Viewer[PC browser viewer page]
+    Viewer -- "Set as Webcam: lancam:// deeplink (room, pin, host, port)" --> Setup[lancam-setup.exe]
+    Setup -- writes --> Ini[session.ini: user + ProgramData]
+    Viewer -- "canvas JPEG, POST /api/vcam/bridge-frame" --> Server[Node server]
+    Server -- "MJPEG /stream/room?pin" --> Source
+    Ini -- room, pin, host, port --> Source
+    subgraph Windows
+      Source[LanCamMfSource.dll in Frame Server] --> Apps1[Camera app, Teams, Zoom, Chrome, Unity]
+      Filter[LanCamFilter.dll DirectShow] --> Apps2[OBS, ffmpeg, older apps]
+    end
+    Server -- MJPEG --> Filter
+```
+
+- **Frame path (as built).** The viewer page that is already receiving the WebRTC stream draws the video to a canvas at about 30 FPS and POSTs each JPEG to `POST /api/vcam/bridge-frame?room=<id>`. The server hands the JPEG to the MJPEG streamer, which serves it at `/stream/<roomId>?pin=<pin>`. Both driver components read that MJPEG stream over loopback HTTP. While the viewer is pumping frames (a POST within the last 3 seconds), the server does **not** ask the phone to upload its own MJPEG frames (`mjpeg:demand` is suppressed), so the phone sends WebRTC only. If no viewer pumps, the driver's connection to `/stream/...` triggers `mjpeg:demand` and the phone uploads MJPEG instead.
+- **The shared-memory design in ADR-022 is not wired.** `shm_bridge.h`, the `--bridge` daemon (127.0.0.1:7779) and the shared-memory reader in the DirectShow filter exist, but nothing starts the daemon or sends frames to it; the filter falls back to HTTP every time.
+- **Two cameras, two stacks.** The DirectShow filter is seen by DirectShow clients (OBS, ffmpeg, Chrome/Electron apps). The Windows Camera app, Teams and other Media Foundation / WinRT consumers only see Media Foundation or kernel-streaming cameras, so `LanCamMfSource.dll` registers a Media Foundation virtual camera (Windows 11, `MFCreateVirtualCamera`, system lifetime). Both read the same MJPEG stream.
+- **Session.** `Set as Webcam` runs `lancam://stream?room=..&pin=..&host=..&port=..`; `lancam-setup.exe` (as the normal user, no UAC) stores it in `%LOCALAPPDATA%/LanCamera/session.ini` for the DirectShow filter and `%ProgramData%/LanCamera/session.ini` for the Frame Server (which runs as LocalService and cannot read the user's profile).
+- **Output.** Both cameras deliver 1280x720 at 30 FPS; incoming frames of any size or orientation are letterboxed (DirectShow: RGB24 bottom-up; Media Foundation: NV12).
+- **Install and download.** The driver ships as one Inno Setup installer, `dist/lan-camera-setupv<version>.exe`, built by `vcam/build.bat` (called from the root `build.bat`). The server serves it at `/download/lan-camera-setup` from disk (next to the exe, `dist/`, or the working directory) or from the copy embedded in the exe at build time. The viewer's "Download Driver" link starts the download through a hidden iframe so the page never navigates away from a live stream.
+- **Diagnostics.** `%ProgramData%/LanCamera/setup.log` (installer, HRESULTs) and `mfsource.log` (the Media Foundation source inside the Frame Server).
+
+## 13. Build and distribution
+
+- `npm start` / `npm run dev`: source server (`src/server/index.js`). `npm run cli -- --local|--zrok`: console app (`src/server/cli.js`). `start.ps1`: development supervisor for zrok mode.
+- `build.bat` (repo root): bumps the patch version, builds the vcam driver and installer (`vcam/build.bat`), then runs `npm run build:exe`.
+- `npm run build:exe`: embeds `src/public`, the Socket.IO browser client (`/vendor/socket.io.js`) and the newest driver installer into `src/server/embedded-assets.js`, bundles with esbuild, and produces the Node SEA executable `dist/lan-camera-streaming.exe` with icon and version resources.
+- `postinstall` regenerates the git-ignored `embedded-assets.js`, so a fresh clone can start.
+- Outputs in `dist/` (git-ignored): `lan-camera-streaming.exe`, `lan-camera-setupv<version>.exe`, `.env`.
+

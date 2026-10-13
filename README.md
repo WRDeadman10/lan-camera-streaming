@@ -5,11 +5,13 @@ Production-ready self-hosted WebRTC camera streaming application for Windows and
 ## Features
 
 - **Peer-to-Peer WebRTC Media**: Low-latency video transmission directly between sender and viewer on LAN without media passing through the server.
-- **Node.js & Express Signaling**: In-memory room management with single-sender, single-viewer capacity enforcement.
+- **Node.js & Express Signaling**: In-memory room management: one sender and any number of viewers per room (a separate WebRTC connection per viewer).
 - **Access Control & Rate Limiting**: Required shared PIN authentication, payload sanitization, and brute-force mitigation.
 - **Real-Time Diagnostics**: Live connection state, candidate pair type (host vs. relay), RTT latency, FPS, and resolution stats.
 - **Clean Hardware Release**: Camera tracks are explicitly stopped and cleared on stop or window close.
 - **Mobile Friendly**: Front/back camera toggle, responsive layout, full-screen viewer support, and `playsinline` video elements.
+- **Windows Virtual Webcam**: The phone appears as "LAN Phone Camera" in the Windows Camera app, Teams, Zoom, Chrome, OBS and Unity, installed with one setup file.
+- **Standalone Windows exe**: One `lan-camera-streaming.exe` with the web pages embedded; no Node.js needed on the target PC.
 
 ---
 
@@ -18,7 +20,8 @@ Production-ready self-hosted WebRTC camera streaming application for Windows and
 | Read | For |
 |---|---|
 | [`docs/receiver-guide.md`](docs/receiver-guide.md) | **Connecting anything to this server** (any language or engine): transports, sequence, errors, checklist, the Unity + Python reference integration |
-| [`docs/architecture.md`](docs/architecture.md) | Components, routes, the formal receiver signaling contract (§4) |
+| [`docs/architecture.md`](docs/architecture.md) | Components, routes, the formal receiver signaling contract (§4), multi-viewer (§11), the virtual webcam (§12), build and distribution (§13) |
+| [`vcam/docs/`](vcam/docs/architecture.md) | The Windows virtual camera driver and installer (separate repository, git submodule) |
 | [`docs/project-overview.md`](docs/project-overview.md), [`docs/roadmap.md`](docs/roadmap.md), [`docs/tasks.md`](docs/tasks.md), [`docs/decisions.md`](docs/decisions.md) | Scope, plan, backlog, decisions |
 | [`docs/ai_handoff.md`](docs/ai_handoff.md) | Current status for the next person or agent |
 
@@ -27,6 +30,7 @@ Production-ready self-hosted WebRTC camera streaming application for Windows and
 - **Node.js**: `v20.0.0` or higher (`v22.15.0+` tested).
 - **Windows PC**: Acting as the local application and signaling server.
 - **Client Devices**: Modern mobile browsers (iOS Safari, Android Chrome) or desktop browsers (Edge, Chrome, Firefox) on the same Wi-Fi/LAN.
+- **Optional, for the virtual webcam**: Windows 11 (Windows Camera app support; Windows 10 gets the DirectShow camera only). Building the driver additionally needs Visual Studio 2022 (C++) and Inno Setup 6.
 
 ---
 
@@ -113,6 +117,41 @@ dist/
   .\dist\lan-camera-streaming.exe --env C:\path\to\custom.env
   ```
 
+### 6. Build everything (exe + virtual camera driver installer)
+
+```bash
+build.bat
+```
+
+Run it from the repository root. It bumps the patch version, builds the Windows virtual camera driver and its Inno Setup installer (`vcam/build.bat`), then builds the exe. Outputs in `dist/`:
+
+| File | What it is |
+|---|---|
+| `lan-camera-streaming.exe` | The server application (no Node.js needed to run it) |
+| `lan-camera-setupv<version>.exe` | One-file installer for the "LAN Phone Camera" virtual webcam |
+| `.env` | Editable settings next to the exe |
+
+Building the driver needs the `vcam` submodule (`git submodule update --init`), Visual Studio 2022 with the C++ workload, and [Inno Setup 6](https://jrsoftware.org/isdl.php). Without them, `npm run build:exe` still builds the server exe; it just has no driver installer to serve.
+
+---
+
+## Windows virtual webcam ("LAN Phone Camera")
+
+Use the phone camera as a normal webcam in Windows applications.
+
+1. On the PC, open the viewer (`http://localhost:<port>/viewer`), join the room and wait for the live feed.
+2. Click **Download Driver** (or open `/download/lan-camera-setup`) and run `lan-camera-setupv<version>.exe`. Accept the UAC prompt once. It installs to `C:\Program Files\LanCamera`, registers the camera, and adds an uninstaller to Windows "Installed apps".
+3. Click **Set as Webcam** in the viewer. This remembers the room, PIN and server address for the camera; no UAC prompt appears.
+4. Pick **LAN Phone Camera** in the app: Windows Camera, Teams, Zoom, Chrome, OBS or Unity. Reopen the app if it was already running.
+
+Notes:
+
+- Two cameras are installed. The **Windows (Media Foundation) camera** is what the Windows Camera app, Teams and other modern apps see; it needs **Windows 11**. The **DirectShow camera** serves OBS, ffmpeg and older software and works on Windows 10 as well.
+- Video is 1280x720 at 30 FPS, letterboxed if the phone sends another size or orientation. Keep the viewer page open while using the camera: it is the one that forwards the frames.
+- Silent install: `lan-camera-setupv<version>.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART`. Uninstall from "Installed apps" or run `"C:\Program Files\LanCamera\unins000.exe"`.
+- If something fails, read `%ProgramData%\LanCamera\setup.log` (installer) and `mfsource.log` (the Windows camera). Details of the driver are in [`vcam/docs/`](vcam/docs/architecture.md).
+- The installer is not code-signed, so Windows SmartScreen or antivirus may warn.
+
 ---
 
 ## Access Scenarios & HTTPS Configuration
@@ -185,8 +224,8 @@ What every receiver needs to know:
 
 - **Endpoints:** `GET /api/config` returns the ICE servers (build your peer connection from it); Socket.IO is on the base URL, default
   namespace; the viewer link a person sees is `http(s)://<host>/viewer?room=<roomId>` and **does not contain the PIN**.
-- **One viewer per room.** A browser viewer open in the room blocks a receiver (and the reverse): the join is refused with
-  `Room already has an active viewer/receiver.`
+- **Several viewers per room.** A browser viewer and any number of receivers can be in the same room at once; the sender makes a
+  separate offer for each. Only a second *sender* is refused (`Room already has an active sender.`).
 - **Emit `room:join` on every Socket.IO `connect`, including reconnects.** The server drops a socket's membership when it
   disconnects.
 - **The sender creates the WebRTC offer.** Build a new peer connection per offer, queue the sender's trickled candidates until the

@@ -125,7 +125,7 @@ the other mode is refused (`Media mode mismatch`). Frames arrive as binary JPEG 
 | `Invalid Room ID. Must be 3-32 alphanumeric characters.` | Room id fails the pattern | No |
 | `Invalid role. ...` | Not `webrtc-receiver`/`viewer`/`sender`/`camera-sender` | No |
 | `Media mode mismatch. This room is configured for "<mode>" mode.` | Wrong `mediaMode` for this room | No |
-| `Room already has an active viewer/receiver.` | Someone else is the viewer (often a **browser tab**) | **Yes**, it clears when they leave. Also happens briefly after *your own* reconnect, until the server notices your old socket is gone |
+| `Room already has an active sender.` | A second **sender** tried to join (receivers are never refused for room capacity) | No, until the first sender leaves |
 | `Too many failed attempts. Please wait N seconds before retrying.` | 5 failed joins on one socket: blocked for 30 s | Yes, after N seconds |
 | `Internal server error` | Server fault | Yes |
 
@@ -199,13 +199,13 @@ it and sends the result to Unity over UDP.
 1. Start this server (`powershell -File start.ps1`) and open the **sender** page on the phone; press start.
 2. In Unity, on `AppBootstrap` > `Video Test Source`: tick **Track From Video**, paste the **viewer** link
    (`http(s)://<host>/viewer?room=<id>`) into **Video Source**, type the server's `ACCESS_PIN` into **Lan Camera Pin**.
-3. Press Play. Close any browser viewer in that room first (one viewer only).
+3. Press Play. A browser viewer may stay open in the same room: since ADR-018 a room accepts several viewers/receivers at once.
 
 **Rules it follows from this guide**
 * The viewer link is recognised by its `/viewer?room=` shape; a link that contains `pin=` is **refused**.
 * The PIN travels in the `CAMERA_PIN` environment variable of the sidecar process, never in the link or on a command line.
 * `room:join` on every connect; a new peer connection per offer; candidates queued; only the newest frame kept; a
-  wrong PIN is fatal (one line, exit code 2) while an occupied room is retried.
+  wrong PIN is fatal (one line, exit code 2). (The sidecar also retries an "occupied room" refusal; the server no longer produces it.)
 * A mid-stream resolution change is detected and the pose crop re-derived; `RTCPeerConnection.close()` is bounded (3 s).
 * **Status lights** in the Unity window (top right, F8 hides) show the sidecar, its watchdog, the source, the model and
   whether a person is being tracked, so a silent sidecar is not mistaken for a working one.
@@ -215,7 +215,7 @@ to this guide and usable on its own as a Python reference; `python-sidecar~/test
 Node server with a fake phone built on `aiortc` (set `CAMERA_SERVER_DIR` to this project's folder).
 
 **Verified:** the WebRTC path against this server with an `aiortc` phone on loopback (frames, a phone that leaves and
-returns, a socket drop, a wrong PIN, an occupied room, a slow consumer), and the full chain through the real pose model.
+returns, a socket drop, a wrong PIN, an occupied room, a slow consumer; the "occupied room" case dates from before multi-viewer support), and the full chain through the real pose model.
 The MJPEG and tunnel-relay paths were verified with an earlier standalone Python receiver. **Not verified:** a real phone
 and its browser sender page with an external receiver, real Wi-Fi/firewall behaviour, a zrok tunnel, the latency of a real
 phone, and a receiver in any language other than Python.

@@ -141,8 +141,8 @@ if (btnDownloadDriver) {
       downloadIframe.style.display = 'none';
       document.body.appendChild(downloadIframe);
     }
-    downloadIframe.src = '/download/lancam-vcam';
-    logDiagnostic('[VCAM] Downloading lancam-vcam-setup.zip driver installer...', 'INFO');
+    downloadIframe.src = '/download/lan-camera-setup';
+    logDiagnostic('[VCAM] Downloading the LAN Phone Camera driver installer (lan-camera-setupv<version>.exe)...', 'INFO');
   });
 }
 

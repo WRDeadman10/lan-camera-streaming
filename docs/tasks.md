@@ -1,6 +1,6 @@
 # LAN Camera Streaming — Task Backlog
 
-Use these checkboxes as the implementation source of truth. Move completed work to checked only after testing it. Update this file in the same change as the implementation.
+Use these checkboxes as the implementation source of truth. Sections are grouped by topic and dated, not strictly ordered by number. Move completed work to checked only after testing it. Update this file in the same change as the implementation.
 
 ## P0 — Inspect and bootstrap
 
@@ -109,14 +109,13 @@ Use these checkboxes as the implementation source of truth. Move completed work 
 
 - [ ] Add TURN only if testing demonstrates a requirement for relayed connectivity.
 - [ ] Evaluate whether audio is required.
-- [x] Support multiple concurrent viewers per room via WebRTC mesh (ADR-018).
+- [x] Support multiple concurrent viewers per room via WebRTC mesh (ADR-018, see P4.7).
 - [x] Elevate Sender and Viewer UI/UX with Ayurvedic Holistic Product Design (ADR-019).
   - [x] Sattvic herb-slate palette with organic Prāna pulse indicator animations.
   - [x] Nāḍī Parīkṣā (Stream Health & Vitals Dashboard) reporting FPS, acuity, path, viewers, and latency.
   - [x] Viewport Heads-Up Display (HUD) overlay for Camera Flip, Torch/Flashlight, Snapshot still capture, PiP, and Fullscreen.
   - [x] Mobile thumb ergonomics, 1-tap clipboard copying with visual feedback, and foldable session setup accordion.
   - [x] Collapsible diagnostics drawer for decluttering technical WebRTC SDP logs.
-- [ ] Evaluate multiple camera senders per room.
 - [ ] Add QR-based pairing if it materially improves setup.
 - [x] Evaluate a stable local DNS name and locally trusted certificate for tunnel-free LAN operation (mkcert + `start.ps1 -LocalOnly`, see ADR-015).
 - [ ] Add a Windows service or auto-start setup only if explicitly required.
@@ -133,7 +132,7 @@ Use these checkboxes as the implementation source of truth. Move completed work 
 - [x] `decisions.md` is updated for any material architecture changes.
 - [x] `ai_handoff.md` describes the actual state of the repository and the next task.
 
-## P5 — External receivers (documentation, 2026-10-10)
+## P5.5 — External receivers (documentation, 2026-10-10)
 
 Decision: **ADR-016**. Docs only; no server code changed.
 
@@ -182,37 +181,39 @@ Decision: **ADR-020**.
 
 ## P8 — DirectShow Virtual Camera Driver & Deeplink Integration (2026-10-12)
 
-Decision: **ADR-021**.
+Decision: **ADR-021**. Code lives in the `vcam/` submodule (its own docs: `vcam/docs/`).
 
-- [x] Add submodule `vcam` referencing `https://github.com/WRDeadman10/DirectShow.git`.
+- [x] Add submodule `vcam` referencing the DirectShow driver repository (`WRDeadman10/DirectShow`).
 - [x] Implement in-process COM DirectShow source filter (`vcam/src/lancam_filter.cpp`, `vcam/src/dll_main.cpp`) registering as `"LAN Phone Camera"` under `CLSID_VideoInputDeviceCategory`.
-- [x] Implement MJPEG HTTP client using WinHTTP and Windows Imaging Component (WIC) decoding into uncompressed RGB24 samples.
-- [x] Implement protocol handler & installer executable (`vcam/src/lancam_setup.cpp`) handling `lancam://` URI schemes and COM driver registration via `regsvr32`.
-- [x] Create automated build script (`vcam/build.bat`) using MSVC x64 toolchain.
-- [x] Package setup binaries into `dist/lancam-vcam-setup.zip` and serve via `/download/lancam-vcam`.
-- [x] Add "Set as Webcam" action button to the browser viewer interface (`src/public/viewer.html`, `src/public/js/viewer.js`) that triggers the `lancam://` deeplink.
-- [x] All 35 automated tests pass (`npm test`).
-- [x] Fix: "Set as Webcam" showed a UAC prompt on every click (`requireAdministrator` manifest) and then opened the Windows Camera app, which reported "We can't find your camera" because it cannot see DirectShow cameras. Manifest is now `asInvoker`, the Camera app is no longer launched, and the viewer text says where the camera does appear.
-- [x] Fix: virtual camera output was upside down and not scaled to the negotiated size; frames are now flipped and letterboxed (`BlitTopDownToBottomUp`, checked with a standalone test).
-- [x] Server rejects an untargeted sender offer when several viewers are in the room (outdated sender page), instead of giving every offer to the first viewer.
-- [x] Media Foundation virtual camera (`LanCamMfSource.dll`, ADR-023) so the Windows Camera app, Teams, Zoom, Chrome and Unity can list "LAN Phone Camera"; installer registers it with `MFCreateVirtualCamera` (System lifetime) and supports `--remove-mf` and `--silent`.
-- [x] Verified on this PC: WinRT video-capture enumeration lists "LAN Phone Camera (Windows Virtual Camera)" and a Frame Server capture returns 30 fps upright 1280x720 frames.
-- [ ] Open the Windows Camera app and confirm the live phone feed (UI not checked); try Teams/Zoom/Unity.
-- [x] Package the driver as one Inno Setup installer `lan-camera-setupv<version>.exe` (install, upgrade, uninstall verified silently on this PC); `build.bat` and the download route use it instead of the zip.
-- [ ] Click through the visible installer wizard and run it on a clean Windows 11 machine/VM.
+- [x] Implement MJPEG HTTP client using WinHTTP and Windows Imaging Component (WIC) decoding (`vcam/include/mjpeg_decoder.h`).
+- [x] Implement protocol handler & setup tool (`vcam/src/lancam_setup.cpp`) handling `lancam://` URI schemes and COM registration.
+- [x] Add "Set as Webcam" action to the browser viewer (`src/public/viewer.html`, `src/public/js/viewer.js`) that triggers the `lancam://` deeplink.
+- [x] Fix: "Set as Webcam" showed a UAC prompt on every click (`requireAdministrator` manifest). The manifest is `asInvoker`; installation still self-elevates.
+- [x] Fix: output was upside down and not scaled to the negotiated size; frames are flipped (bottom-up RGB24) and letterboxed (`BlitTopDownToBottomUp`, tested in isolation).
+- [x] Server rejects an untargeted sender offer when several viewers are in the room (stale sender page), with a clear `room:error`.
 
-## P9 — Pure WebRTC Shared-Memory Bridge for DirectShow Virtual Camera (2026-10-12)
+## P8.5 — Media Foundation virtual camera for the Windows Camera app (2026-10-12)
 
-Decision: **ADR-022**.
+Decision: **ADR-023**.
 
-- [x] Create Win32 shared-memory IPC header (`vcam/include/shm_bridge.h`) with mutex synchronization (`Local\LanCamSharedMemory_Video` & `Local\LanCamSharedMemory_Mutex`).
-- [x] Update DirectShow virtual capture filter (`vcam/src/lancam_filter.cpp`) to prioritize reading live WebRTC uncompressed RGB24 video samples directly from shared memory with sub-millisecond latency.
-- [x] Implement local loopback bridge server in setup launcher (`vcam/src/lancam_setup.cpp --bridge`) listening on `127.0.0.1:7779` via WinSock2.
-- [x] Implement local bridge HTTP frame ingestion endpoint (`POST /api/vcam/bridge-frame`) in `src/server/server.js` piping BGR24 frames directly to TCP port 7779.
-- [x] Implement browser WebRTC video frame pump in `src/public/js/viewer.js` extracting frames at ~30 FPS from `#remoteVideo` canvas to bridge endpoint when virtual camera mode is engaged.
-- [x] Recompile x64 DirectShow binaries (`LanCamFilter.dll` & `lancam-setup.exe`) via `vcam/build.bat`.
-- [x] Repackage setup archive (`dist/lancam-vcam-setup.zip`).
-- [x] Recompile embedded assets (`node scripts/build-embedded-assets.js`) and run test suite (`npm test`, 35/35 passing).
+- [x] Diagnose: the Windows Camera app (UWP / Media Foundation) lists no DirectShow cameras (WinRT video-capture enumeration returned 0 devices).
+- [x] Implement `LanCamMfSource.dll` (`vcam/src/lancam_mfsource.cpp`): IMFMediaSourceEx + IMFMediaStream2 + IKsControl behind an `IMFActivate` factory; NV12 1280x720 at 30 FPS, letterboxed.
+- [x] Register with `MFCreateVirtualCamera` (system lifetime, all users, `KSCATEGORY_VIDEO_CAMERA`); class registered through `HKEY_CLASSES_ROOT` (a direct `HKLM/SOFTWARE/Classes` write is denied even when elevated).
+- [x] Machine-wide session file `%ProgramData%/LanCamera/session.ini` (ACL for Users and LOCAL SERVICE) because the Frame Server runs as LocalService; `lancam://` writes both copies.
+- [x] Logs: `%ProgramData%/LanCamera/mfsource.log` and `setup.log`.
+- [x] Verified on this PC: WinRT enumeration lists "LAN Phone Camera (Windows Virtual Camera)"; a Media Foundation capture through the Frame Server returned 30.0 fps upright 1280x720 live frames from a mock sender.
+- [ ] Open the Windows Camera app and confirm the live phone feed (UI not checked); try Teams, Zoom and Unity.
+- [ ] Verify with a real phone sender and the PC viewer pump (`POST /api/vcam/bridge-frame`) instead of the mock sender's own MJPEG upload.
+
+## P9 — Shared-memory bridge for the DirectShow camera (2026-10-12) — partly implemented, not wired
+
+Decision: **ADR-022** (see its correction).
+
+- [x] Win32 shared-memory IPC header (`vcam/include/shm_bridge.h`) and a reader in the DirectShow filter that prefers shared-memory frames over HTTP.
+- [x] `lancam-setup.exe --bridge` daemon (WinSock2, `127.0.0.1:7779`) that writes frames into shared memory.
+- [x] Viewer frame pump (`src/public/js/viewer.js`) and `POST /api/vcam/bridge-frame` (`src/server/server.js`).
+- [x] Corrected behavior (verified by reading the code, 2026-10-13): the endpoint does **not** forward to TCP 7779. It hands each JPEG to the MJPEG streamer, and the camera reads `/stream/<room>` over HTTP. Nothing starts `--bridge` or sends frames to it, so the shared-memory path is dead code.
+- [ ] Decide: wire the shared-memory path (lower latency, no JPEG) or delete it (`shm_bridge.h`, `--bridge`, the reader).
 
 ## P10 — Controls Sidebar Panel Scrolling & Viewport Constraints (2026-10-12)
 
@@ -238,7 +239,36 @@ Decision: **ADR-022**.
 
 ## P13 — Prevent Web Viewer Room Disconnection on Driver Download (2026-10-13)
 
-- [x] In `src/public/viewer.html`, add `id="btnDownloadDriver"`, `download="lancam-vcam-setup.zip"`, and `target="_blank" rel="noopener noreferrer"` to the driver download link.
-- [x] In `src/public/js/viewer.js`, intercept click event on `#btnDownloadDriver` with `event.preventDefault()` and initiate download via hidden iframe (`iframe.src = '/download/lancam-vcam'`) to guarantee `beforeunload` never fires and WebRTC/Socket.IO connections remain active.
-- [x] Rebuild embedded assets (`node scripts/build-embedded-assets.js`) and run test suite (`npm test`, 37/37 passing).
+- [x] The driver link is an anchor with `id="btnDownloadDriver"`; its click handler calls `preventDefault()` and starts the download through a hidden iframe (`/download/lan-camera-setup`), so the page never navigates and `beforeunload` (which leaves the room) never fires on a live stream.
+- [x] Link, attribute and log text now name the installer (`lan-camera-setup.exe`), not the former zip.
+- [x] Rebuild embedded assets (`node scripts/build-embedded-assets.js`) and run the test suite.
+- [ ] Verify the download on a live stream in a real browser.
 
+## P14 — One-file driver installer and fresh-machine fixes (2026-10-13)
+
+Decision: **ADR-024**.
+
+- [x] Fix: the "dynamically load `MFCreateVirtualCamera`" change looked in `mfplat.dll`; the function is exported by `mfsensorgroup.dll`, so the Media Foundation camera was skipped on every machine (hidden on the dev PC by an earlier install).
+- [x] Fix: link the C++ runtime statically (`/MT`) for `lancam-setup.exe`, `LanCamFilter.dll` and `LanCamMfSource.dll`; a clean Windows has no Visual C++ redistributable. Dependencies are now only Windows DLLs.
+- [x] Installer tool: preflight (DLLs next to the exe), real `regsvr32` result, check that Windows lists the camera, honest per-component summary, non-zero exit on problems, `--silent`, `--uninstall`, `--remove-mf`, no self-copy when run from the install folder, in-use DLLs renamed aside.
+- [x] Inno Setup 6 script `vcam/installer/lan-camera.iss`; `vcam/build.bat` builds it; output `dist/lan-camera-setupv<version>.exe` (the zip is gone; root `build.bat` no longer packages anything).
+- [x] `/download/lan-camera-setup` (aliases `/download/lancam-vcam`, `.exe`, `.zip`) serves the newest installer from disk or from the copy embedded in the exe (`scripts/build-embedded-assets.js`); test added (37/37).
+- [x] Verified on this PC: silent install (exit 0, camera listed), silent uninstall (camera list empty, DirectShow class gone, data folder gone), fresh reinstall, and the exe serving the byte-identical installer from an empty folder.
+- [ ] Run the installer on a clean Windows 11 machine/VM and click through the visible wizard.
+- [ ] Windows 10: confirm the installer reports "Windows camera needs Windows 11" and the DirectShow camera still works.
+- [ ] Run the full root `build.bat` end to end (it bumps the version and ends with `pause`; its steps were run individually).
+- [ ] Code-sign the installer (SmartScreen warns on unsigned files).
+
+## P4.7 — Multiple viewers (2026-10-12)
+
+Decision: **ADR-018**.
+
+- [x] `RoomManager` with `viewerSocketIds`; one sender enforced; room removed when everyone left.
+- [x] Targeted offers/answers/candidates (`targetId`, `senderId`), `peer:left` with `peerId`, broadcast of `stream:state` and `tunnel:frame`.
+- [x] Sender page: one `RTCPeerConnection` per viewer; status "Live (N viewers)".
+- [x] Tests: targeted offer routing, untargeted offer rejection with several viewers, room capacity.
+- [x] Fix: leaked tunnel-stats timer on repeated `peer:joined` (kept logging after Stop).
+- [x] Verified in the in-app browser with a mock camera: 2 and 3 viewers, leave/rejoin, sender restart with viewers present, tunnel relay with 2 viewers.
+- [ ] Real phone with 2+ viewers (each viewer adds an encoder; the default "Full Maximum Resolution" 4K capture may overload a phone).
+- [ ] Optional: per-peer bitrate/resolution caps; automatic retry for a viewer whose ICE fails.
+- [ ] Evaluate multiple camera senders per room.

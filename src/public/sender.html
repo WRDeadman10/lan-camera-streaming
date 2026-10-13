@@ -117,6 +117,22 @@
                 <option value="">Default (Auto / Facing)</option>
               </select>
             </div>
+            <div class="form-group">
+              <label for="sourceSelect">Source</label>
+              <select id="sourceSelect">
+                <option value="webcam" selected>Webcam (default)</option>
+                <option value="file">Local video file</option>
+                <option value="url">Remote video URL</option>
+              </select>
+            </div>
+            <div class="form-group" id="fileInputGroup" style="display:none;">
+              <label for="fileInput">Choose video file</label>
+              <input type="file" id="fileInput" accept="video/*">
+            </div>
+            <div class="form-group" id="urlInputGroup" style="display:none;">
+              <label for="urlInput">Video URL</label>
+              <input type="text" id="urlInput" placeholder="https://example.com/stream.mp4">
+            </div>
 
             <div class="form-group">
               <label for="cameraResolution">Resolution</label>
