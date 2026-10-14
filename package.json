@@ -1,6 +1,6 @@
 {
   "name": "lan-camera-streaming",
-  "version": "1.0.23",
+  "version": "1.0.25",
   "description": "Production-ready self-hosted LAN camera streaming web application via WebRTC and Socket.IO",
   "main": "src/server/index.js",
   "type": "module",
@@ -9,7 +9,7 @@
     "cli": "node src/server/cli.js",
     "dev": "node --watch src/server/index.js",
     "postinstall": "node scripts/build-embedded-assets.js",
-    "test": "node --test tests/**/*.test.js",
+    "test": "node --test --test-timeout=10000 tests/**/*.test.js",
     "bump:version": "node scripts/bump-version.js",
     "build:assets": "node scripts/build-embedded-assets.js",
     "build:exe": "node scripts/build-exe.js"

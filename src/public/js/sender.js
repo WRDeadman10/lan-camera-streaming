@@ -4,7 +4,7 @@
  * and WebRTC peer connection to viewer.
  */
 
-import { showError, clearError, showInfo, clearInfo, updateStatus, logDiagnostic, parseCandidateSummary, setupDiagnosticsControls, setPathIndicator, describePath, isLocalHostname, fetchLocalServerOrigin, updateVitals, captureFrameSnapshot, copyTextToClipboard, setupCollapsibleDrawer, setupPasswordToggle } from './ui-utils.js';
+import { showError, clearError, showInfo, clearInfo, updateStatus, logDiagnostic, parseCandidateSummary, setupDiagnosticsControls, setPathIndicator, describePath, isLocalHostname, fetchLocalServerOrigin, updateVitals, captureFrameSnapshot, copyTextToClipboard, setupCollapsibleDrawer, setupPasswordToggle, StreamRecorder, WakeLockController, StreamTransformController, parseUrlStreamParams, buildShareUrl } from './ui-utils.js';
 import { CameraManager } from './camera-manager.js';
 import { WebRtcPeer } from './webrtc-peer.js';
 
@@ -24,6 +24,15 @@ let cachedIceServers = null;
 let mjpegIsEncoding = false;
 let lastLoggedPathKind = null;
 let torchActive = false;
+
+// Auto-reconnect state management (distinguish human stop vs network/device drop)
+let isStreamingRequested = false;
+let isRejoining = false;
+let autoRejoinTimer = null;
+let watchdogInterval = null;
+let activeRoomId = null;
+let activePin = null;
+let isStudioSender = false;
 
 const MjpegMaxWidth = 1280;
 const MjpegMaxFrameBytes = 900000;
@@ -195,9 +204,85 @@ if (btnToggleSetup && setupFormBody) {
   });
 }
 
+const wakeLockController = new WakeLockController();
+const gridOverlay = document.getElementById('gridOverlay');
+const transformController = new StreamTransformController(localVideo, gridOverlay);
+const btnHudFlipH = document.getElementById('btnHudFlipH');
+const btnHudRotate = document.getElementById('btnHudRotate');
+const btnHudGrid = document.getElementById('btnHudGrid');
+const btnHudBatterySaver = document.getElementById('btnHudBatterySaver');
+const oledSaverOverlay = document.getElementById('oledSaverOverlay');
+const btnHudRecord = document.getElementById('btnHudRecord');
+const recIndicator = document.getElementById('recIndicator');
+const recTimerText = document.getElementById('recTimerText');
+const zoomControlBar = document.getElementById('zoomControlBar');
+const zoomSlider = document.getElementById('zoomSlider');
+const zoomValText = document.getElementById('zoomValText');
+const btnSharePreLink = document.getElementById('btnSharePreLink');
+
 if (btnHudFacing) {
   btnHudFacing.addEventListener('click', () => {
     btnToggleFacing.click();
+  });
+}
+
+if (btnHudFlipH) {
+  btnHudFlipH.addEventListener('click', () => {
+    const isMirrored = transformController.toggleMirror();
+    btnHudFlipH.style.color = isMirrored ? 'var(--accent-cyan)' : 'inherit';
+  });
+}
+
+if (btnHudRotate) {
+  btnHudRotate.addEventListener('click', () => {
+    transformController.rotate();
+  });
+}
+
+if (btnHudGrid) {
+  btnHudGrid.addEventListener('click', () => {
+    const isActive = transformController.toggleGrid();
+    btnHudGrid.style.color = isActive ? 'var(--accent-cyan)' : 'inherit';
+  });
+}
+
+if (btnHudBatterySaver && oledSaverOverlay) {
+  btnHudBatterySaver.addEventListener('click', () => {
+    oledSaverOverlay.classList.add('active');
+  });
+  oledSaverOverlay.addEventListener('click', () => {
+    oledSaverOverlay.classList.remove('active');
+  });
+}
+
+let streamRecorder = null;
+if (btnHudRecord && localVideo) {
+  streamRecorder = new StreamRecorder(localVideo, {
+    onStart: () => {
+      if (recIndicator) { recIndicator.classList.add('active'); }
+      btnHudRecord.style.color = '#ef4444';
+      logDiagnostic('[Record] Video recording started on sender.', 'INFO');
+    },
+    onStop: () => {
+      if (recIndicator) { recIndicator.classList.remove('active'); }
+      btnHudRecord.style.color = 'inherit';
+      logDiagnostic('[Record] Video recording completed and file downloaded.', 'INFO');
+    },
+    onTimeUpdate: (timeStr) => {
+      if (recTimerText) { recTimerText.textContent = `REC ${timeStr}`; }
+    }
+  });
+
+  btnHudRecord.addEventListener('click', () => {
+    if (streamRecorder.isRecording) {
+      streamRecorder.stop();
+    } else {
+      if (isStreamingActive()) {
+        streamRecorder.start();
+      } else {
+        showError('Start streaming before recording video.');
+      }
+    }
   });
 }
 
@@ -222,19 +307,57 @@ if (btnHudFullscreen && videoContainer) {
 
 if (btnHudTorch) {
   btnHudTorch.addEventListener('click', async () => {
-    if (cameraManager.currentStream) {
-      const track = cameraManager.currentStream.getVideoTracks()[0];
-      if (track && track.applyConstraints) {
-        try {
-          torchActive = !torchActive;
-          await track.applyConstraints({ advanced: [{ torch: torchActive }] });
-          btnHudTorch.style.color = torchActive ? '#facc15' : 'inherit';
-          logDiagnostic(`[HUD] Torch flashlight ${torchActive ? 'enabled' : 'disabled'}.`, 'INFO');
-        } catch (e) {
-          torchActive = false;
-        }
-      }
+    torchActive = !torchActive;
+    const ok = await cameraManager.applyTorch(torchActive);
+    if (ok) {
+      btnHudTorch.style.color = torchActive ? '#facc15' : 'inherit';
+      logDiagnostic(`[HUD] Torch flashlight ${torchActive ? 'enabled' : 'disabled'}.`, 'INFO');
+    } else {
+      torchActive = false;
     }
+  });
+}
+
+if (zoomSlider) {
+  zoomSlider.addEventListener('input', async () => {
+    const val = parseFloat(zoomSlider.value);
+    if (zoomValText) {
+      zoomValText.textContent = `${val.toFixed(1)}x`;
+    }
+    await cameraManager.applyZoom(val);
+  });
+}
+
+function updateHardwareCapabilitiesUI() {
+  const caps = cameraManager.getCapabilities();
+  if (!caps) {
+    if (btnHudTorch) btnHudTorch.style.display = 'none';
+    if (zoomControlBar) zoomControlBar.classList.remove('active');
+    return;
+  }
+  if (btnHudTorch) {
+    btnHudTorch.style.display = caps.torch ? 'inline-flex' : 'none';
+  }
+  if (caps.zoom && zoomControlBar && zoomSlider) {
+    zoomControlBar.classList.add('active');
+    zoomSlider.min = caps.zoom.min || 1;
+    zoomSlider.max = caps.zoom.max || 5;
+    zoomSlider.step = caps.zoom.step || 0.1;
+    zoomSlider.value = 1;
+    if (zoomValText) zoomValText.textContent = '1.0x';
+  } else if (zoomControlBar) {
+    zoomControlBar.classList.remove('active');
+  }
+}
+
+if (btnSharePreLink) {
+  btnSharePreLink.addEventListener('click', () => {
+    const url = buildShareUrl('/viewer', {
+      roomId: roomIdInput?.value || '',
+      pin: accessPinInput?.value || '',
+      autostart: true
+    });
+    copyTextToClipboard(url, btnSharePreLink, '✓ Link Copied!');
   });
 }
 
@@ -382,12 +505,15 @@ async function obtainStreamForCurrentSource() {
       targetWidth = 854;
       targetHeight = 480;
     }
-    logDiagnostic(`Requesting camera capture (mode: ${resChoice})...`, 'INFO');
+    const audioToggle = document.getElementById('audioToggle');
+    const withAudio = Boolean(audioToggle && audioToggle.checked);
+    logDiagnostic(`Requesting camera capture (mode: ${resChoice}, audio: ${withAudio})...`, 'INFO');
     return await cameraManager.startCapture({
       deviceId: selectedDeviceId,
       width: targetWidth,
       height: targetHeight,
-      frameRate: 30
+      frameRate: 30,
+      withAudio
     });
   } else if (sourceChoice === 'file') {
     const file = fileInput && fileInput.files && fileInput.files[0];
@@ -531,6 +657,11 @@ async function startSession() {
     return;
   }
 
+  isStreamingRequested = true;
+  activeRoomId = roomId;
+  activePin = pin;
+  isStudioSender = Boolean(streamParams.role === 'studio-sender' || streamParams.studio === '1');
+
   btnStart.disabled = true;
   updateStatus('connecting', 'Starting capture...');
   logDiagnostic('Requesting camera permissions...');
@@ -553,12 +684,15 @@ async function startSession() {
         targetWidth = 854;
         targetHeight = 480;
       }
-      logDiagnostic(`Requesting camera capture (mode: ${resChoice})...`, 'INFO');
+      const audioToggle = document.getElementById('audioToggle');
+      const withAudio = Boolean(audioToggle && audioToggle.checked);
+      logDiagnostic(`Requesting camera capture (mode: ${resChoice}, audio: ${withAudio})...`, 'INFO');
       stream = await cameraManager.startCapture({
         deviceId: selectedDeviceId,
         width: targetWidth,
         height: targetHeight,
-        frameRate: 30
+        frameRate: 30,
+        withAudio
       });
     } else if (sourceChoice === 'file') {
       const file = fileInput && fileInput.files[0];
@@ -624,14 +758,12 @@ if (viewerPeers.size > 0) {
       actualHeight = settings.height || localVideo.videoHeight || 0;
       actualFps = Math.round(settings.frameRate || 30);
       logDiagnostic(`Camera capture active: ${actualWidth}x${actualHeight} @ ${actualFps} FPS (${videoTrack.label || 'Default Camera'}).`, 'INFO');
-
-      const capabilities = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
-      if (capabilities.torch && btnHudTorch) {
-        btnHudTorch.style.display = 'inline-flex';
-      }
     } else {
       logDiagnostic('Camera capture started.', 'INFO');
     }
+
+    updateHardwareCapabilitiesUI();
+    wakeLockController.request().catch(() => {});
 
     updateVitals({
       fps: actualFps,
@@ -676,19 +808,23 @@ if (viewerPeers.size > 0) {
     setupSocketListeners();
   }
 
-  logDiagnostic(`Joining room "${roomId}" as sender [mode: ${currentMediaMode}]...`);
+  startWatchdog();
+
+  const role = isStudioSender ? 'studio-sender' : 'sender';
+  logDiagnostic(`Joining room "${roomId}" as ${role} [mode: ${currentMediaMode}]...`);
   updateStatus('connecting', 'Joining Room...');
 
-  socket.emit('room:join', { roomId, role: 'sender', pin, mediaMode: currentMediaMode }, async (response) => {
+  socket.emit('room:join', { roomId, role, pin, mediaMode: currentMediaMode, reconnect: true }, async (response) => {
     if (!response || !response.success) {
       const errMsg = response ? response.error : 'Connection to room failed';
       showError(errMsg);
-      logDiagnostic(`Join failed: ${errMsg}`);
-      stopSession();
+      logDiagnostic(`Join failed: ${errMsg}. Will automatically retry in 3 seconds...`, 'WARN');
+      updateStatus('connecting', `Join failed (${errMsg}) - Retrying...`);
+      scheduleAutoRejoin(3000);
       return;
     }
 
-    logDiagnostic(`Joined room "${roomId}" as sender [mode: ${response.mediaMode}].`);
+    logDiagnostic(`Joined room "${roomId}" as ${role} [mode: ${response.mediaMode}].`);
 
     // Display Share QR Code for Viewer
     const viewerUrl = `${window.location.origin}/viewer?room=${encodeURIComponent(roomId)}`;
@@ -745,6 +881,170 @@ if (viewerPeers.size > 0) {
       }
     }
   });
+}
+
+async function rejoinRoomAsSender() {
+  if (!isStreamingRequested || !activeRoomId || !activePin) {
+    return;
+  }
+  if (isRejoining) {
+    return;
+  }
+
+  if (autoRejoinTimer) {
+    clearTimeout(autoRejoinTimer);
+    autoRejoinTimer = null;
+  }
+
+  isRejoining = true;
+
+  // 1. Ensure socket exists and is connected
+  if (!socket) {
+    socket = io();
+    setupSocketListeners();
+  }
+
+  if (!socket.connected) {
+    logDiagnostic('[AutoReconnect] Socket not connected yet. Waiting for socket connect event...', 'INFO');
+    socket.connect();
+    isRejoining = false;
+    return;
+  }
+
+  // 2. Ensure camera stream is still active
+  const hasLiveVideoTrack = cameraManager.currentStream &&
+    cameraManager.currentStream.getVideoTracks().some((t) => t.readyState === 'live');
+  if (!hasLiveVideoTrack && (!sourceSelect || sourceSelect.value === 'webcam')) {
+    logDiagnostic('[AutoReconnect] Camera capture ended or interrupted while backgrounded; re-acquiring capture...', 'WARN');
+    try {
+      await applyDynamicSourceChange();
+    } catch (err) {
+      logDiagnostic(`[AutoReconnect] Failed to re-acquire camera: ${err.message}`, 'WARN');
+    }
+  }
+
+  // 3. Clear stale viewer peer connections
+  for (const peer of viewerPeers.values()) {
+    try {
+      peer.close();
+    } catch {
+      // Ignore
+    }
+  }
+  viewerPeers.clear();
+  pendingCandidatesByViewer.clear();
+
+  updateStatus('connecting', 'Rejoining room...');
+  logDiagnostic(`[AutoReconnect] Automatically re-joining room "${activeRoomId}"...`, 'INFO');
+
+  const role = isStudioSender ? 'studio-sender' : 'sender';
+  const joinPayload = {
+    roomId: activeRoomId,
+    role,
+    pin: activePin,
+    mediaMode: currentMediaMode,
+    reconnect: true
+  };
+
+  socket.emit('room:join', joinPayload, async (response) => {
+    isRejoining = false;
+
+    if (!isStreamingRequested) {
+      return;
+    }
+
+    if (!response || !response.success) {
+      const errMsg = response ? response.error : 'Connection to room failed';
+      logDiagnostic(`[AutoReconnect] Rejoin room failed: ${errMsg}. Retrying in 3 seconds...`, 'WARN');
+      updateStatus('connecting', `Reconnecting (${errMsg})...`);
+      scheduleAutoRejoin(3000);
+      return;
+    }
+
+    logDiagnostic(`[AutoReconnect] Successfully rejoined room "${activeRoomId}" as ${role} [mode: ${response.mediaMode}].`, 'INFO');
+    showInfo('✓ Stream reconnected to room');
+    setTimeout(clearInfo, 2500);
+
+    socket.emit('stream:state', { state: 'live' });
+
+    if (currentMediaMode === 'tunnel-relay') {
+      if (response.hasPeer) {
+        updateStatus('live', 'Live (zrok Tunnel Relay)');
+        startTunnelFrameLoop();
+      } else {
+        updateStatus('waiting', 'Waiting for Viewer (Tunnel Mode)...');
+        logDiagnostic('Waiting for viewer to connect in tunnel mode.');
+      }
+    } else {
+      if (response.hasPeer) {
+        updateStatus('connecting', 'Viewers present. Connecting WebRTC...');
+        const peerList = response.peerSocketIds || (response.peerSocketId ? [response.peerSocketId] : []);
+        for (const pId of peerList) {
+          await initiateWebRtcConnectionForViewer(pId);
+        }
+      } else {
+        updateStatus('waiting', 'Waiting for Viewer / Python...');
+        logDiagnostic('Waiting for viewer or Python consumer to connect.');
+      }
+    }
+  });
+}
+
+function scheduleAutoRejoin(delayMs = 3000) {
+  if (!isStreamingRequested) {
+    return;
+  }
+  if (autoRejoinTimer) {
+    clearTimeout(autoRejoinTimer);
+  }
+  autoRejoinTimer = setTimeout(() => {
+    rejoinRoomAsSender();
+  }, delayMs);
+}
+
+function startWatchdog() {
+  stopWatchdog();
+  watchdogInterval = setInterval(async () => {
+    if (!isStreamingRequested) {
+      stopWatchdog();
+      return;
+    }
+
+    // Check socket connection
+    if (!socket || !socket.connected) {
+      logDiagnostic('[Watchdog] Socket disconnected while streaming active. Reconnecting...', 'INFO');
+      if (socket) {
+        socket.connect();
+      } else {
+        rejoinRoomAsSender();
+      }
+      return;
+    }
+
+    // Refresh Screen WakeLock
+    wakeLockController.request().catch(() => {});
+
+    // Check camera track health
+    const stream = cameraManager.currentStream;
+    if (stream && (!sourceSelect || sourceSelect.value === 'webcam')) {
+      const liveTracks = stream.getVideoTracks().filter((t) => t.readyState === 'live');
+      if (liveTracks.length === 0 && !isSwitchingSource) {
+        logDiagnostic('[Watchdog] Video track ended. Re-acquiring camera...', 'WARN');
+        try {
+          await applyDynamicSourceChange();
+        } catch (err) {
+          logDiagnostic(`[Watchdog] Camera recovery failed: ${err.message}`, 'WARN');
+        }
+      }
+    }
+  }, 5000);
+}
+
+function stopWatchdog() {
+  if (watchdogInterval) {
+    clearInterval(watchdogInterval);
+    watchdogInterval = null;
+  }
 }
 
 
@@ -918,16 +1218,35 @@ async function initiateWebRtcConnectionForViewer(viewerId) {
 function setupSocketListeners() {
   socket.on('connect', () => {
     logDiagnostic(`[SOCKET] Connected to signaling server (ID: ${socket.id})`, 'INFO');
+    if (isStreamingRequested && activeRoomId) {
+      logDiagnostic(`[AutoReconnect] Socket connected while streaming active. Automatically rejoining room "${activeRoomId}"...`, 'INFO');
+      rejoinRoomAsSender();
+    }
   });
 
   socket.on('disconnect', (reason) => {
     logDiagnostic(`[SOCKET] Disconnected from signaling server (${reason})`, 'WARN');
-    updateStatus('disconnected', 'Server Disconnected');
     stopStatsPolling();
+    if (isStreamingRequested) {
+      logDiagnostic(`[AutoReconnect] Unexpected disconnection (${reason}). Auto-reconnecting in background...`, 'WARN');
+      updateStatus('connecting', 'Connection Lost - Reconnecting...');
+      for (const peer of viewerPeers.values()) {
+        try { peer.close(); } catch {}
+      }
+      viewerPeers.clear();
+      pendingCandidatesByViewer.clear();
+      scheduleAutoRejoin(2000);
+    } else {
+      updateStatus('disconnected', 'Server Disconnected');
+    }
   });
 
   socket.on('connect_error', (err) => {
     logDiagnostic(`[SOCKET] Connection error: ${err.message}`, 'ERROR');
+    if (isStreamingRequested) {
+      updateStatus('connecting', 'Reconnecting to Server...');
+      scheduleAutoRejoin(3000);
+    }
   });
 
   socket.on('mjpeg:demand', (data) => {
@@ -1041,6 +1360,34 @@ function setupSocketListeners() {
     showError(data.message);
     logDiagnostic(`[ROOM] Signaling error: ${data.message}`, 'ERROR');
   });
+
+  socket.on('intercom:message', (data) => {
+    logDiagnostic(`[INTERCOM] Received message from viewer: ${data.message}`, 'INFO');
+    playIntercomChime();
+    showInfo(`🔔 Intercom chime from viewer!`);
+    setTimeout(clearInfo, 3500);
+  });
+}
+
+function playIntercomChime() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime + 0.15);
+    gain.gain.setValueAtTime(0.25, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.45);
+  } catch {
+    // Non-fatal
+  }
 }
 
 function startStatsPolling() {
@@ -1065,6 +1412,19 @@ function startStatsPolling() {
           if (stats.rtt) {
             const pairInfo = `${stats.localCandidateType || '?'} (${stats.localAddress || '?'}) <-> ${stats.remoteCandidateType || '?'} (${stats.remoteAddress || '?'})`;
             logDiagnostic(`[STATS:${vId}] Pair: ${pairInfo} | RTT: ${stats.rtt} | FPS: ${stats.framesPerSecond || 'active'}`, 'INFO');
+          }
+
+          // Adaptive Bitrate (ABR) Controller
+          if (stats.rawRttMs !== null) {
+            if (stats.rawRttMs > 350) {
+              await peer.applyBitrateLimit(600000, 2.0);
+              logDiagnostic(`[ABR:${vId}] High RTT (${stats.rawRttMs}ms): Throttled to 600 kbps (0.5x scale)`, 'WARN');
+            } else if (stats.rawRttMs > 150) {
+              await peer.applyBitrateLimit(1500000, 1.5);
+              logDiagnostic(`[ABR:${vId}] Moderate RTT (${stats.rawRttMs}ms): Scaled to 1.5 Mbps (0.66x scale)`, 'INFO');
+            } else if (stats.rawRttMs < 80) {
+              await peer.applyBitrateLimit(4000000, 1.0);
+            }
           }
         }
       }
@@ -1241,6 +1601,13 @@ function stopTunnelFrameLoop() {
 
 function stopSession() {
   logDiagnostic('Stopping stream and releasing camera...');
+  stopWatchdog();
+  if (autoRejoinTimer) {
+    clearTimeout(autoRejoinTimer);
+    autoRejoinTimer = null;
+  }
+  isRejoining = false;
+  isStreamingRequested = false;
   stopStatsPolling();
   stopMjpegFrameLoop();
   stopTunnelFrameLoop();
@@ -1302,6 +1669,12 @@ function stopSession() {
     videoOverlay.style.display = 'block';
   }
 
+  wakeLockController.release().catch(() => {});
+  if (streamRecorder && streamRecorder.isRecording) {
+    streamRecorder.stop();
+  }
+  updateHardwareCapabilitiesUI();
+
   if (btnStart) {
     btnStart.disabled = false;
     btnStart.style.display = 'inline-flex';
@@ -1318,8 +1691,40 @@ if (btnStart) {
   btnStart.addEventListener('click', startSession);
 }
 if (btnStop) {
-  btnStop.addEventListener('click', stopSession);
+  btnStop.addEventListener('click', () => {
+    logDiagnostic('User clicked "Stop Streaming" (manual stop).', 'INFO');
+    isStreamingRequested = false;
+    if (autoRejoinTimer) {
+      clearTimeout(autoRejoinTimer);
+      autoRejoinTimer = null;
+    }
+    stopSession();
+  });
 }
+
+// Mobile screen wake / app return / network online listeners
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && isStreamingRequested) {
+    logDiagnostic('[Lifecycle] Screen/tab became visible. Verifying stream health...', 'INFO');
+    wakeLockController.request().catch(() => {});
+    if (localVideo && localVideo.paused) {
+      localVideo.play().catch(() => {});
+    }
+    if (!socket || !socket.connected) {
+      if (socket) socket.connect();
+    } else {
+      rejoinRoomAsSender();
+    }
+  }
+});
+
+window.addEventListener('online', () => {
+  if (isStreamingRequested) {
+    logDiagnostic('[Lifecycle] Network connection restored (online). Re-establishing stream...', 'INFO');
+    if (socket) socket.connect();
+    rejoinRoomAsSender();
+  }
+});
 
 if (btnToggleFacing) {
   btnToggleFacing.addEventListener('click', async () => {
@@ -1344,4 +1749,23 @@ if (roomIdInput) {
 }
 populateCameraDevices();
 fetchIceServers().catch(() => {});
+
+// URL query parameters parsing for auto-connect & prefilling
+const streamParams = parseUrlStreamParams();
+if (streamParams.roomId && roomIdInput) {
+  roomIdInput.value = streamParams.roomId;
+}
+if (streamParams.pin && accessPinInput) {
+  accessPinInput.value = streamParams.pin;
+}
+if (streamParams.mode && mediaModeSelect) {
+  mediaModeSelect.value = streamParams.mode;
+}
+if (streamParams.autostart) {
+  logDiagnostic(`[AutoStart] Autostart query parameter detected. Launching capture for room "${streamParams.roomId}"...`, 'INFO');
+  setTimeout(() => {
+    startSession();
+  }, 400);
+}
+
 logDiagnostic('Sender client ready. Click "Start Streaming" to begin.');

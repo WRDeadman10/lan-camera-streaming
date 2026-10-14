@@ -1,8 +1,10 @@
 // Tests for source selection UI in sender.js using Node's built-in test runner
 
 import { JSDOM } from 'jsdom';
-import { describe, before, test } from 'node:test';
+import { describe, before, after, test } from 'node:test';
 import assert from 'node:assert/strict';
+
+let domInstance;
 
 // Helper to create a minimal DOM required by sender.js
 function setupDom() {
@@ -22,11 +24,11 @@ function setupDom() {
       <div id="videoOverlay"></div>
       <div id="appWorkspace"></div>
     </body></html>`;
-  const dom = new JSDOM(html, { url: "http://localhost" });
-  global.window = dom.window;
-  global.document = dom.window.document;
-  global.Event = dom.window.Event;
-  global.HTMLVideoElement = dom.window.HTMLVideoElement;
+  domInstance = new JSDOM(html, { url: "http://localhost" });
+  global.window = domInstance.window;
+  global.document = domInstance.window.document;
+  global.Event = domInstance.window.Event;
+  global.HTMLVideoElement = domInstance.window.HTMLVideoElement;
 }
 
 describe('Sender source selection UI', () => {
@@ -34,6 +36,12 @@ describe('Sender source selection UI', () => {
     setupDom();
     // Load the sender module after globals are set
     return import('../src/public/js/sender.js');
+  });
+
+  after(() => {
+    if (domInstance && domInstance.window) {
+      domInstance.window.close();
+    }
   });
 
   test('Changing source to file shows file input group', () => {

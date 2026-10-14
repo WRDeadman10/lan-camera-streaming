@@ -47,6 +47,48 @@ html, body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Dynamic Daily Space Wallpaper System */
+.wallpaper-container {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.wallpaper-layer-image {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: 0;
+  transition: opacity 1000ms ease-in-out;
+  transform: scale(1.02);
+  z-index: 0;
+}
+
+.wallpaper-layer-image.loaded {
+  opacity: 1;
+}
+
+.wallpaper-layer-overlay {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, rgba(3, 7, 18, 0.82) 0%, rgba(2, 6, 23, 0.94) 100%);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 1;
+}
+
+.wallpaper-layer-texture {
+  position: absolute;
+  inset: 0;
+  opacity: 0.045;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  z-index: 2;
+}
+
 /* App Shell Layout */
 .app-shell {
   display: flex;
@@ -56,6 +98,9 @@ html, body {
   height: 100dvh;
   max-height: 100dvh;
   overflow: hidden;
+  position: relative;
+  z-index: 10;
+  background-color: transparent;
 }
 
 /* Slim Application Header (44px) */
@@ -96,6 +141,21 @@ html, body {
   font-weight: 500;
   color: var(--accent-cyan);
   margin-left: 2px;
+}
+
+.brand-version {
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  opacity: 0.8;
+  letter-spacing: 0.02em;
+  margin-left: 6px;
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  background-color: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: inline-block;
+  vertical-align: middle;
 }
 
 .header-status {
@@ -261,7 +321,7 @@ video {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  padding: 24px 20px;
   text-align: center;
   color: var(--text-secondary);
   background: radial-gradient(circle at center, rgba(14, 21, 36, 0.85) 0%, rgba(8, 12, 21, 0.95) 100%);
@@ -269,23 +329,32 @@ video {
 }
 
 .overlay-icon {
-  width: 44px;
-  height: 44px;
-  margin-bottom: 12px;
+  width: 46px;
+  height: 46px;
+  margin-bottom: 14px;
   color: var(--text-muted);
 }
 
 .overlay-title {
-  font-size: 1.05rem;
+  font-size: 1.1rem;
   font-weight: 600;
   color: var(--text-primary);
-  margin-bottom: 4px;
+  margin-bottom: 6px;
+  line-height: 1.3;
 }
 
 .overlay-subtitle {
   font-size: 0.85rem;
   color: var(--text-secondary);
-  max-width: 380px;
+  max-width: 400px;
+  line-height: 1.5;
+}
+
+.overlay-actions {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* Floating Viewport HUD Controls */
@@ -335,10 +404,11 @@ video {
   justify-content: space-around;
   background-color: var(--bg-surface);
   border-top: 1px solid var(--border-subtle);
-  padding: 6px 10px;
-  gap: 8px;
+  padding: 8px 14px;
+  gap: 12px;
   flex-shrink: 0;
   user-select: none;
+  min-height: 38px;
 }
 
 .vital-item {
@@ -438,7 +508,7 @@ video {
 
 /* Forms & Inputs */
 .form-group {
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
 
 .form-group:last-child {
@@ -459,15 +529,15 @@ label {
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--text-secondary);
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
 input[type="text"],
 input[type="password"],
 select {
   width: 100%;
-  height: 34px;
-  padding: 0 10px;
+  height: 36px;
+  padding: 0 12px;
   background-color: var(--bg-input);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
@@ -495,15 +565,15 @@ input:focus, select:focus {
 }
 
 .input-action-group input {
-  padding-right: 46px;
+  padding-right: 52px;
 }
 
 .btn-action-inline {
   position: absolute;
-  right: 4px;
-  top: 4px;
-  bottom: 4px;
-  padding: 0 8px;
+  right: 5px;
+  top: 5px;
+  bottom: 5px;
+  padding: 0 10px;
   background-color: var(--border-subtle);
   border: none;
   border-radius: var(--radius-xs);
@@ -1513,3 +1583,187 @@ input:focus, select:focus {
     grid-template-columns: 1fr;
   }
 }
+
+/* ==========================================================================
+   Advanced HUD Controls & Overlays (P16 Feature Expansion)
+   ========================================================================== */
+
+/* Rule-of-Thirds Grid Overlay */
+.grid-overlay {
+  position: absolute;
+  inset: 0;
+  display: none;
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: 1fr 1fr 1fr;
+  pointer-events: none;
+  z-index: 6;
+}
+.grid-overlay.active {
+  display: grid;
+}
+.grid-cell {
+  border: 1px dashed rgba(255, 255, 255, 0.22);
+  box-sizing: border-box;
+}
+
+/* Recording Status Indicator */
+.rec-indicator {
+  display: none;
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  align-items: center;
+  gap: 6px;
+  background-color: rgba(220, 38, 38, 0.88);
+  color: #ffffff;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  z-index: 12;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.rec-indicator.active {
+  display: inline-flex;
+}
+.rec-dot {
+  width: 8px;
+  height: 8px;
+  background-color: #ffffff;
+  border-radius: 50%;
+  animation: recPulse 1.2s infinite ease-in-out;
+}
+@keyframes recPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.3; transform: scale(0.85); }
+}
+
+/* OLED / Thermal Battery Saver Mode */
+.oled-saver-overlay {
+  display: none;
+  position: absolute;
+  inset: 0;
+  background-color: #000000;
+  z-index: 30;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.oled-saver-overlay.active {
+  display: flex;
+}
+.oled-saver-hint {
+  color: rgba(255, 255, 255, 0.28);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 600;
+  text-align: center;
+  padding: 20px;
+}
+
+/* Hardware Zoom Control Floating Bar */
+.zoom-control-bar {
+  display: none;
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: rgba(14, 22, 36, 0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 5px 12px;
+  border-radius: var(--radius-pill);
+  align-items: center;
+  gap: 8px;
+  z-index: 10;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+.zoom-control-bar.active {
+  display: flex;
+}
+.zoom-slider {
+  width: 110px;
+  accent-color: var(--accent-cyan);
+  cursor: pointer;
+}
+
+/* Share Link Button */
+.btn-action-share {
+  background-color: rgba(56, 189, 248, 0.15);
+  color: var(--accent-cyan);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+.btn-action-share:hover {
+  background-color: rgba(56, 189, 248, 0.25);
+  color: #fff;
+}
+
+/* Feature 4: Studio Camera Switcher */
+.studio-switcher-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background-color: var(--bg-surface);
+  border-top: 1px solid var(--border-subtle);
+  padding: 6px 14px;
+  flex-shrink: 0;
+  user-select: none;
+  min-height: 36px;
+}
+.studio-title {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--accent-cyan);
+  white-space: nowrap;
+}
+.studio-cameras-list {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.studio-cameras-list::-webkit-scrollbar {
+  display: none;
+}
+.studio-cam-btn {
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+.studio-cam-btn:hover {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: var(--accent-cyan);
+  color: var(--text-primary);
+}
+.studio-cam-btn.active {
+  background: #0284c7;
+  border-color: var(--accent-cyan);
+  color: #ffffff;
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.4);
+}
+

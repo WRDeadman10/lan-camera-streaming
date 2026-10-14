@@ -296,3 +296,256 @@ export function setupPasswordToggle(btnId, inputId) {
     }
   });
 }
+
+/**
+ * Screen WakeLock manager to prevent mobile devices from sleeping during live streams.
+ */
+export class WakeLockController {
+  constructor() {
+    this.sentinel = null;
+    this.isActive = false;
+
+    // Reacquire lock when tab regains visibility
+    document.addEventListener('visibilitychange', async () => {
+      if (document.visibilityState === 'visible' && this.isActive && !this.sentinel) {
+        await this.request();
+      }
+    });
+  }
+
+  async request() {
+    if (!('wakeLock' in navigator)) {
+      return false;
+    }
+    try {
+      this.sentinel = await navigator.wakeLock.request('screen');
+      this.isActive = true;
+      this.sentinel.addEventListener('release', () => {
+        this.sentinel = null;
+      });
+      return true;
+    } catch (err) {
+      console.warn('WakeLock request failed:', err);
+      return false;
+    }
+  }
+
+  async release() {
+    this.isActive = false;
+    if (this.sentinel) {
+      try {
+        await this.sentinel.release();
+      } catch (err) {
+        // ignore
+      }
+      this.sentinel = null;
+    }
+  }
+}
+
+/**
+ * Client-side media recording using MediaRecorder API.
+ */
+export class StreamRecorder {
+  constructor(mediaElement, { onStart, onStop, onTimeUpdate } = {}) {
+    this.mediaElement = mediaElement;
+    this.recorder = null;
+    this.recordedChunks = [];
+    this.startTime = 0;
+    this.timerInterval = null;
+    this.onStart = onStart;
+    this.onStop = onStop;
+    this.onTimeUpdate = onTimeUpdate;
+  }
+
+  get isRecording() {
+    return Boolean(this.recorder && this.recorder.state === 'recording');
+  }
+
+  start() {
+    if (this.isRecording) {
+      return false;
+    }
+
+    let stream = null;
+    if (this.mediaElement instanceof HTMLVideoElement && this.mediaElement.srcObject) {
+      stream = this.mediaElement.srcObject;
+    } else if (this.mediaElement instanceof HTMLVideoElement && this.mediaElement.captureStream) {
+      stream = this.mediaElement.captureStream();
+    } else if (this.mediaElement instanceof MediaStream) {
+      stream = this.mediaElement;
+    }
+
+    if (!stream || stream.getVideoTracks().length === 0) {
+      console.warn('Cannot record: no active stream found on media element.');
+      return false;
+    }
+
+    let mimeType = 'video/webm;codecs=vp9';
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+      mimeType = 'video/webm;codecs=vp8';
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = 'video/webm';
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+          mimeType = '';
+        }
+      }
+    }
+
+    try {
+      this.recordedChunks = [];
+      const options = mimeType ? { mimeType } : {};
+      this.recorder = new MediaRecorder(stream, options);
+
+      this.recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          this.recordedChunks.push(event.data);
+        }
+      };
+
+      this.recorder.onstop = () => {
+        this.finishRecording();
+      };
+
+      this.recorder.start(1000); // 1s timeslices
+      this.startTime = Date.now();
+
+      this.timerInterval = setInterval(() => {
+        const elapsedSec = Math.floor((Date.now() - this.startTime) / 1000);
+        const mm = String(Math.floor(elapsedSec / 60)).padStart(2, '0');
+        const ss = String(elapsedSec % 60).padStart(2, '0');
+        if (typeof this.onTimeUpdate === 'function') {
+          this.onTimeUpdate(`${mm}:${ss}`);
+        }
+      }, 500);
+
+      if (typeof this.onStart === 'function') {
+        this.onStart();
+      }
+      return true;
+    } catch (err) {
+      console.error('Failed to start MediaRecorder:', err);
+      return false;
+    }
+  }
+
+  stop() {
+    if (!this.isRecording) {
+      return;
+    }
+    clearInterval(this.timerInterval);
+    this.timerInterval = null;
+    this.recorder.stop();
+  }
+
+  finishRecording() {
+    clearInterval(this.timerInterval);
+    this.timerInterval = null;
+
+    if (this.recordedChunks.length > 0) {
+      const blob = new Blob(this.recordedChunks, { type: this.recorder.mimeType || 'video/webm' });
+      const now = new Date();
+      const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+      const filename = `lancam-recording-${timestamp}.webm`;
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => {
+        URL.revokeObjectURL(url);
+      }, 2000);
+    }
+
+    this.recordedChunks = [];
+    this.recorder = null;
+
+    if (typeof this.onStop === 'function') {
+      this.onStop();
+    }
+  }
+}
+
+/**
+ * Stream transformation manager (flip horizontal, rotate 0/90/180/270, rule-of-thirds grid).
+ */
+export class StreamTransformController {
+  constructor(videoElement, gridOverlayElement) {
+    this.videoElement = videoElement;
+    this.gridOverlayElement = gridOverlayElement;
+    this.isMirrored = false;
+    this.rotationDegrees = 0; // 0, 90, 180, 270
+    this.isGridVisible = false;
+  }
+
+  toggleMirror() {
+    this.isMirrored = !this.isMirrored;
+    this.applyTransform();
+    return this.isMirrored;
+  }
+
+  rotate() {
+    this.rotationDegrees = (this.rotationDegrees + 90) % 360;
+    this.applyTransform();
+    return this.rotationDegrees;
+  }
+
+  toggleGrid() {
+    this.isGridVisible = !this.isGridVisible;
+    if (this.gridOverlayElement) {
+      if (this.isGridVisible) {
+        this.gridOverlayElement.classList.add('active');
+      } else {
+        this.gridOverlayElement.classList.remove('active');
+      }
+    }
+    return this.isGridVisible;
+  }
+
+  applyTransform() {
+    if (!this.videoElement) {
+      return;
+    }
+    const parts = [];
+    if (this.rotationDegrees !== 0) {
+      parts.push(`rotate(${this.rotationDegrees}deg)`);
+    }
+    if (this.isMirrored) {
+      parts.push('scaleX(-1)');
+    }
+    this.videoElement.style.transform = parts.join(' ');
+  }
+}
+
+/**
+ * Parse URL query parameters for auto-join and configuration.
+ */
+export function parseUrlStreamParams() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const roomId = urlParams.get('room') || urlParams.get('roomId') || '';
+  const pin = urlParams.get('pin') || '';
+  const mode = urlParams.get('mode') || '';
+  const autostart = urlParams.get('autostart') === '1' || urlParams.get('autostart') === 'true';
+  return { roomId, pin, mode, autostart };
+}
+
+/**
+ * Construct deep link for sharing room access.
+ */
+export function buildShareUrl(targetPath, { roomId, pin, autostart = true }) {
+  const url = new URL(targetPath, window.location.origin);
+  if (roomId) {
+    url.searchParams.set('room', roomId);
+  }
+  if (pin) {
+    url.searchParams.set('pin', pin);
+  }
+  if (autostart) {
+    url.searchParams.set('autostart', '1');
+  }
+  return url.toString();
+}
+

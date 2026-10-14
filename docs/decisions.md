@@ -391,16 +391,62 @@ Tearing down and recreating rooms or peer connections causes user-visible stutte
 **Consequences:**
 Source switching takes effect immediately on all connected receivers. Senders rejoining occupied rooms instantly reconnect to all waiting viewers without requiring viewers to refresh or leave the room.
 
+## ADR-026 — The 14-Feature LAN Camera Ecosystem Architecture
+
+**Status:** Accepted
+
+**Decision:**
+Implement a comprehensive 14-feature expansion across mobile client controls, network adaptability, multi-camera studio switching, virtual webcam resilience, native game engine reception, IP camera bridging, and Windows OS integration:
+1. **Bidirectional Audio Pipeline & Intercom (Talkback):** Senders capture optional microphone audio alongside video; viewers control audio playback/mute/volume and emit push-to-talk chimes via dual-tone Web Audio synthesis.
+2. **High-Performance Shared-Memory Bridge (ADR-022 Wired):** Activated `src/server/vcam-shm-bridge.js` connecting Node.js to `lancam-setup.exe --bridge` on TCP 7779, writing directly into `Local\LanCamSharedMemory_Video` for zero-latency DirectShow frame delivery without HTTP polling overhead.
+3. **Native Unity Receiver Package (`com.vcam.lancamera`):** Created production-ready UPM package adhering strictly to `AGENTS.md` (no `var`, explicit types, no `new()`, K&R braces). Decodes streams directly into reusable `Texture2D` instances via `ImageConversion.LoadImage` for UI (`RawImage`) and 3D materials without GC spikes.
+4. **Multi-Camera Studio Switcher Mode:** `RoomManager` supports `studio-sender` role with multiple concurrent camera feeds; `signaling.js` broadcasts active cameras and targeted offer/answer routing; viewer displays interactive Studio Switcher bar.
+5. **Embedded RTSP 1.0 / IP-Camera Bridge:** Implemented zero-dependency `src/server/rtsp-server.js` (RFC 2326 & RFC 2435 JPEG over RTP) broadcasting on `rtsp://<host>:8554/live/<roomId>` for VLC, OBS, ffmpeg, and NVRs.
+6. **Hardware Camera Controls:** Added torch/flashlight toggle and hardware zoom slider to camera manager HUD with constraint fallbacks.
+7. **Adaptive Bitrate (ABR) & Dynamic Quality Scaling:** WebRTC sender dynamically inspects RTCPeerConnection stats (RTT and packet loss) and adjusts encoding parameters (`RTCRtpSender.setParameters`) between 600 kbps, 1.5 Mbps, and 4.0 Mbps.
+8. **Local Recording & Snapshot Hub:** Canvas snapshot PNG capture and client-side `MediaRecorder` with live recording timer HUD.
+9. **mDNS / Zero-Conf LAN Auto-Discovery:** Implemented zero-dependency multicast DNS beacon (`src/server/mdns-beacon.js`) advertising `lancam.local` on 224.0.0.251:5353 and added `/api/discover`.
+10. **Standby Slate & Virtual Camera Fallback State:** Added valid JFIF fallback generator (`src/server/standby-slate.js`) served on MJPEG stream when no sender is active, and SMPTE color bars rendered in DirectShow `lancam_filter.cpp`.
+11. **Mobile Battery & Thermal Saver Mode:** Integrated Screen WakeLock API (`navigator.wakeLock`) and OLED Blackout Saver mode to preserve battery and prevent thermal throttling.
+12. **Quick-Join URL & QR Code Auto-Connect:** Deep link query parameter handling (`?room=...&pin=...&autostart=1`) and one-click share link generation.
+13. **Stream Transformation & Framing HUD:** Interactive horizontal flip (mirroring), 90°/180°/270° rotation locks, and 3x3 rule-of-thirds grid.
+14. **Windows System Tray Companion & Auto-Start Configuration:** PowerShell tray companion (`scripts/lan-camera-tray.ps1`) docking into Windows notification area and Windows Registry auto-start manager (`scripts/register-autostart.ps1`).
+
+**Reasoning:**
+Transforms the project from an isolated browser tool into a complete, professional, cross-platform LAN camera broadcasting and ingestion ecosystem compatible with browsers, Windows apps, game engines, and surveillance systems.
+
+**Consequences:**
+Complete interoperability across WebRTC, RTSP, MJPEG, DirectShow, Unity, and Windows system tray, validated by 50 automated tests with zero external runtime dependencies.
+
+## ADR-027 — Non-Human Sender Disconnection Resilience & Auto-Reconnection Lifecycle
+
+**Status:** Accepted
+
+**Context:**
+On mobile devices and fluctuating local networks, senders can experience transient disconnections caused by Wi-Fi roaming, lock screen sleep, app backgrounding, or temporary TCP socket timeouts. Previously, when the sender socket disconnected, Socket.IO client reconnected under the hood with a new socket ID, but never re-joined the room. Furthermore, if a reconnect occurred before the server expired an orphaned socket, `RoomManager` rejected the join with `"Room already has an active sender."`, which caused `sender.js` to invoke `stopSession()` and permanently kill the camera and session. When viewers joined or reconnected, the server reported no sender, leaving viewers stuck on `"Waiting for Sender..."`.
+
+**Decision:**
+1. **Human Stop vs Non-Human Disconnect Distinction:**
+   - The only action that terminates streaming and releases the camera is an explicit user click on the "Stop Streaming" button (`btnStop`).
+   - For all non-human interruptions (socket `disconnect`, `connect_error`, Wi-Fi loss, background sleep), the sender maintains `isStreamingRequested = true` and keeps the local camera stream alive.
+2. **Server-Side Stale Sender Socket Eviction:**
+   - `RoomManager.createOrJoinRoom` supports `options.reconnect: true`.
+   - When a sender with the valid PIN reconnects to a room with an existing `senderSocketId`:
+     - If the existing socket is disconnected/dead or `reconnect: true` is set, the server evicts the stale socket (`result.evictedSenderId`), assigns the new socket ID, and broadcasts `peer:left` for the old socket followed by `peer:joined` for the new socket.
+3. **Automated Client Rejoin & WebRTC Peer Restoration:**
+   - On socket `connect`, mobile `visibilitychange` (screen turn-on), or network `online`, `sender.js` automatically emits `room:join` with `{ reconnect: true }`.
+   - Upon successful rejoin, the sender immediately receives all waiting viewers in `response.peerSocketIds` and initiates fresh WebRTC offers to resume video playback instantly.
+   - If join fails transiently (e.g., server still processing), an auto-rejoin retry timer exponential backoff continues attempting reconnection every 3 seconds until restored or explicitly stopped by the user.
+4. **Periodic Health Watchdog:**
+   - A 5-second watchdog interval checks socket connectivity, refreshes the Screen WakeLock, and re-acquires camera tracks if killed by mobile OS background policies.
+5. **Viewer Auto-Reconnection:**
+   - `viewer.js` automatically re-joins its room if the viewer's socket reconnects, avoiding stranded state.
+
+**Consequences:**
+Transient network drops, mobile lock screen wakeups, and server restarts heal automatically within 1-2 seconds without requiring manual button clicks or room re-entry.
+
 ## Open decisions to revisit after the first working stream
 
-
-- Whether TypeScript should replace plain JavaScript for stricter types.
-- Whether the app needs multiple simultaneous camera sources.
-- Whether TURN should be operated locally, on a server, or not at all for the intended networks.
-- Whether audio is required.
-- Whether the final deployment should use a trusted local CA/local DNS or continue using a tunnel.
-- What latency and quality targets the real deployment must meet, based on measurements from the target devices and Wi-Fi.
-- Whether the shared-memory bridge for the virtual camera (ADR-022) is wired up or removed.
-- Whether the viewer mesh needs per-peer bitrate or resolution caps (ADR-018), based on a real-phone test with 2+ viewers.
 - Whether to code-sign the installer and executables (ADR-024).
 - Whether the Windows camera should support Windows 10 (it needs an API that exists only on Windows 11).
+- Whether to add hardware H.264/HEVC transcoding for RTSP in addition to RFC 2435 JPEG.

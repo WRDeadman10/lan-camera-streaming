@@ -1,0 +1,18 @@
+{
+  "name": "com.vcam.lancamera",
+  "version": "1.0.0",
+  "displayName": "LAN Camera Receiver",
+  "description": "High-performance LAN Camera Streaming receiver for Unity, supporting low-latency MJPEG and HTTP snapshot pipelines.",
+  "unity": "2021.3",
+  "category": "Video",
+  "keywords": [
+    "camera",
+    "streaming",
+    "lan",
+    "video",
+    "mjpeg"
+  ],
+  "author": {
+    "name": "LAN Camera Streaming Team"
+  }
+}

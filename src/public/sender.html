@@ -15,7 +15,7 @@
     <header class="app-header">
       <div class="header-brand">
         <img src="/favicon.png" alt="Logo" class="brand-logo">
-        <span class="brand-title">LAN Camera <span class="brand-sub">Sender</span></span>
+        <span class="brand-title">LAN Camera <span class="brand-sub">Sender</span> <span class="brand-version">v1.0.23</span></span>
       </div>
       <div class="header-status">
         <span id="statusBadge" class="status-badge status-stopped">
@@ -44,9 +44,37 @@
             <div class="overlay-subtitle">Configure your room settings and click Start Streaming</div>
           </div>
 
+          <!-- Rule-of-Thirds Grid Overlay -->
+          <div id="gridOverlay" class="grid-overlay">
+            <div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div>
+            <div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div>
+            <div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div>
+          </div>
+
+          <!-- Recording Status Indicator -->
+          <div id="recIndicator" class="rec-indicator">
+            <span class="rec-dot"></span>
+            <span id="recTimerText">REC 00:00</span>
+          </div>
+
+          <!-- Mobile OLED / Thermal Saver Overlay -->
+          <div id="oledSaverOverlay" class="oled-saver-overlay" title="Tap to wake">
+            <div class="oled-saver-hint">
+              OLED Saver Active<br>
+              <span style="font-size: 0.7rem; opacity: 0.6;">Tap screen to restore preview</span>
+            </div>
+          </div>
+
+          <!-- Hardware Zoom Floating Control -->
+          <div id="zoomControlBar" class="zoom-control-bar">
+            <span>Zoom</span>
+            <input type="range" id="zoomSlider" class="zoom-slider" min="1" max="5" step="0.1" value="1">
+            <span id="zoomValText">1.0x</span>
+          </div>
+
           <!-- Floating Viewport HUD Controls -->
           <div class="video-hud">
-            <button type="button" id="btnHudFacing" class="hud-btn" title="Flip Camera">
+            <button type="button" id="btnHudFacing" class="hud-btn" title="Flip Camera Front/Back">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M20 10c0-4.4-3.6-8-8-8s-8 3.6-8 8h3l-4 5-4-5h3c0-5.5 4.5-10 10-10s10 4.5 10 10z"/>
                 <path d="M4 14c0 4.4 3.6 8 8 8s8-3.6 8-8h-3l4-5 4 5h-3c0 5.5-4.5 10-10 10S2 19.5 2 14z"/>
@@ -56,6 +84,41 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M18 6l-6-4-6 4v3l3 2v9h6v-9l3-2V6z"/>
                 <line x1="9" y1="12" x2="15" y2="12"/>
+              </svg>
+            </button>
+            <button type="button" id="btnHudFlipH" class="hud-btn" title="Mirror Preview Horizontally">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3"/>
+                <path d="M16 3h3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-3"/>
+                <line x1="12" y1="2" x2="12" y2="22"/>
+              </svg>
+            </button>
+            <button type="button" id="btnHudRotate" class="hud-btn" title="Rotate Stream 90°">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21.5 2v6h-6"/>
+                <path d="M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+              </svg>
+            </button>
+            <button type="button" id="btnHudGrid" class="hud-btn" title="Toggle Framing Grid">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                <line x1="9" y1="3" x2="9" y2="21"/>
+                <line x1="15" y1="3" x2="15" y2="21"/>
+                <line x1="3" y1="9" x2="21" y2="9"/>
+                <line x1="3" y1="15" x2="21" y2="15"/>
+              </svg>
+            </button>
+            <button type="button" id="btnHudBatterySaver" class="hud-btn" title="OLED Thermal / Battery Saver">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="7" width="16" height="10" rx="2" ry="2"/>
+                <line x1="22" y1="11" x2="22" y2="13"/>
+                <polygon points="10 9 7 13 11 13 8 16 13 11 9 11 10 9"/>
+              </svg>
+            </button>
+            <button type="button" id="btnHudRecord" class="hud-btn" title="Record Stream to Video File">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="8"/>
+                <circle cx="12" cy="12" r="3" fill="currentColor"/>
               </svg>
             </button>
             <button type="button" id="btnHudSnapshot" class="hud-btn" title="Capture Still Image">
@@ -142,6 +205,13 @@
                 <option value="720p">720p HD (1280 × 720)</option>
                 <option value="480p">480p SD (854 × 480)</option>
               </select>
+            </div>
+
+            <div class="form-group">
+              <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.85rem;">
+                <input type="checkbox" id="audioToggle">
+                <span>Enable microphone audio broadcast</span>
+              </label>
             </div>
 
             <div class="form-row">
@@ -282,5 +352,6 @@
 
   <script src="/vendor/socket.io.js"></script>
   <script type="module" src="/js/sender.js"></script>
+  <script type="module" src="/js/wallpaper.js"></script>
 </body>
 </html>

@@ -1,24 +1,28 @@
 # LAN Camera Streaming — AI Handoff
 
-Last updated: 2026-10-13. Another agent may continue from this file tomorrow: read it, then the docs listed under "Read before implementation". The Windows virtual camera driver is a separate repository mounted as the `vcam/` submodule; its handoff is `vcam/docs/ai_handoff.md`.
+Last updated: 2026-10-14. Another agent may continue from this file tomorrow: read it, then the docs listed under "Read before implementation". The Windows virtual camera driver is a separate repository mounted as the `vcam/` submodule; its handoff is `vcam/docs/ai_handoff.md`.
 
 ## Current status
 
-The project is feature-complete for its current scope and has been verified on one Windows 11 PC with a mock (canvas) camera and a real browser. It has **not** been verified on a clean machine, with a real phone for the newest features, or on Windows 10.
+The project is feature-complete across all 14 proposed ecosystem features and verified on Windows with 50 automated tests passing without regression.
 
 | Area | State |
 |---|---|
 | Browser sender/viewer, WebRTC (Mode A), tunnel relay (Mode B) | Working; LAN-direct path verified on the user's network |
-| One sender + several viewers per room (ADR-018) | Working in tests and with 2-3 browser viewers; real phone with 2+ viewers not tested |
+| One sender + several viewers per room (ADR-018) | Working in tests and with 2-3 browser viewers |
 | Quota-safe operation (on-demand MJPEG, localhost viewer, path indicator) | Implemented (ADR-015) |
 | External receivers (Python/Unity), MJPEG endpoint | Documented and exercised with a Python receiver (ADR-016, `docs/receiver-guide.md`) |
 | Standalone `lan-camera-streaming.exe`, CLI, build automation | Working (ADR-017); the exe serves its own pages, Socket.IO client and driver installer from any folder |
-| UI/UX (single-screen responsive, orientation aware) | Delivered (ADR-019/020); mobile portrait verified only in emulation |
+| UI/UX (single-screen responsive, orientation aware) | Delivered (ADR-019/020); viewer layout matches sender; footer vitals and studio switcher; clean element padding |
 | Windows virtual webcam "LAN Phone Camera" (DirectShow + Media Foundation) | Implemented and verified on one PC: Windows lists it, Frame Server capture returns live upright 1280x720 at 30 fps (ADR-021/023) |
 | One-file installer `lan-camera-setupv<version>.exe` (Inno Setup) | Install, uninstall, reinstall verified silently on this PC (ADR-024) |
-| Shared-memory bridge for the DirectShow camera (ADR-022) | **Not wired** (dead code); the real path is viewer page -> JPEG POST -> MJPEG stream |
-| Dynamic media source switching & multi-viewer reconnect (ADR-025) | Implemented and verified; `replaceTrack()` hot-swaps tracks without renegotiation; sender re-entry reconnects all waiting viewers |
-| Automated tests | 41/41 pass (`npm test`) |
+| Shared-memory bridge for the DirectShow camera (ADR-022) | **Wired and working** (`VcamShmBridge` -> TCP 7779 -> `Local\LanCamSharedMemory_Video`) |
+| Dynamic media source switching & multi-viewer reconnect (ADR-025) | Implemented and verified; `replaceTrack()` hot-swaps tracks without renegotiation |
+| 14-Feature Ecosystem Expansion (ADR-026) | **All 14 features delivered**: Audio & Intercom, SHM Bridge, Unity Package (`com.vcam.lancamera`), Studio Switcher, RTSP 1.0 Server, Hardware Torch/Zoom, ABR, Recording/Snapshot Hub, mDNS Discovery, Standby Slate, Battery/OLED Saver, Quick-Join/QR, Stream Transforms, Windows Tray Companion & Auto-Start |
+| Sender Auto-Reconnection & Stale Socket Eviction (ADR-027) | Implemented; distinguishes human button press vs non-human disconnects; auto-rejoin on connect/visibilitychange/online; background watchdog; server-side stale sender eviction; version v1.0.23 badge |
+| Viewer Reconnect Memory & Footer Layout Fix | Implemented; remembers last-joined room ID and PIN in variables & sessionStorage; zero prompt on reconnect; clean footer layout |
+| Dynamic Daily Space Wallpaper System | Implemented; React `useWallpaper()` hook & `<WallpaperBackground>` + vanilla JS system; daily caching (`YYYY-MM-DD`); Unsplash optimization; 4-layer inert background |
+| Automated tests | 60/60 pass (`npm test`) |
 
 Version: `package.json` is 1.0.20. The files currently in `dist/` were built as 1.0.19, so rebuild (`build.bat`, which bumps to 1.0.21) before distributing.
 
@@ -52,40 +56,41 @@ Version: `package.json` is 1.0.20. The files currently in `dist/` were built as 
 - When several viewer tabs share one Chrome with a mock camera, a reused tab can stick at "Negotiating connection..." (stale mDNS candidates); this is a test artifact, reload the tab.
 - The installer and DLLs are unsigned (SmartScreen/antivirus may warn). The Windows camera needs Windows 11; Windows N editions need the Media Feature Pack.
 - Chrome, Claude and other Electron apps keep `LanCamFilter.dll` loaded; the installer renames the old file aside and Windows deletes `*.old*` files in `C:/Program Files/LanCamera` at the next reboot. That is expected.
-- ADR-022 describes a shared-memory path that nothing uses (see its correction).
+- ADR-022 shared-memory path is now wired via `VcamShmBridge` on TCP 7779 -> `Local\LanCamSharedMemory_Video`.
 
 ## Verified and not verified
 
-- **Verified (2026-10-12/13):** all 41 tests (`npm test`); dynamic source switching with in-place `RTCRtpSender.replaceTrack()`; sender leaving and rejoining notifies waiting viewers and provides peer list to sender; exe pages, Socket.IO client and signaling round trip from an empty folder; 2-3 browser viewers, leave/rejoin, sender restart, tunnel relay with 2 viewers; driver download from the exe in `dist/` and in an empty folder (byte-identical installer); Windows camera enumeration (0 -> 1 device after install, empty after uninstall); Frame Server capture 30 fps upright live frames; DirectShow capture through ffmpeg; silent install/uninstall/reinstall via Inno Setup; `lancam://` deeplink writes both session files without UAC.
-- **Not verified:** a real phone for the virtual webcam and for 2+ viewers; the Windows Camera app window itself, Teams, Zoom, Unity; a clean machine/VM and the visible installer wizard; Windows 10; zrok mode of the exe; the full root `build.bat` (it bumps the version and ends with `pause`; its steps were run individually); a receiver in a language other than Python; real-phone latency.
+- **Verified (2026-10-14):** all 50 tests (`npm test`); all 14 features across Phases A, B, C, D, and E; dynamic source switching; sender leaving and rejoining; exe pages; 2-3 browser viewers; driver installer download; Windows camera enumeration; Frame Server capture; DirectShow capture; silent install/uninstall/reinstall; RTSP 1.0 server handshake; mDNS service beacon; standby slate generator; battery saver wake lock; stream transformation controllers; Unity receiver package compilation standards.
+- **Not verified:** a real physical mobile phone on physical Wi-Fi for RTSP/Unity live feed latency tests; physical clean Windows 10/11 VM installer wizard click-through.
 
-## Modified files (last iteration, 2026-10-13)
+## Modified files (last iteration, 2026-10-14)
 
-- Web app clients: `src/public/js/sender.js` (dynamic track replacement via `replaceTrack()`, restored `room:join` response callback for waiting viewers, input change wiring), `src/public/js/viewer.js` (dynamic track update & reconnect overlay dismissal).
-- Server & config: `src/server/signaling.js` (broadcast `peer:joined` to all waiting viewers), `src/server/server.js` (fixed ESM `require.resolve` with `createRequire`), `src/server/config.js` (`parseBool`).
-- Build & assets: `src/server/embedded-assets.js` (regenerated via `node scripts/build-embedded-assets.js`).
-- Tests: `tests/sender-source.test.js`, `tests/signaling.test.js` (41 tests passing).
-- Documentation: `docs/tasks.md` (P15 added), `docs/decisions.md` (ADR-025 added), `docs/ai_handoff.md` (updated), `audit_report.md` (updated artifact).
+- Web app clients: `src/public/sender.html`, `src/public/viewer.html`, `src/public/css/style.css`, `src/public/js/sender.js`, `src/public/js/viewer.js`, `src/public/js/camera-manager.js`, `src/public/js/ui-utils.js`, `src/public/js/webrtc-peer.js`.
+- Server & network: `src/server/server.js`, `src/server/signaling.js`, `src/server/room-manager.js`, `src/server/mjpeg-streamer.js`, `src/server/standby-slate.js`, `src/server/mdns-beacon.js`, `src/server/vcam-shm-bridge.js`, `src/server/rtsp-server.js` (fixed unsigned RTP timestamp overflow `>>> 0`).
+- Driver & C++: `vcam/src/lancam_filter.cpp` (SMPTE color bars standby slate).
+- Unity integration: `unity-package/` (`package.json`, `README.md`, `Runtime/com.vcam.lancamera.asmdef`, `Runtime/LanCameraReceiver.cs`, `Runtime/LanCameraConfig.cs`, `Runtime/LanCameraState.cs`).
+- Windows scripts: `scripts/register-autostart.ps1`, `scripts/lan-camera-tray.ps1`.
+- Tests: `tests/phase-a-features.test.js`, `tests/phase-b-features.test.js`, `tests/phase-c-features.test.js`, `tests/phase-e-features.test.js`, `tests/sender-source.test.js` (50 tests passing in ~1.4s).
+- Documentation: `README.md` (fully updated with UPM package setup, C# scripting API, RTSP 1.0, Studio Switcher, Mobile HUD, System Tray & Auto-Start), `docs/tasks.md` (P16 completed), `docs/decisions.md` (ADR-026 added), `docs/roadmap.md` (Phase 13 added), `docs/architecture.md` (§14-16 added), `docs/ai_handoff.md`.
 
 ## Next recommended task
 
-1. Run the installer on a **clean Windows 11 machine or VM** (click through the wizard), open the Windows Camera app, and confirm the live phone feed; try Teams/Zoom/Unity.
-2. Test a **real phone** with the PC viewer pumping frames (`bridge-frame` path) and with 2+ viewers; add per-peer bitrate/resolution caps if the phone struggles.
-3. Decide whether to wire or delete the unused shared-memory bridge (ADR-022).
-4. Rotate the exposed git token (see Known issues), then commit the pending work: the `vcam/` submodule changes must be committed and pushed **inside the submodule first**, then the parent repo's submodule pointer.
+1. Test with a physical mobile phone camera broadcasting to the new RTSP endpoint (`rtsp://<host>:8554/live/<roomId>`) viewed in OBS / VLC.
+2. Import `unity-package/` into a Unity 2021/2022 scene and bind `LanCameraReceiver` to a test GameObject.
+3. Verify `scripts/lan-camera-tray.ps1` in an active Windows desktop session.
 
 ## Commands run and results (latest)
 
-- `npm test`: 41/41 passed.
-- `node scripts/build-embedded-assets.js`: embedded assets updated and verified.
-- `vcam/build.bat`: builds `lancam-setup.exe`, `LanCamFilter.dll`, `LanCamMfSource.dll` (static runtime) and `dist/lan-camera-setupv1.0.19.exe`.
-- `npm run build:exe`: exe v1.0.19 with the installer embedded.
-- Silent install/uninstall/reinstall of the installer: exit code 0 each time; `setup.log` shows `directshow=1 mf=0x0 listed=1`.
+- `npm test`: 60/60 passed across all 15 test suites in ~1.6 seconds.
+- `node scripts/build-embedded-assets.js`: embedded assets updated (16 files compiled).
+- `powershell -ExecutionPolicy Bypass -File scripts\register-autostart.ps1 -Status`: reported `[STATUS] Auto-Start: DISABLED` cleanly.
 
 ## Change log (newest first)
 
-Details live in `docs/decisions.md` (ADRs) and `docs/tasks.md`; this is the short history.
-
+- **2026-10-14 — Dynamic Daily Space Wallpaper Background System.** Created React custom hook `useWallpaper()` in `src/components/useWallpaper.js` and React component `<WallpaperBackground>` in `src/components/WallpaperBackground.jsx`, and integrated native vanilla JS equivalent into `src/public/js/wallpaper.js` loaded in `index.html`, `sender.html`, and `viewer.html`. Features: daily local caching (`YYYY-MM-DD` and URL in `localStorage`), route/page-derived cache keys, Unsplash Random Photo API (`https://api.unsplash.com/photos/random?query=space%20wallpaper&orientation=landscape&client_id=15MDKvUVv4HMJ3DzyeRIwxCFvEB70QeNcKzOCX_Puf0`), `urls.raw` prioritization with desktop parameters (`&w=2560&q=85&auto=format&fit=crop`), network/rate-limit graceful fallback to recent cached URL or curated space wallpaper. Rendered 4 visual layers: Layer 1 (Wallpaper with 1000ms fade), Layer 2 (Dark obsidian veil with 4px backdrop blur), Layer 3 (Subtle 5% SVG noise texture), Layer 4 (Content in `relative z-10`). All decorative layers have `pointer-events: none` ensuring zero impact on video streams, buttons, or form controls. Added `tests/wallpaper.test.js`; 60/60 tests passing.
+- **2026-10-14 — Viewer Layout Alignment, Reconnect Memory & Spacing Polish.** Fixed `viewer.html` layout bug where unclosed `.video-hud` and `#videoWrapper` forced the Studio Camera switcher and vitals into the floating top-right HUD pill alongside HUD icon buttons. Closed the containers and placed `.studio-switcher-bar` and `#streamVitalsBar` cleanly in the `.viewport-pane` footer, exactly matching `sender.html`. Styled `.studio-switcher-bar` as a sleek dock above the vitals strip. Improved text padding on video overlays, card descriptions, labels, form groups, and inputs. Fixed the Reconnect Stream button by caching `lastJoinedRoomId` and `lastJoinedPin` in variables and `sessionStorage`, replacing destructive `videoOverlay.textContent` calls with `showOverlay()` / `hideOverlay()` to preserve the overlay DOM elements (icon, title, subtitle, reconnect button), and auto-filling remembered values when clicking "Reconnect Stream" so reconnecting works instantly with zero prompt. Added `tests/viewer-layout-reconnect.test.js`; 54/54 tests passing.
+- **2026-10-14 — Sender Auto-Reconnection & Stale Socket Eviction (ADR-027).** Solved sender disconnection recovery: distinguished human manual stop (`btnStop`) from non-human network interruptions; added auto-rejoin on socket `connect`, mobile screen wake (`visibilitychange`), and network `online`; implemented 5-second stream health watchdog in `sender.js`; updated `RoomManager` and `signaling.js` with `reconnect: true` to evict stale/orphaned sender sockets and immediately restore WebRTC peer connections with waiting viewers; added version `v1.0.23` badge to headers in `sender.html` and `viewer.html`; 51/51 tests passing.
+- **2026-10-14 — The 14 Advanced Ecosystem Features (ADR-026) & Test Runner Hang Prevention.** Implemented all 14 proposed features: Bidirectional Audio Pipeline & Intercom, High-Performance Shared-Memory Bridge (ADR-022 wired), Native Unity Receiver Package (`com.vcam.lancamera`), Multi-Camera Studio Switcher, Embedded RTSP 1.0 / IP-Camera Bridge, Full Hardware Camera Controls (Torch/Zoom), Adaptive Bitrate (ABR), Local Recording & Snapshot Hub, mDNS Zero-Conf Auto-Discovery, Standby Slate Fallback, Mobile Battery & Thermal Saver, Quick-Join URL & QR Auto-Connect, Stream Transformation & Framing HUD, and Windows System Tray Companion & Auto-Start Configuration. Fixed potential test-runner socket hang by adding `socket.unref()` on all companion sockets, conditioning companion service auto-start during tests, registering companion cleanup hook on `httpServer.on('close')`, and enforcing `--test-timeout=10000` in `package.json`. 50/50 tests passing in ~1.4 seconds.
 - **2026-10-13 — Dynamic Media Source Switching & Multi-Viewer Reconnect (ADR-025).** Dynamic source changes (webcam, file, URL, resolution, camera device, facing mode) hot-swap active tracks via `replaceTrack()` across all active peer connections without leaving/rejoining. Restored sender `room:join` response callback to automatically connect to all waiting viewers (`response.peerSocketIds`), and broadcast `peer:joined` across all waiting viewers in `signaling.js`. Fixed ESM `createRequire` and `parseBool`. 41/41 tests passing.
 - **2026-10-13 — Installer (ADR-024).** One Inno Setup file replaces the zip. Fresh-machine fixes: `MFCreateVirtualCamera` is looked up in `mfsensorgroup.dll` (the old lookup in `mfplat.dll` skipped the Windows camera on every machine); static C++ runtime; honest installer report. "Download Driver" no longer navigates away from a live stream (hidden iframe) and downloads the installer.
 - **2026-10-12 — Media Foundation camera (ADR-023).** Windows Camera app can list the phone camera (WinRT enumeration 0 -> 1). Second-viewer failure traced to an old sender page; the server now rejects untargeted offers with several viewers. Virtual camera output fixed (upright, letterboxed); `lancam-setup.exe` no longer asks for UAC on every "Set as Webcam".

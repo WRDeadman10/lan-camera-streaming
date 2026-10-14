@@ -6,6 +6,8 @@
  * (or a snapshot is pending), so senders never upload frames nobody is reading.
  */
 
+import { getStandbySlateBuffer } from './standby-slate.js';
+
 export class MjpegStreamer {
   constructor() {
     // Map<roomId, Set<httpResponse>>
@@ -48,10 +50,12 @@ export class MjpegStreamer {
       res.flushHeaders();
     }
 
-    // Send latest frame immediately if available
+    // Send latest frame immediately if available, otherwise deliver initial standby slate
     const latest = this.latestFrames.get(roomId);
     if (latest) {
       this._writeFrame(res, latest);
+    } else {
+      this._writeFrame(res, getStandbySlateBuffer());
     }
 
     res.on('close', () => {

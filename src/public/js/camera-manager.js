@@ -76,7 +76,7 @@ export class CameraManager {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: videoConstraints,
-        audio: false // Initial release is strictly video-only per AGENTS.md / architecture
+        audio: withAudio
       });
 
       this.currentStream = stream;
@@ -95,13 +95,62 @@ export class CameraManager {
         // Fallback to minimal constraints if resolution is overconstrained
         const fallbackStream = await navigator.mediaDevices.getUserMedia({
           video: true,
-          audio: false
+          audio: withAudio
         });
         this.currentStream = fallbackStream;
         return fallbackStream;
       }
       throw new Error(`Failed to access camera: ${err.message || err.name}`);
     }
+  }
+
+  getCapabilities() {
+    if (!this.currentStream) {
+      return null;
+    }
+    const track = this.currentStream.getVideoTracks()[0];
+    if (track && typeof track.getCapabilities === 'function') {
+      try {
+        return track.getCapabilities();
+      } catch (e) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  async applyTorch(state) {
+    if (!this.currentStream) {
+      return false;
+    }
+    const track = this.currentStream.getVideoTracks()[0];
+    if (track && typeof track.applyConstraints === 'function') {
+      try {
+        await track.applyConstraints({ advanced: [{ torch: Boolean(state) }] });
+        return true;
+      } catch (err) {
+        console.warn('Failed to toggle torch:', err);
+        return false;
+      }
+    }
+    return false;
+  }
+
+  async applyZoom(zoomValue) {
+    if (!this.currentStream) {
+      return false;
+    }
+    const track = this.currentStream.getVideoTracks()[0];
+    if (track && typeof track.applyConstraints === 'function') {
+      try {
+        await track.applyConstraints({ advanced: [{ zoom: Number(zoomValue) }] });
+        return true;
+      } catch (err) {
+        console.warn('Failed to apply zoom:', err);
+        return false;
+      }
+    }
+    return false;
   }
 
   toggleFacingMode() {

@@ -110,16 +110,48 @@ export class WebRtcPeer {
     return this.peerConnection.addTrack(track, stream);
   }
 
-  async createOffer() {
+  async createOffer({ withAudio = true } = {}) {
     if (!this.peerConnection) {
       this.createPeerConnection();
     }
     const offer = await this.peerConnection.createOffer({
       offerToReceiveVideo: true,
-      offerToReceiveAudio: false
+      offerToReceiveAudio: Boolean(withAudio)
     });
     await this.peerConnection.setLocalDescription(offer);
     return offer;
+  }
+
+  async applyBitrateLimit(maxBitrateBps, scaleResolutionDownBy = 1.0) {
+    if (!this.peerConnection) {
+      return false;
+    }
+    const senders = this.peerConnection.getSenders();
+    const videoSender = senders.find((s) => s.track && s.track.kind === 'video');
+    if (!videoSender || !videoSender.getParameters) {
+      return false;
+    }
+    try {
+      const params = videoSender.getParameters();
+      if (!params.encodings || params.encodings.length === 0) {
+        params.encodings = [{}];
+      }
+      if (maxBitrateBps && maxBitrateBps > 0) {
+        params.encodings[0].maxBitrate = maxBitrateBps;
+      } else {
+        delete params.encodings[0].maxBitrate;
+      }
+      if (scaleResolutionDownBy && scaleResolutionDownBy > 1.0) {
+        params.encodings[0].scaleResolutionDownBy = scaleResolutionDownBy;
+      } else {
+        delete params.encodings[0].scaleResolutionDownBy;
+      }
+      await videoSender.setParameters(params);
+      return true;
+    } catch (err) {
+      console.warn('Failed to apply ABR bitrate limit:', err);
+      return false;
+    }
   }
 
   async handleOffer(offer) {
@@ -187,6 +219,8 @@ export class WebRtcPeer {
         pathKind: null,
         protocol: null,
         rtt: null,
+        rawRttMs: null,
+        packetsLost: null,
         bytesReceived: null,
         bytesSent: null,
         framesPerSecond: null,
@@ -200,7 +234,8 @@ export class WebRtcPeer {
         const isUsablePair = stat.type === 'candidate-pair' && (stat.state === 'succeeded' || stat.nominated === true);
         if (isSelectedPair || (isUsablePair && !hasSelectedPair)) {
           hasSelectedPair = hasSelectedPair || isSelectedPair;
-          report.rtt = stat.currentRoundTripTime ? Math.round(stat.currentRoundTripTime * 1000) + ' ms' : null;
+          report.rawRttMs = stat.currentRoundTripTime ? Math.round(stat.currentRoundTripTime * 1000) : null;
+          report.rtt = report.rawRttMs !== null ? report.rawRttMs + ' ms' : null;
           const localCand = stats.get(stat.localCandidateId);
           const remoteCand = stats.get(stat.remoteCandidateId);
           let localIp = null;

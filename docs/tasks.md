@@ -212,8 +212,7 @@ Decision: **ADR-022** (see its correction).
 - [x] Win32 shared-memory IPC header (`vcam/include/shm_bridge.h`) and a reader in the DirectShow filter that prefers shared-memory frames over HTTP.
 - [x] `lancam-setup.exe --bridge` daemon (WinSock2, `127.0.0.1:7779`) that writes frames into shared memory.
 - [x] Viewer frame pump (`src/public/js/viewer.js`) and `POST /api/vcam/bridge-frame` (`src/server/server.js`).
-- [x] Corrected behavior (verified by reading the code, 2026-10-13): the endpoint does **not** forward to TCP 7779. It hands each JPEG to the MJPEG streamer, and the camera reads `/stream/<room>` over HTTP. Nothing starts `--bridge` or sends frames to it, so the shared-memory path is dead code.
-- [ ] Decide: wire the shared-memory path (lower latency, no JPEG) or delete it (`shm_bridge.h`, `--bridge`, the reader).
+- [x] Wire the shared-memory path: `src/server/vcam-shm-bridge.js` connects Node to `lancam-setup.exe --bridge` on TCP 7779 and `/api/vcam/bridge-frame?format=raw` writes frames directly into shared memory.
 
 ## P10 — Controls Sidebar Panel Scrolling & Viewport Constraints (2026-10-12)
 
@@ -285,4 +284,37 @@ Decision: **ADR-025**.
 - [x] Fix Node.js ESM module resolution in `src/server/server.js` using `createRequire(import.meta.url)` with fallback.
 - [x] Fix boolean parsing in `src/server/config.js` (`parseBool`).
 - [x] Automated tests added for sender source selection UI and sender leaving/rejoining with waiting viewers (41/41 passing).
+
+## P16 — The 14 Advanced Feature Expansion (2026-10-13)
+
+### Phase A: Mobile Sender & Viewer Experience + Controls
+- [x] Feature 12: Quick-Join URL & QR Code Auto-Connect (`?room=...&pin=...&autostart=1` query parameters, one-click share deep links).
+- [x] Feature 11: Mobile Battery & Thermal Saver Mode (Screen WakeLock API, OLED Blackout mode).
+- [x] Feature 6: Full Hardware Camera Controls (Torch/Flashlight toggle, hardware zoom slider, focus/exposure constraints).
+- [x] Feature 13: Stream Transformation & Overlay HUD (Mirror front camera, 90/180/270 rotation lock, rule-of-thirds grid).
+- [x] Feature 8: Local Recording, Snapshot & Replay Hub (Canvas PNG snapshot download, client-side MediaRecorder).
+
+### Phase B: Audio, Network Quality & Auto-Discovery
+- [x] Feature 1: Bidirectional Audio Pipeline & Intercom (Talkback) (Audio stream capture, viewer playback/mute/volume, push-to-talk).
+- [x] Feature 7: Adaptive Bitrate (ABR) & Dynamic Quality Scaling (RTCPeerConnection stats polling, RTCRtpSender.setParameters).
+- [x] Feature 9: mDNS / Zero-Conf LAN Auto-Discovery (Server mDNS service advertisement, `.local` hostname resolution).
+
+### Phase C: Virtual Camera Standby Slate & Multi-Camera Switcher
+- [x] Feature 10: Standby Slate & Virtual Camera Fallback State (Valid JFIF standby generator in `standby-slate.js` and SMPTE color bars in `lancam_filter.cpp`).
+- [x] Feature 4: Multi-Camera Studio / Switcher Mode (Multi-sender room support in `room-manager.js`, targeted signaling in `signaling.js`, interactive Studio Switcher bar in `viewer.html`/`viewer.js`).
+- [x] Feature 2: High-Performance Shared-Memory Bridge (Wired ADR-022 shared memory bridge via `src/server/vcam-shm-bridge.js` to TCP 7779 and `Local\LanCamSharedMemory_Video`).
+
+### Phase D: Native Unity Integration
+- [x] Feature 3: Native Unity Receiver Package (`unity-package/` / `com.vcam.lancamera` with C# MonoBehaviours `LanCameraReceiver`, `LanCameraConfig`, `LanCameraState` adhering to strict `AGENTS.md` rules).
+
+### Phase E: RTSP / IP-Camera Broadcaster & Windows System Tray
+- [x] Feature 5: Embedded RTSP / IP-Camera Server Bridge (Zero-dependency RFC 2326 & RFC 2435 JPEG over RTP streaming in `src/server/rtsp-server.js` on `rtsp://<host>:8554/live/<roomId>`).
+- [x] Feature 14: Windows System Tray Companion & Auto-Start Configuration (System tray companion in `scripts/lan-camera-tray.ps1` and registry auto-start in `scripts/register-autostart.ps1`).
+- [x] Comprehensive root `README.md` documentation for Native Unity UPM package (`com.vcam.lancamera`), RTSP server, Studio Switcher, mobile HUD controls, and Windows system tray scripts; resolved JSDOM event loop exit in tests and unsigned RTP timestamp integer overflow.
+- [x] Feature: Sender Auto-Reconnection & Stale Socket Eviction (ADR-027): Distinguish human button press vs non-human disconnects; auto-rejoin on socket connect/visibilitychange/online; background watchdog; server-side stale sender eviction; version v1.0.23 badge in sender and viewer headers (51/51 tests pass).
+- [x] UI & Reconnect Stream Polish: Fixed viewer HTML layout where unclosed `.video-hud` and `#videoWrapper` forced Studio Camera switcher and vitals into floating top-right HUD pill; moved `studioSwitcherBar` and `streamVitalsBar` into viewport footer matching sender layout; enhanced element padding, overlay text spacing, and input margins; fixed Reconnect button so viewer remembers last-joined room ID and PIN across disconnects/leaving without error (54/54 tests pass).
+- [x] Dynamic Daily Space Wallpaper Background System: Created React `useWallpaper()` hook and `<WallpaperBackground>` component along with vanilla JS system in `src/public/js/wallpaper.js`; daily caching in `localStorage` (`YYYY-MM-DD`); Unsplash Random Photo API integration with `urls.raw` desktop optimization (`&w=2560&q=85&auto=format&fit=crop`); graceful network/rate-limit fallback; 4-layer visual background architecture with obsidian veil and subtle SVG noise texture with `pointer-events: none` and content on `z-index: 10` (60/60 tests pass).
+
+
+
 

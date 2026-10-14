@@ -344,3 +344,77 @@ test('Sender leaving and rejoining notifies waiting viewers and provides peer li
   }
 });
 
+test('Sender auto-reconnection with reconnect: true evicts orphaned sender socket and immediately reconnects waiting viewers', async () => {
+  const config = loadConfig({ PORT: '3006', ACCESS_PIN: 'testpass' });
+  const logger = new Logger('error');
+  const { httpServer } = createServer(config, logger);
+  setupSignaling(httpServer, config, logger);
+
+  await new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+  const address = httpServer.address();
+  const socketUrl = `http://127.0.0.1:${address.port}`;
+
+  const viewer = Client(socketUrl);
+  const sender1 = Client(socketUrl);
+  const sender2 = Client(socketUrl);
+
+  try {
+    await Promise.all([
+      new Promise((res) => viewer.on('connect', res)),
+      new Promise((res) => sender1.on('connect', res)),
+      new Promise((res) => sender2.on('connect', res))
+    ]);
+
+    // Viewer joins room
+    const vJoin = await new Promise((res) => {
+      viewer.emit('room:join', { roomId: 'autoreconnect-room', role: 'viewer', pin: 'testpass' }, res);
+    });
+    assert.equal(vJoin.success, true);
+
+    // Initial sender joins room
+    const s1Join = await new Promise((res) => {
+      sender1.emit('room:join', { roomId: 'autoreconnect-room', role: 'sender', pin: 'testpass' }, res);
+    });
+    assert.equal(s1Join.success, true);
+    assert.equal(s1Join.hasPeer, true);
+    const originalSender1Id = sender1.id;
+
+    let viewerSawLeftPeer = null;
+    let viewerSawJoinedPeer = null;
+    viewer.on('peer:left', (evt) => {
+      viewerSawLeftPeer = evt.peerId;
+    });
+    viewer.on('peer:joined', (evt) => {
+      viewerSawJoinedPeer = evt.peerId;
+    });
+
+    // Without reconnect: true, a second sender joining the same room is refused
+    const s2Refused = await new Promise((res) => {
+      sender2.emit('room:join', { roomId: 'autoreconnect-room', role: 'sender', pin: 'testpass' }, res);
+    });
+    assert.equal(s2Refused.success, false);
+    assert.equal(s2Refused.error, 'Room already has an active sender.');
+
+    // With reconnect: true (auto-reconnect), the new sender socket takes over and evicts the stale sender
+    const s2Rejoined = await new Promise((res) => {
+      sender2.emit('room:join', { roomId: 'autoreconnect-room', role: 'sender', pin: 'testpass', reconnect: true }, res);
+    });
+    assert.equal(s2Rejoined.success, true);
+    assert.equal(s2Rejoined.hasPeer, true);
+    assert.equal(s2Rejoined.evictedSenderId, originalSender1Id);
+    assert.ok(s2Rejoined.peerSocketIds.includes(viewer.id));
+
+    // Wait briefly for signaling broadcast
+    await new Promise((res) => setTimeout(res, 60));
+
+    assert.equal(viewerSawLeftPeer, originalSender1Id);
+    assert.equal(viewerSawJoinedPeer, sender2.id);
+  } finally {
+    viewer.disconnect();
+    sender1.disconnect();
+    sender2.disconnect();
+    await new Promise((resolve) => httpServer.close(resolve));
+  }
+});
+
+
