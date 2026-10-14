@@ -884,6 +884,26 @@ btnFullscreen.addEventListener('click', () => {
   }
 });
 
+function handleFullscreenChange() {
+  const isFs = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+  document.body.classList.toggle('is-fullscreen', isFs);
+  if (videoWrapper) {
+    videoWrapper.classList.toggle('is-fullscreen', isFs);
+  }
+}
+
+document.addEventListener('fullscreenchange', handleFullscreenChange);
+document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+
+if (videoWrapper) {
+  videoWrapper.addEventListener('dblclick', (e) => {
+    if (e.target && e.target.closest('button, a, input, select')) {
+      return;
+    }
+    btnFullscreen.click();
+  });
+}
+
 const gridOverlay = document.getElementById('gridOverlay');
 const transformController = new StreamTransformController(remoteVideo, gridOverlay);
 const btnHudFlipH = document.getElementById('btnHudFlipH');

@@ -28,6 +28,7 @@ let torchActive = false;
 
 // Auto-reconnect state management (distinguish human stop vs network/device drop)
 let isStreamingRequested = false;
+let hasJoinedRoom = false;
 let isRejoining = false;
 let autoRejoinTimer = null;
 let watchdogInterval = null;
@@ -481,6 +482,28 @@ if (btnHudFullscreen && videoContainer) {
       videoContainer.requestFullscreen().catch(() => {});
     } else {
       document.exitFullscreen();
+    }
+  });
+}
+
+function handleSenderFullscreenChange() {
+  const isFs = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+  document.body.classList.toggle('is-fullscreen', isFs);
+  if (videoContainer) {
+    videoContainer.classList.toggle('is-fullscreen', isFs);
+  }
+}
+
+document.addEventListener('fullscreenchange', handleSenderFullscreenChange);
+document.addEventListener('webkitfullscreenchange', handleSenderFullscreenChange);
+
+if (videoContainer) {
+  videoContainer.addEventListener('dblclick', (e) => {
+    if (e.target && e.target.closest('button, a, input, select')) {
+      return;
+    }
+    if (btnHudFullscreen) {
+      btnHudFullscreen.click();
     }
   });
 }
@@ -1062,6 +1085,7 @@ if (viewerPeers.size > 0) {
       return;
     }
 
+    hasJoinedRoom = true;
     logDiagnostic(`Joined room "${roomId}" as ${role} [mode: ${response.mediaMode}].`);
     broadcastBatteryToViewers();
 
@@ -1200,6 +1224,7 @@ async function rejoinRoomAsSender() {
       return;
     }
 
+    hasJoinedRoom = true;
     logDiagnostic(`[AutoReconnect] Successfully rejoined room "${activeRoomId}" as ${role} [mode: ${response.mediaMode}].`, 'INFO');
     showInfo('✓ Stream reconnected to room');
     setTimeout(clearInfo, 2500);
@@ -1338,6 +1363,9 @@ function updateStreamingStatus() {
   updateVitals({ viewers: count });
 }
 
+// Viewers whose peer connection gathered a Chrome mDNS-obfuscated host candidate on this sender (used to explain ICE failures).
+const viewerPeerHidesLanAddress = new Set();
+
 function createSenderPeerForViewer(viewerId, iceServers) {
   if (viewerPeers.has(viewerId)) {
     const existing = viewerPeers.get(viewerId);
@@ -1351,6 +1379,9 @@ function createSenderPeerForViewer(viewerId, iceServers) {
     iceServers,
     onIceCandidate: (candidate) => {
       if (candidate) {
+        if (candidate.type === 'host' && /\.local/.test(candidate.candidate)) {
+          viewerPeerHidesLanAddress.add(viewerId);
+        }
         logDiagnostic(`[ICE:${viewerId}] Local candidate gathered: ${parseCandidateSummary(candidate)}`, 'INFO');
         socket.emit('webrtc:ice-candidate', {
           candidate: candidate.candidate,
@@ -1378,6 +1409,9 @@ function createSenderPeerForViewer(viewerId, iceServers) {
         startStatsPolling();
       } else if (state === 'failed') {
         logDiagnostic(`[P2P:${viewerId}] Connection failed.`, 'ERROR');
+        if (viewerPeerHidesLanAddress.has(viewerId)) {
+          logDiagnostic(`[DIAGNOSIS:${viewerId}] THIS browser hides its LAN IP behind an mDNS name (xxxx.local) because the page has no camera/mic permission, so viewers on other devices often cannot reach it. Fix: allow Camera or Microphone for this site (site settings), or set chrome://flags/#enable-webrtc-hide-local-ips-with-mdns to Disabled and restart Chrome.`, 'WARN');
+        }
       }
     },
     onIceConnectionStateChange: (state) => {
@@ -1457,7 +1491,8 @@ async function initiateWebRtcConnectionForViewer(viewerId) {
 function setupSocketListeners() {
   socket.on('connect', () => {
     logDiagnostic(`[SOCKET] Connected to signaling server (ID: ${socket.id})`, 'INFO');
-    if (isStreamingRequested && activeRoomId) {
+    // The very first connect is already covered by startSession()'s room:join; rejoining here would send every viewer two offers.
+    if (isStreamingRequested && activeRoomId && hasJoinedRoom) {
       logDiagnostic(`[AutoReconnect] Socket connected while streaming active. Automatically rejoining room "${activeRoomId}"...`, 'INFO');
       rejoinRoomAsSender();
     }
@@ -1865,6 +1900,7 @@ function stopSession() {
   }
   isRejoining = false;
   isStreamingRequested = false;
+  hasJoinedRoom = false;
   stopStatsPolling();
   stopMjpegFrameLoop();
   stopTunnelFrameLoop();
@@ -1959,22 +1995,24 @@ if (btnStop) {
   });
 }
 
-// Sharing a screen means switching to another window, which hides this tab; a full rejoin would tear down healthy viewer connections.
-function areScreenShareViewersHealthy() {
+// Sharing a screen means switching to another window, which hides this tab. A full rejoin would tear down healthy
+// viewer connections (and renegotiate every viewer), so only re-offer to viewers whose connection actually died.
+async function repairUnhealthyViewerPeers() {
+  for (const [viewerId, peer] of Array.from(viewerPeers.entries())) {
+    const state = peer.peerConnection ? peer.peerConnection.connectionState : 'closed';
+    if (state === 'failed' || state === 'disconnected' || state === 'closed') {
+      logDiagnostic(`[Lifecycle] Viewer ${viewerId} connection is ${state}; re-offering to this viewer only.`, 'INFO');
+      await initiateWebRtcConnectionForViewer(viewerId);
+    }
+  }
+}
+
+function canRepairViewersInPlace() {
   if (!sourceSelect || sourceSelect.value !== 'screen' || viewerPeers.size === 0) {
     return false;
   }
-  const hasLiveVideoTrack = cameraManager.currentStream &&
-    cameraManager.currentStream.getVideoTracks().some((t) => t.readyState === 'live');
-  if (!hasLiveVideoTrack) {
-    return false;
-  }
-  for (const peer of viewerPeers.values()) {
-    if (!peer.peerConnection || peer.peerConnection.connectionState !== 'connected') {
-      return false;
-    }
-  }
-  return true;
+  return Boolean(cameraManager.currentStream &&
+    cameraManager.currentStream.getVideoTracks().some((t) => t.readyState === 'live'));
 }
 
 // Mobile screen wake / app return / network online listeners
@@ -1987,7 +2025,9 @@ document.addEventListener('visibilitychange', () => {
     }
     if (!socket || !socket.connected) {
       if (socket) socket.connect();
-    } else if (!areScreenShareViewersHealthy()) {
+    } else if (canRepairViewersInPlace()) {
+      repairUnhealthyViewerPeers();
+    } else {
       rejoinRoomAsSender();
     }
   }

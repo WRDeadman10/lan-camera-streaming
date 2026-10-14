@@ -325,11 +325,16 @@ Decision: **ADR-025**.
   - [x] Full quality mode (`max`) unconstrained up to 7680x4320 for 1:1 pixel rendering on 4K/high-DPI screens.
   - [x] Aspect-preserving proportional bounding boxes for lower quality tiers (`1080p`, `720p`, `480p`) with auto-orientation detection for portrait and landscape displays.
   - [x] Dynamic in-place resolution adjustment via `track.applyConstraints()` without re-prompting the user.
-  - [x] Native toolbar termination listener (`track.onended`) and graceful fallback if user cancels screen picker.
-  - [x] Added unit tests for screen capture, aspect preservation, audio fallback, and UI controls (78/78 tests pass).
-
-
-
-
-
+- [x] Resilient Clipboard Copying in Secure and Insecure LAN Contexts:
+  - Resolved `[WARN] Failed to copy diagnostics: Cannot read properties of undefined (reading 'writeText')` when accessing the application over LAN IP HTTP (`http://<IP>:<PORT>/viewer` or `/sender`) where `navigator.clipboard` is restricted by browsers to Secure Contexts.
+  - Implemented `copyToClipboard(text)` in `src/public/js/ui-utils.js` with modern Async Clipboard API check and fallback to `document.execCommand('copy')` via an off-screen readonly `<textarea>` with selection restoration.
+  - Refactored `setupDiagnosticsControls()` and `copyTextToClipboard()` in `src/public/js/ui-utils.js` to use `copyToClipboard()`.
+  - Updated inline clipboard copy in `src/public/index.html`.
+  - Added unit test suite in `tests/clipboard-fallback.test.js` covering secure context, insecure context fallback, writeText rejection fallback, and dual-failure handling (91/91 passing tests, 1 skipped).
+- [x] Fullscreen HUD Auto-Hiding:
+  - Resolved floating top-right viewport HUD control panel (`.video-hud`) obscuring video stream and application overlays when entering fullscreen.
+  - Added CSS rules (`:fullscreen .video-hud`, `:-webkit-full-screen .video-hud`, `.is-fullscreen .video-hud`) with `display: none !important;`.
+  - Added `fullscreenchange` and `webkitfullscreenchange` listeners in `viewer.js` and `sender.js` to synchronize `.is-fullscreen` class on container and body.
+  - Added double-click to toggle fullscreen on `videoWrapper` (viewer) and `videoContainer` (sender).
+  - Added automated test in `tests/viewer-layout-reconnect.test.js` (92/92 passing tests, 1 skipped).
 

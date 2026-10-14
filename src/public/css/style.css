@@ -373,6 +373,19 @@ video {
   z-index: 10;
 }
 
+/* Hide floating HUD control panel in fullscreen mode */
+:fullscreen .video-hud {
+  display: none !important;
+}
+
+:-webkit-full-screen .video-hud {
+  display: none !important;
+}
+
+.is-fullscreen .video-hud {
+  display: none !important;
+}
+
 .hud-btn {
   background: transparent;
   border: none;

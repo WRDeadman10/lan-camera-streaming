@@ -88,4 +88,17 @@ describe('Viewer Layout and Reconnect Memory Verification', () => {
     const failedBlock = viewerJs.slice(viewerJs.indexOf("state === 'failed'"), viewerJs.indexOf('onIceConnectionStateChange:'));
     assert.match(failedBlock, /showOverlay\('Connection Failed'/, 'a failed peer connection must show an explanatory overlay');
   });
+
+  test('style.css and viewer.js hide top-right .video-hud in fullscreen mode', () => {
+    const styleCss = fs.readFileSync(path.resolve(__dirname, '../src/public/css/style.css'), 'utf8');
+    assert.match(styleCss, /:fullscreen\s+\.video-hud\s*\{[^}]*display:\s*none\s*!important/, 'style.css must hide .video-hud in :fullscreen');
+    assert.match(styleCss, /:-webkit-full-screen\s+\.video-hud\s*\{[^}]*display:\s*none\s*!important/, 'style.css must hide .video-hud in :-webkit-full-screen');
+    assert.match(styleCss, /\.is-fullscreen\s+\.video-hud\s*\{[^}]*display:\s*none\s*!important/, 'style.css must hide .video-hud in .is-fullscreen');
+
+    const viewerJs = fs.readFileSync(path.resolve(__dirname, '../src/public/js/viewer.js'), 'utf8');
+    assert.match(viewerJs, /document\.addEventListener\('fullscreenchange'/, 'viewer.js must listen for fullscreenchange');
+    assert.match(viewerJs, /classList\.toggle\('is-fullscreen'/, 'viewer.js must toggle is-fullscreen class');
+    assert.match(viewerJs, /videoWrapper\.addEventListener\('dblclick'/, 'viewer.js must toggle fullscreen on double-click');
+  });
 });
+

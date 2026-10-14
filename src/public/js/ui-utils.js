@@ -140,6 +140,73 @@ export async function fetchLocalServerOrigin() {
   }
 }
 
+/**
+ * Copies text to the clipboard across secure contexts (navigator.clipboard)
+ * and insecure LAN HTTP contexts (document.execCommand fallback).
+ * @param {string} text - The text string to copy.
+ * @returns {Promise<boolean>} True if the copy succeeded, false otherwise.
+ */
+export async function copyToClipboard(text) {
+  const content = typeof text === 'string' ? text : String(text ?? '');
+
+  // 1. Try modern Async Clipboard API if available in secure context (localhost / HTTPS)
+  if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    try {
+      await navigator.clipboard.writeText(content);
+      return true;
+    } catch {
+      // Fall through to execCommand fallback if writeText rejects
+    }
+  }
+
+  // 2. Fallback: document.execCommand('copy') via off-screen readonly textarea
+  if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+    let textarea = null;
+    const selection = typeof window !== 'undefined' && window.getSelection ? window.getSelection() : null;
+    const selectedRange = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+
+    try {
+      textarea = document.createElement('textarea');
+      textarea.value = content;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.top = '0';
+      textarea.style.left = '0';
+      textarea.style.width = '2em';
+      textarea.style.height = '2em';
+      textarea.style.padding = '0';
+      textarea.style.border = 'none';
+      textarea.style.outline = 'none';
+      textarea.style.boxShadow = 'none';
+      textarea.style.background = 'transparent';
+      textarea.style.opacity = '0';
+      textarea.style.pointerEvents = 'none';
+      textarea.style.zIndex = '-9999';
+
+      document.body.appendChild(textarea);
+
+      textarea.focus();
+      textarea.select();
+      textarea.setSelectionRange(0, textarea.value.length);
+
+      const successful = typeof document.execCommand === 'function' && document.execCommand('copy');
+      return Boolean(successful);
+    } catch {
+      return false;
+    } finally {
+      if (textarea && textarea.parentNode) {
+        textarea.parentNode.removeChild(textarea);
+      }
+      if (selection && selectedRange) {
+        selection.removeAllRanges();
+        selection.addRange(selectedRange);
+      }
+    }
+  }
+
+  return false;
+}
+
 export function setupDiagnosticsControls(copyBtnId, clearBtnId, logElementId = 'diagnosticsLog') {
   const copyBtn = document.getElementById(copyBtnId);
   const clearBtn = document.getElementById(clearBtnId);
@@ -148,12 +215,17 @@ export function setupDiagnosticsControls(copyBtnId, clearBtnId, logElementId = '
   if (copyBtn && logEl) {
     copyBtn.addEventListener('click', async () => {
       try {
-        await navigator.clipboard.writeText(logEl.textContent);
-        const originalText = copyBtn.textContent;
-        copyBtn.textContent = '✓ Copied!';
-        setTimeout(() => {
-          copyBtn.textContent = originalText;
-        }, 2000);
+        const textToCopy = logEl.textContent || '';
+        const success = await copyToClipboard(textToCopy);
+        if (success) {
+          const originalText = copyBtn.textContent;
+          copyBtn.textContent = '✓ Copied!';
+          setTimeout(() => {
+            copyBtn.textContent = originalText;
+          }, 2000);
+        } else {
+          logDiagnostic('Failed to copy diagnostics: Clipboard copy not supported or permitted', 'WARN');
+        }
       } catch (err) {
         logDiagnostic(`Failed to copy diagnostics: ${err.message}`, 'WARN');
       }
@@ -252,19 +324,27 @@ export function captureFrameSnapshot(mediaElement, baseFilename = 'stream-snapsh
   return true;
 }
 
-export function copyTextToClipboard(text, buttonElement, feedbackLabel = '✓ Copied!') {
+export async function copyTextToClipboard(text, buttonElement, feedbackLabel = '✓ Copied!') {
   if (!text || !buttonElement) {
-    return;
+    return false;
   }
-  navigator.clipboard.writeText(text).then(() => {
-    const original = buttonElement.innerHTML;
-    buttonElement.innerHTML = feedbackLabel;
-    setTimeout(() => {
-      buttonElement.innerHTML = original;
-    }, 2000);
-  }).catch((err) => {
+  try {
+    const success = await copyToClipboard(text);
+    if (success) {
+      const original = buttonElement.innerHTML;
+      buttonElement.innerHTML = feedbackLabel;
+      setTimeout(() => {
+        buttonElement.innerHTML = original;
+      }, 2000);
+      return true;
+    } else {
+      logDiagnostic('Copy failed: Clipboard copy not supported or permitted', 'WARN');
+      return false;
+    }
+  } catch (err) {
     logDiagnostic(`Copy failed: ${err.message}`, 'WARN');
-  });
+    return false;
+  }
 }
 
 export function setupCollapsibleDrawer(toggleBtnId, contentId, expandText = 'Expand', collapseText = 'Collapse') {
