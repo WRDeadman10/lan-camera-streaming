@@ -105,6 +105,10 @@ function showOverlay(title, subtitle, showReconnect = false) {
   videoOverlay.style.display = 'flex';
 }
 
+function isWebRtcConnected() {
+  return Boolean(webrtcPeer && webrtcPeer.peerConnection && webrtcPeer.peerConnection.connectionState === 'connected');
+}
+
 function hideOverlay() {
   if (videoOverlay) {
     videoOverlay.style.display = 'none';
@@ -481,9 +485,14 @@ function createViewerPeer(iceServers) {
     onTrack: (remoteStream) => {
       logDiagnostic(`[MEDIA] Remote video track received (${remoteStream.getTracks().length} track(s)). Attaching to player...`, 'INFO');
       remoteVideo.srcObject = remoteStream;
-      hideOverlay();
+      // The track arrives with the SDP, before any media flows; only report live once ICE has connected.
+      if (isWebRtcConnected()) {
+        hideOverlay();
+      }
       remoteVideo.play().then(() => {
-        updateStatus('live', 'Live Feed');
+        if (isWebRtcConnected()) {
+          updateStatus('live', 'Live Feed');
+        }
         logDiagnostic('[MEDIA] Playback started successfully.', 'INFO');
       }).catch((err) => {
         logDiagnostic(`[MEDIA] Auto-play blocked: ${err.message}. Click to play.`, 'WARN');
@@ -493,13 +502,18 @@ function createViewerPeer(iceServers) {
     onConnectionStateChange: (state) => {
       logDiagnostic(`[P2P] Peer connection state: ${state}`, 'INFO');
       if (state === 'connected') {
+        hideOverlay();
         updateStatus('live', 'Live Feed');
         startStatsPolling();
+        if (remoteVideo) {
+          remoteVideo.play().catch(() => {});
+        }
       } else if (state === 'disconnected') {
         updateStatus('disconnected', 'Sender Disconnected');
         stopStatsPolling();
       } else if (state === 'failed') {
         updateStatus('error', 'Connection Failed');
+        showOverlay('Connection Failed', 'Could not reach the sender directly. The sender and this device are probably on different networks (no TURN relay configured), or the network blocks the path.', true);
         stopStatsPolling();
       }
     },
@@ -513,6 +527,7 @@ function createViewerPeer(iceServers) {
         logDiagnostic('1. Router "AP / client isolation" (or a guest network) blocks phone-to-PC traffic.', 'WARN');
         logDiagnostic('2. Windows Firewall blocks inbound UDP for this browser (Wi-Fi profile set to Public).', 'WARN');
         logDiagnostic('3. A VPN or virtual adapter on this PC hides the real LAN route.', 'WARN');
+        logDiagnostic('4. Sender and viewer are on different networks and no TURN relay is configured (set TURN_SERVERS in .env). Screen sharing also hides the sender LAN IP behind an mDNS name that other devices may not resolve.', 'WARN');
         logDiagnostic('LAST RESORT: switch Media Transport Mode to "Fallback - Video through zrok" (Mode B) on both sender and viewer. It works anywhere but consumes zrok quota.', 'INFO');
       }
     }
@@ -572,10 +587,13 @@ function createViewerPeer(iceServers) {
       updateStatus('stopped', 'Stream Stopped by Sender');
       showOverlay('Stream Stopped', 'Sender stopped the stream.', true);
     } else if (data.state === 'source-changed' || data.state === 'live') {
-      updateStatus('live', 'Live Feed');
-      hideOverlay();
-      if (remoteVideo) {
-        remoteVideo.play().catch(() => {});
+      // Signaling-only event: in WebRTC mode it must not claim "live" before the media connection is up.
+      if (currentMediaMode === 'tunnel-relay' || isWebRtcConnected()) {
+        updateStatus('live', 'Live Feed');
+        hideOverlay();
+        if (remoteVideo) {
+          remoteVideo.play().catch(() => {});
+        }
       }
     }
   });

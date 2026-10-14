@@ -75,18 +75,45 @@ const fileInput = document.getElementById('fileInput');
 const urlInput = document.getElementById('urlInput');
 const fileInputGroup = document.getElementById('fileInputGroup');
 const urlInputGroup = document.getElementById('urlInputGroup');
+const cameraSelectGroup = document.getElementById('cameraSelectGroup');
+const focusModeGroup = document.getElementById('focusModeGroup');
+const focusDistanceGroup = document.getElementById('focusDistanceGroup');
+const resolutionGroup = document.getElementById('resolutionGroup');
+const resolutionLabel = document.querySelector('label[for="cameraResolution"]');
+
 // Show/hide appropriate input based on selected source and apply dynamic switch
 function updateSourceInputsVisibility() {
   const value = sourceSelect ? sourceSelect.value : 'webcam';
   if (value === 'file') {
     if (fileInputGroup) { fileInputGroup.style.display = 'block'; }
     if (urlInputGroup) { urlInputGroup.style.display = 'none'; }
+    if (cameraSelectGroup) { cameraSelectGroup.style.display = 'none'; }
+    if (focusModeGroup) { focusModeGroup.style.display = 'none'; }
+    if (focusDistanceGroup) { focusDistanceGroup.style.display = 'none'; }
+    if (resolutionLabel) { resolutionLabel.textContent = 'Resolution'; }
   } else if (value === 'url') {
     if (fileInputGroup) { fileInputGroup.style.display = 'none'; }
     if (urlInputGroup) { urlInputGroup.style.display = 'block'; }
-  } else {
+    if (cameraSelectGroup) { cameraSelectGroup.style.display = 'none'; }
+    if (focusModeGroup) { focusModeGroup.style.display = 'none'; }
+    if (focusDistanceGroup) { focusDistanceGroup.style.display = 'none'; }
+    if (resolutionLabel) { resolutionLabel.textContent = 'Resolution'; }
+  } else if (value === 'screen') {
     if (fileInputGroup) { fileInputGroup.style.display = 'none'; }
     if (urlInputGroup) { urlInputGroup.style.display = 'none'; }
+    if (cameraSelectGroup) { cameraSelectGroup.style.display = 'none'; }
+    if (focusModeGroup) { focusModeGroup.style.display = 'none'; }
+    if (focusDistanceGroup) { focusDistanceGroup.style.display = 'none'; }
+    if (resolutionGroup) { resolutionGroup.style.display = 'block'; }
+    if (resolutionLabel) { resolutionLabel.textContent = 'Quality / Resolution'; }
+  } else {
+    // webcam
+    if (fileInputGroup) { fileInputGroup.style.display = 'none'; }
+    if (urlInputGroup) { urlInputGroup.style.display = 'none'; }
+    if (cameraSelectGroup) { cameraSelectGroup.style.display = 'block'; }
+    if (focusModeGroup) { focusModeGroup.style.display = 'block'; }
+    if (resolutionGroup) { resolutionGroup.style.display = 'block'; }
+    if (resolutionLabel) { resolutionLabel.textContent = 'Quality / Resolution'; }
   }
 }
 
@@ -136,8 +163,12 @@ if (cameraSelect) {
 
 if (cameraResolutionSelect) {
   cameraResolutionSelect.addEventListener('change', async () => {
-    if (isStreamingActive() && (!sourceSelect || sourceSelect.value === 'webcam')) {
-      await applyDynamicSourceChange();
+    if (isStreamingActive()) {
+      if (!sourceSelect || sourceSelect.value === 'webcam') {
+        await applyDynamicSourceChange();
+      } else if (sourceSelect.value === 'screen') {
+        await applyScreenResolutionChange();
+      }
     }
   });
 }
@@ -230,7 +261,6 @@ const btnSharePreLink = document.getElementById('btnSharePreLink');
 
 // Focus controls
 const focusModeSelect = document.getElementById('focusModeSelect');
-const focusDistanceGroup = document.getElementById('focusDistanceGroup');
 const focusDistanceSlider = document.getElementById('focusDistanceSlider');
 const focusDistanceValText = document.getElementById('focusDistanceValText');
 const focusControlBar = document.getElementById('focusControlBar');
@@ -479,6 +509,19 @@ if (zoomSlider) {
 }
 
 function updateHardwareCapabilitiesUI() {
+  const sourceChoice = sourceSelect ? sourceSelect.value : 'webcam';
+  if (sourceChoice !== 'webcam') {
+    if (btnHudTorch) btnHudTorch.style.display = 'none';
+    if (btnHudFacing) btnHudFacing.style.display = 'none';
+    if (btnHudFocus) btnHudFocus.style.display = 'none';
+    if (zoomControlBar) zoomControlBar.classList.remove('active');
+    if (focusControlBar) focusControlBar.classList.remove('active');
+    if (focusDistanceGroup) focusDistanceGroup.style.display = 'none';
+    return;
+  }
+  if (btnHudFacing) btnHudFacing.style.display = 'inline-flex';
+  if (btnHudFocus) btnHudFocus.style.display = 'inline-flex';
+
   const caps = cameraManager.getCapabilities();
   if (!caps) {
     if (btnHudTorch) btnHudTorch.style.display = 'none';
@@ -657,6 +700,33 @@ async function getRemoteUrlStream(url) {
   });
 }
 
+let lastSuccessfulSource = 'webcam';
+
+async function applyScreenResolutionChange() {
+  const resChoice = cameraResolutionSelect ? cameraResolutionSelect.value : 'max';
+  logDiagnostic(`[SCREEN] Adjusting screen share resolution to "${resChoice}" (aspect preserved)...`, 'INFO');
+  const ok = await cameraManager.applyScreenResolution(resChoice);
+  if (ok) {
+    const track = cameraManager.currentStream && cameraManager.currentStream.getVideoTracks()[0];
+    const settings = track && track.getSettings ? track.getSettings() : {};
+    const actualWidth = settings.width || localVideo.videoWidth || 0;
+    const actualHeight = settings.height || localVideo.videoHeight || 0;
+    const actualFps = Math.round(settings.frameRate || 30);
+    logDiagnostic(`[SCREEN] Dynamic resolution applied: ${actualWidth}x${actualHeight} @ ${actualFps} FPS (${resChoice}).`, 'INFO');
+    updateVitals({
+      fps: actualFps,
+      resolution: (actualWidth && actualHeight) ? `${actualWidth} × ${actualHeight}` : null
+    });
+    if (socket) {
+      socket.emit('stream:state', { state: 'source-changed' });
+    }
+    showInfo(`Screen resolution adjusted to ${resChoice} (aspect preserved).`);
+    setTimeout(clearInfo, 2500);
+  } else {
+    await applyDynamicSourceChange();
+  }
+}
+
 async function obtainStreamForCurrentSource() {
   const sourceChoice = sourceSelect ? sourceSelect.value : 'webcam';
   if (sourceChoice === 'webcam') {
@@ -684,6 +754,28 @@ async function obtainStreamForCurrentSource() {
       frameRate: 30,
       withAudio
     });
+  } else if (sourceChoice === 'screen') {
+    const resChoice = cameraResolutionSelect ? cameraResolutionSelect.value : 'max';
+    const audioToggle = document.getElementById('audioToggle');
+    const withAudio = Boolean(audioToggle && audioToggle.checked);
+    logDiagnostic(`Requesting screen capture (quality: ${resChoice}, audio: ${withAudio})...`, 'INFO');
+    const stream = await cameraManager.startScreenCapture({
+      resolution: resChoice,
+      frameRate: 30,
+      withAudio
+    });
+    const videoTrack = stream.getVideoTracks()[0];
+    if (videoTrack) {
+      videoTrack.addEventListener('ended', () => {
+        logDiagnostic('[SCREEN] Screen sharing stopped via browser UI.', 'WARN');
+        if (isStreamingActive()) {
+          stopSession();
+          showInfo('Screen sharing was ended.');
+          setTimeout(clearInfo, 3000);
+        }
+      });
+    }
+    return stream;
   } else if (sourceChoice === 'file') {
     const file = fileInput && fileInput.files && fileInput.files[0];
     if (!file) {
@@ -724,6 +816,7 @@ async function applyDynamicSourceChange() {
     if (sourceChoice === 'webcam') {
       cleanupSourceVideoElement();
     }
+    lastSuccessfulSource = sourceChoice;
 
     localVideo.srcObject = newStream;
     videoOverlay.style.display = 'none';
@@ -805,6 +898,10 @@ async function applyDynamicSourceChange() {
 
     showInfo(`Stream source changed to ${sourceChoice}.`);
   } catch (err) {
+    if (sourceSelect) {
+      sourceSelect.value = lastSuccessfulSource;
+      updateSourceInputsVisibility();
+    }
     showError(`Failed to switch source: ${err.message}`);
     logDiagnostic(`Source switch failed: ${err.message}`, 'ERROR');
   } finally {
@@ -841,44 +938,12 @@ async function startSession() {
   let stream = null;
   try {
     const sourceChoice = sourceSelect ? sourceSelect.value : 'webcam';
+    stream = await obtainStreamForCurrentSource();
+
     if (sourceChoice === 'webcam') {
-      const selectedDeviceId = cameraSelect.value || null;
-      const resChoice = cameraResolutionSelect ? cameraResolutionSelect.value : 'max';
-      let targetWidth = 'max';
-      let targetHeight = 'max';
-      if (resChoice === '1080p') {
-        targetWidth = 1920;
-        targetHeight = 1080;
-      } else if (resChoice === '720p') {
-        targetWidth = 1280;
-        targetHeight = 720;
-      } else if (resChoice === '480p') {
-        targetWidth = 854;
-        targetHeight = 480;
-      }
-      const audioToggle = document.getElementById('audioToggle');
-      const withAudio = Boolean(audioToggle && audioToggle.checked);
-      logDiagnostic(`Requesting camera capture (mode: ${resChoice}, audio: ${withAudio})...`, 'INFO');
-      stream = await cameraManager.startCapture({
-        deviceId: selectedDeviceId,
-        width: targetWidth,
-        height: targetHeight,
-        frameRate: 30,
-        withAudio
-      });
-    } else if (sourceChoice === 'file') {
-      const file = fileInput && fileInput.files[0];
-      if (!file) {
-        throw new Error('No video file selected');
-      }
-      stream = await getLocalFileStream(file);
-    } else if (sourceChoice === 'url') {
-      const url = urlInput ? urlInput.value.trim() : '';
-      if (!url) {
-        throw new Error('No video URL provided');
-      }
-      stream = await getRemoteUrlStream(url);
+      cleanupSourceVideoElement();
     }
+    lastSuccessfulSource = sourceChoice;
 
     localVideo.srcObject = stream;
     videoOverlay.style.display = 'none';
@@ -1415,6 +1480,18 @@ function setupSocketListeners() {
     }
   });
 
+  socket.on('sender:evicted', () => {
+    logDiagnostic('[ROOM] Another sender took over this room. Stopping this sender to avoid a reconnect loop.', 'WARN');
+    const evictedSocket = socket;
+    stopSession();
+    if (evictedSocket) {
+      evictedSocket.off();
+      evictedSocket.disconnect();
+    }
+    socket = null;
+    showError('Another sender joined this room and replaced this one. Close the other sender page, or use a different Room ID, then press Start again.');
+  });
+
   socket.on('connect_error', (err) => {
     logDiagnostic(`[SOCKET] Connection error: ${err.message}`, 'ERROR');
     if (isStreamingRequested) {
@@ -1697,8 +1774,13 @@ function startTunnelFrameLoop() {
     targetHeight = localVideo.videoHeight || 720;
   } else {
     const parts = resVal.split('x').map((n) => parseInt(n, 10));
-    targetWidth = parts[0] || 640;
-    targetHeight = parts[1] || 360;
+    const boundW = parts[0] || 640;
+    const boundH = parts[1] || 360;
+    const srcW = localVideo.videoWidth || boundW;
+    const srcH = localVideo.videoHeight || boundH;
+    const scale = Math.min(boundW / srcW, boundH / srcH, 1);
+    targetWidth = Math.round(srcW * scale) || boundW;
+    targetHeight = Math.round(srcH * scale) || boundH;
   }
   const targetFps = parseInt(tunnelFpsSelect ? tunnelFpsSelect.value : '10', 10);
   const targetQuality = parseFloat(tunnelQualitySelect ? tunnelQualitySelect.value : '0.6');
@@ -1877,6 +1959,24 @@ if (btnStop) {
   });
 }
 
+// Sharing a screen means switching to another window, which hides this tab; a full rejoin would tear down healthy viewer connections.
+function areScreenShareViewersHealthy() {
+  if (!sourceSelect || sourceSelect.value !== 'screen' || viewerPeers.size === 0) {
+    return false;
+  }
+  const hasLiveVideoTrack = cameraManager.currentStream &&
+    cameraManager.currentStream.getVideoTracks().some((t) => t.readyState === 'live');
+  if (!hasLiveVideoTrack) {
+    return false;
+  }
+  for (const peer of viewerPeers.values()) {
+    if (!peer.peerConnection || peer.peerConnection.connectionState !== 'connected') {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Mobile screen wake / app return / network online listeners
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && isStreamingRequested) {
@@ -1887,7 +1987,7 @@ document.addEventListener('visibilitychange', () => {
     }
     if (!socket || !socket.connected) {
       if (socket) socket.connect();
-    } else {
+    } else if (!areScreenShareViewersHealthy()) {
       rejoinRoomAsSender();
     }
   }

@@ -74,4 +74,18 @@ describe('Viewer Layout and Reconnect Memory Verification', () => {
     assert.strictEqual(win.sessionStorage.getItem('lancam_last_room'), 'TEST_ROOM_101');
     assert.strictEqual(win.sessionStorage.getItem('lancam_last_pin'), '998877');
   });
+
+  test('viewer.js reports live only after the WebRTC connection is established', () => {
+    const viewerJs = fs.readFileSync(path.resolve(__dirname, '../src/public/js/viewer.js'), 'utf8');
+    assert.match(viewerJs, /function isWebRtcConnected\(\)/, 'isWebRtcConnected helper must exist');
+
+    const streamStateBlock = viewerJs.slice(viewerJs.indexOf("socket.on('stream:state'"), viewerJs.indexOf("socket.on('sender:battery'"));
+    assert.match(streamStateBlock, /isWebRtcConnected\(\)/, 'stream:state live must be gated on the peer connection state');
+
+    const onTrackBlock = viewerJs.slice(viewerJs.indexOf('onTrack:'), viewerJs.indexOf('onConnectionStateChange:'));
+    assert.match(onTrackBlock, /isWebRtcConnected\(\)/, 'onTrack must not hide the overlay before ICE connects');
+
+    const failedBlock = viewerJs.slice(viewerJs.indexOf("state === 'failed'"), viewerJs.indexOf('onIceConnectionStateChange:'));
+    assert.match(failedBlock, /showOverlay\('Connection Failed'/, 'a failed peer connection must show an explanatory overlay');
+  });
 });

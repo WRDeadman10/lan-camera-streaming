@@ -194,7 +194,7 @@
           </div>
 
           <div id="setupFormBody">
-            <div class="form-group">
+            <div class="form-group" id="cameraSelectGroup">
               <label for="cameraSelect">Camera</label>
               <select id="cameraSelect">
                 <option value="">Default (Auto / Facing)</option>
@@ -204,6 +204,7 @@
               <label for="sourceSelect">Source</label>
               <select id="sourceSelect">
                 <option value="webcam" selected>Webcam (default)</option>
+                <option value="screen">Screen share (display)</option>
                 <option value="file">Local video file</option>
                 <option value="url">Remote video URL</option>
               </select>
@@ -217,13 +218,13 @@
               <input type="text" id="urlInput" placeholder="https://example.com/stream.mp4">
             </div>
 
-            <div class="form-group">
-              <label for="cameraResolution">Resolution</label>
+            <div class="form-group" id="resolutionGroup">
+              <label for="cameraResolution">Quality / Resolution</label>
               <select id="cameraResolution">
-                <option value="max" selected>Full Resolution (Native Sensor)</option>
-                <option value="1080p">1080p Full HD (1920 × 1080)</option>
-                <option value="720p">720p HD (1280 × 720)</option>
-                <option value="480p">480p SD (854 × 480)</option>
+                <option value="max" selected>Full Quality (Native Display / Sensor)</option>
+                <option value="1080p">1080p Full HD (Max 1080p, aspect preserved)</option>
+                <option value="720p">720p HD (Max 720p, aspect preserved)</option>
+                <option value="480p">480p SD (Max 480p, aspect preserved)</option>
               </select>
             </div>
 

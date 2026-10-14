@@ -319,6 +319,15 @@ Decision: **ADR-025**.
 - [x] CameraManager withAudio ReferenceError Fix: Added `withAudio = false` parameter to `CameraManager.startCapture()` in `src/public/js/camera-manager.js` with graceful fallback to video-only capture if audio fails; added unit tests in `tests/camera-manager.test.js` (66/66 tests pass).
 - [x] Camera Focus Controls (Constant / Manual Focus vs Continuous Auto-Focus): Implemented `applyFocusMode()`, `applyFocusDistance()`, and `getFocusCapabilities()` in `CameraManager`. Added Focus Mode dropdown (Continuous Auto, Constant/Locked Focus, Single-Shot), manual focus distance slider, floating focus control bar, HUD focus lock button, and tap-to-focus on preview.
 - [x] Sender Battery Percentage in Viewer Screen: Added `BatteryMonitor` reading `navigator.getBattery()`, broadcasting `sender:battery` over Socket.IO signaling, and displaying battery percentage and charging status (`⚡`) in viewer vitals footer and HUD pill with adaptive color coding (71/71 tests pass).
+- [x] Screen Sharing Input Source with Aspect-Preserving Scaling (ADR-028):
+  - [x] Added `screen` ("Screen share (display)") to `<select id="sourceSelect">` in `src/public/sender.html`.
+  - [x] Implemented `startScreenCapture()`, `isScreenCaptureSupported()`, `getScreenConstraints()`, and `applyScreenResolution()` in `src/public/js/camera-manager.js`.
+  - [x] Full quality mode (`max`) unconstrained up to 7680x4320 for 1:1 pixel rendering on 4K/high-DPI screens.
+  - [x] Aspect-preserving proportional bounding boxes for lower quality tiers (`1080p`, `720p`, `480p`) with auto-orientation detection for portrait and landscape displays.
+  - [x] Dynamic in-place resolution adjustment via `track.applyConstraints()` without re-prompting the user.
+  - [x] Native toolbar termination listener (`track.onended`) and graceful fallback if user cancels screen picker.
+  - [x] Added unit tests for screen capture, aspect preservation, audio fallback, and UI controls (78/78 tests pass).
+
 
 
 

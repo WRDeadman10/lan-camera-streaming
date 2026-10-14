@@ -417,4 +417,49 @@ test('Sender auto-reconnection with reconnect: true evicts orphaned sender socke
   }
 });
 
+test('Evicted sender is notified with sender:evicted so it can stop instead of looping reconnects', async () => {
+  const config = loadConfig({ PORT: '3007', ACCESS_PIN: 'testpass' });
+  const logger = new Logger('error');
+  const { httpServer } = createServer(config, logger);
+  setupSignaling(httpServer, config, logger);
+
+  await new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+  const address = httpServer.address();
+  const socketUrl = `http://127.0.0.1:${address.port}`;
+
+  const sender1 = Client(socketUrl);
+  const sender2 = Client(socketUrl);
+
+  try {
+    await Promise.all([
+      new Promise((res) => sender1.on('connect', res)),
+      new Promise((res) => sender2.on('connect', res))
+    ]);
+
+    const s1Join = await new Promise((res) => {
+      sender1.emit('room:join', { roomId: 'evict-notify-room', role: 'sender', pin: 'testpass' }, res);
+    });
+    assert.equal(s1Join.success, true);
+
+    const evictedEvent = new Promise((res) => sender1.on('sender:evicted', res));
+
+    const s2Join = await new Promise((res) => {
+      sender2.emit('room:join', { roomId: 'evict-notify-room', role: 'sender', pin: 'testpass', reconnect: true }, res);
+    });
+    assert.equal(s2Join.success, true);
+
+    const evt = await Promise.race([
+      evictedEvent,
+      new Promise((res) => setTimeout(() => res(null), 1000))
+    ]);
+    assert.ok(evt, 'Evicted sender must receive sender:evicted');
+    assert.equal(evt.roomId, 'evict-notify-room');
+    assert.equal(evt.replacedBy, sender2.id);
+  } finally {
+    sender1.disconnect();
+    sender2.disconnect();
+    await new Promise((resolve) => httpServer.close(resolve));
+  }
+});
+
 

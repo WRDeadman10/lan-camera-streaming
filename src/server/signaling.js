@@ -91,6 +91,8 @@ export function setupSignaling(httpServer, config, logger) {
           logger.info(`Evicting stale sender socket ${result.evictedSenderId} in room "${roomId}" for reconnected sender ${socket.id}`);
           const staleSock = io.sockets.sockets.get(result.evictedSenderId);
           if (staleSock) {
+            // Tell the old sender it was replaced so it stops instead of auto-rejoining and evicting the new sender back.
+            staleSock.emit('sender:evicted', { roomId, replacedBy: socket.id });
             staleSock.leave(roomId);
             staleSock.disconnect(true);
           }

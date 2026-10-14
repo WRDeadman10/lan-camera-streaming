@@ -445,6 +445,35 @@ On mobile devices and fluctuating local networks, senders can experience transie
 **Consequences:**
 Transient network drops, mobile lock screen wakeups, and server restarts heal automatically within 1-2 seconds without requiring manual button clicks or room re-entry.
 
+## ADR-028 — Screen Sharing Input Source with Aspect-Preserving Quality Scaling
+
+**Status:** Accepted
+
+**Context:**
+Users frequently need to broadcast desktop screens, application windows, or browser tabs across the local network to viewers, Unity applications, or virtual webcam clients, matching the quality and resolution controls available for physical camera sensors. However, screens have varied aspect ratios (16:9, 16:10, 4:3, 21:9 Ultrawide, or 9:16 portrait on mobile/vertical monitors). Hardcoding fixed dimensions (such as 1280x720) causes distortion, black letterboxing, or text blurriness when downscaling.
+
+**Decision:**
+1. **Screen Capture as First-Class Input Source:**
+   - Add `screen` ("Screen share (display)") to `<select id="sourceSelect">` in `sender.html`.
+   - Leverage `navigator.mediaDevices.getDisplayMedia()` with fallback for optional system/tab audio capture.
+   - When `screen` is selected, automatically hide camera-only UI controls (camera device dropdown, torch, zoom, focus controls, flip button) while keeping the Quality/Resolution selector active.
+2. **Aspect-Preserving Proportional Scaling:**
+   - Define bounding-box constraints rather than rigid width/height forcing:
+     - `max`: Unconstrained full native display resolution (`width: { max: 7680 }, height: { max: 4320 }, frameRate: { ideal: 30, max: 60 }`), transmitting 1:1 screen pixels for 4K, 1440p, and high-DPI displays.
+     - `1080p`: Bounding box `1920x1080` (or `1080x1920` for portrait).
+     - `720p`: Bounding box `1280x720` (or `720x1280` for portrait).
+     - `480p`: Bounding box `854x480` (or `480x854` for portrait).
+   - In accordance with the W3C Screen Capture specification, bounding boxes scale the captured frame proportionally, strictly preserving the native aspect ratio without geometric distortion, stretching, or cropping.
+3. **Seamless Dynamic Quality Switching without Re-Prompting:**
+   - When a user changes resolution while screen sharing is live, `CameraManager.applyScreenResolution()` directly calls `track.applyConstraints()`, adjusting capture resolution in-place without triggering the browser's screen-selection modal again.
+   - Automatic orientation detection dynamically swaps width and height constraint maximums for portrait displays.
+4. **Lifecycle & Native Toolbar Termination:**
+   - Listen for `track.onended` (fired when the user clicks "Stop sharing" on the browser's floating toolbar) to cleanly terminate or reset the stream without leaving frozen frames.
+   - Preserve previous source state if screen sharing is cancelled by the user.
+
+**Consequences:**
+Desktop and mobile senders can share any screen, window, or tab at 1:1 full fidelity or bandwidth-friendly 1080p/720p/480p resolutions with exact aspect ratio preservation. All downstream pipelines (WebRTC P2P, Mode B Tunnel Relay, HTTP MJPEG, and RTSP) seamlessly distribute the screen feed.
+
 ## Open decisions to revisit after the first working stream
 
 - Whether to code-sign the installer and executables (ADR-024).
