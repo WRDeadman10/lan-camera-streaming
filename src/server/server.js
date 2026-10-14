@@ -66,12 +66,22 @@ export function createServer(config, logger) {
     app.set('trust proxy', 1);
   }
 
-  // Security headers (including CSP)
+  // Security headers (including comprehensive Content Security Policy)
   app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline';");
+    res.setHeader(
+      'Content-Security-Policy',
+      "default-src 'self'; " +
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+      "style-src 'self' 'unsafe-inline' https:; " +
+      "img-src 'self' data: blob: https://images.unsplash.com https://*.unsplash.com https:; " +
+      "connect-src 'self' ws: wss: https://api.unsplash.com https://*.unsplash.com https:; " +
+      "media-src 'self' blob: mediastream: data:; " +
+      "font-src 'self' data: https:; " +
+      "worker-src 'self' blob:;"
+    );
     next();
   });
 

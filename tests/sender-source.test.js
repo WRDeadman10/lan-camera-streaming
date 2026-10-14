@@ -15,8 +15,8 @@ function setupDom() {
         <option value="file">Local File</option>
         <option value="url">Remote URL</option>
       </select>
-      <div id="fileInputGroup" style="display:none;"><input type="file" id="fileInput"/></div>
-      <div id="urlInputGroup" style="display:none;"><input type="text" id="urlInput"/></div>
+      <div id="fileInputGroup"><input type="file" id="fileInput"/></div>
+      <div id="urlInputGroup"><input type="text" id="urlInput"/></div>
       <select id="cameraSelect"></select>
       <select id="cameraResolution"></select>
       <button id="btnStart"></button>
@@ -42,6 +42,13 @@ describe('Sender source selection UI', () => {
     if (domInstance && domInstance.window) {
       domInstance.window.close();
     }
+  });
+
+  test('Initial load hides both file and url groups when source is webcam by default', () => {
+    const fileGroup = document.getElementById('fileInputGroup');
+    const urlGroup = document.getElementById('urlInputGroup');
+    assert.strictEqual(fileGroup.style.display, 'none');
+    assert.strictEqual(urlGroup.style.display, 'none');
   });
 
   test('Changing source to file shows file input group', () => {

@@ -7,6 +7,7 @@
 import { showError, clearError, showInfo, clearInfo, updateStatus, logDiagnostic, parseCandidateSummary, setupDiagnosticsControls, setPathIndicator, describePath, isLocalHostname, fetchLocalServerOrigin, updateVitals, captureFrameSnapshot, copyTextToClipboard, setupCollapsibleDrawer, setupPasswordToggle, StreamRecorder, WakeLockController, StreamTransformController, parseUrlStreamParams, buildShareUrl } from './ui-utils.js';
 import { CameraManager } from './camera-manager.js';
 import { WebRtcPeer } from './webrtc-peer.js';
+import { BatteryMonitor } from './battery-monitor.js';
 
 const cameraManager = new CameraManager();
 let socket = null;
@@ -75,19 +76,26 @@ const urlInput = document.getElementById('urlInput');
 const fileInputGroup = document.getElementById('fileInputGroup');
 const urlInputGroup = document.getElementById('urlInputGroup');
 // Show/hide appropriate input based on selected source and apply dynamic switch
+function updateSourceInputsVisibility() {
+  const value = sourceSelect ? sourceSelect.value : 'webcam';
+  if (value === 'file') {
+    if (fileInputGroup) { fileInputGroup.style.display = 'block'; }
+    if (urlInputGroup) { urlInputGroup.style.display = 'none'; }
+  } else if (value === 'url') {
+    if (fileInputGroup) { fileInputGroup.style.display = 'none'; }
+    if (urlInputGroup) { urlInputGroup.style.display = 'block'; }
+  } else {
+    if (fileInputGroup) { fileInputGroup.style.display = 'none'; }
+    if (urlInputGroup) { urlInputGroup.style.display = 'none'; }
+  }
+}
+
+// Initialize input visibility immediately on page load
+updateSourceInputsVisibility();
+
 if (sourceSelect) {
   sourceSelect.addEventListener('change', async () => {
-    const value = sourceSelect.value;
-    if (value === 'file') {
-      if (fileInputGroup) { fileInputGroup.style.display = 'block'; }
-      if (urlInputGroup) { urlInputGroup.style.display = 'none'; }
-    } else if (value === 'url') {
-      if (fileInputGroup) { fileInputGroup.style.display = 'none'; }
-      if (urlInputGroup) { urlInputGroup.style.display = 'block'; }
-    } else {
-      if (fileInputGroup) { fileInputGroup.style.display = 'none'; }
-      if (urlInputGroup) { urlInputGroup.style.display = 'none'; }
-    }
+    updateSourceInputsVisibility();
     if (isStreamingActive()) {
       await applyDynamicSourceChange();
     }
@@ -220,6 +228,148 @@ const zoomSlider = document.getElementById('zoomSlider');
 const zoomValText = document.getElementById('zoomValText');
 const btnSharePreLink = document.getElementById('btnSharePreLink');
 
+// Focus controls
+const focusModeSelect = document.getElementById('focusModeSelect');
+const focusDistanceGroup = document.getElementById('focusDistanceGroup');
+const focusDistanceSlider = document.getElementById('focusDistanceSlider');
+const focusDistanceValText = document.getElementById('focusDistanceValText');
+const focusControlBar = document.getElementById('focusControlBar');
+const focusSlider = document.getElementById('focusSlider');
+const focusValText = document.getElementById('focusValText');
+const btnHudFocus = document.getElementById('btnHudFocus');
+
+// Battery monitoring
+const vitalSenderBatteryItem = document.getElementById('vitalSenderBatteryItem');
+const vitalSenderBattery = document.getElementById('vitalSenderBattery');
+
+let latestBatteryData = null;
+const batteryMonitor = new BatteryMonitor((batteryData) => {
+  latestBatteryData = batteryData;
+  if (vitalSenderBatteryItem && vitalSenderBattery && batteryData && batteryData.level !== null) {
+    vitalSenderBatteryItem.style.display = 'flex';
+    const chargingIcon = batteryData.charging ? ' ⚡' : '';
+    vitalSenderBattery.textContent = `${batteryData.level}%${chargingIcon}`;
+    if (batteryData.level <= 20) {
+      vitalSenderBattery.style.color = '#ef4444';
+    } else if (batteryData.level <= 50) {
+      vitalSenderBattery.style.color = '#eab308';
+    } else {
+      vitalSenderBattery.style.color = '#22c55e';
+    }
+  }
+  broadcastBatteryToViewers();
+});
+
+function broadcastBatteryToViewers() {
+  if (socket && socket.connected && currentRoomId && latestBatteryData) {
+    socket.emit('sender:battery', latestBatteryData);
+  }
+}
+
+function updateFocusUI() {
+  const currentMode = focusModeSelect ? focusModeSelect.value : 'continuous';
+  const isLocked = currentMode === 'manual' || currentMode === 'single-shot';
+  if (btnHudFocus) {
+    btnHudFocus.style.color = isLocked ? 'var(--accent-cyan)' : 'inherit';
+    btnHudFocus.title = isLocked
+      ? 'Focus is Constant / Locked (Click for Auto-Focus)'
+      : 'Focus is Auto (Click to Lock Constant Focus)';
+  }
+  const caps = cameraManager.getCapabilities();
+  const hasDistance = Boolean(caps && caps.focusDistance);
+  if (focusDistanceGroup) {
+    focusDistanceGroup.style.display = (currentMode === 'manual' && hasDistance) ? 'block' : 'none';
+  }
+  if (focusControlBar) {
+    if (currentMode === 'manual' && hasDistance) {
+      focusControlBar.classList.add('active');
+    } else {
+      focusControlBar.classList.remove('active');
+    }
+  }
+}
+
+async function applyCurrentFocusSettings() {
+  if (!cameraManager || !cameraManager.currentStream) return;
+  const mode = focusModeSelect ? focusModeSelect.value : 'continuous';
+  const ok = await cameraManager.applyFocusMode(mode);
+  if (ok) {
+    logDiagnostic(`[Camera] Focus mode applied: ${mode}`, 'INFO');
+  }
+  if (mode === 'manual' && focusDistanceSlider) {
+    const dist = parseFloat(focusDistanceSlider.value);
+    if (!isNaN(dist)) {
+      await cameraManager.applyFocusDistance(dist);
+    }
+  }
+}
+
+if (focusModeSelect) {
+  focusModeSelect.addEventListener('change', async () => {
+    updateFocusUI();
+    await applyCurrentFocusSettings();
+  });
+}
+
+if (focusDistanceSlider) {
+  focusDistanceSlider.addEventListener('input', async () => {
+    const val = parseFloat(focusDistanceSlider.value);
+    if (focusDistanceValText) {
+      focusDistanceValText.textContent = `${val.toFixed(2)}m`;
+    }
+    if (focusSlider) {
+      focusSlider.value = val;
+    }
+    if (focusValText) {
+      focusValText.textContent = `${val.toFixed(2)}m`;
+    }
+    await cameraManager.applyFocusDistance(val);
+  });
+}
+
+if (focusSlider) {
+  focusSlider.addEventListener('input', async () => {
+    const val = parseFloat(focusSlider.value);
+    if (focusValText) {
+      focusValText.textContent = `${val.toFixed(2)}m`;
+    }
+    if (focusDistanceSlider) {
+      focusDistanceSlider.value = val;
+    }
+    if (focusDistanceValText) {
+      focusDistanceValText.textContent = `${val.toFixed(2)}m`;
+    }
+    await cameraManager.applyFocusDistance(val);
+  });
+}
+
+if (btnHudFocus) {
+  btnHudFocus.addEventListener('click', async () => {
+    const currentMode = focusModeSelect ? focusModeSelect.value : 'continuous';
+    const newMode = (currentMode === 'continuous') ? 'manual' : 'continuous';
+    if (focusModeSelect) {
+      focusModeSelect.value = newMode;
+    }
+    updateFocusUI();
+    const ok = await cameraManager.applyFocusMode(newMode);
+    if (ok) {
+      logDiagnostic(`[HUD] Focus mode toggled to ${newMode === 'manual' ? 'Constant / Locked' : 'Continuous Auto-Focus'}.`, 'INFO');
+    }
+  });
+}
+
+if (localVideo) {
+  localVideo.addEventListener('click', async () => {
+    if (!isStreamingActive()) return;
+    const ok = await cameraManager.applyFocusMode('single-shot');
+    if (ok) {
+      if (focusModeSelect) focusModeSelect.value = 'single-shot';
+      updateFocusUI();
+      logDiagnostic('[Camera] Focus locked via tap on preview.', 'INFO');
+    }
+  });
+}
+
 if (btnHudFacing) {
   btnHudFacing.addEventListener('click', () => {
     btnToggleFacing.click();
@@ -333,6 +483,8 @@ function updateHardwareCapabilitiesUI() {
   if (!caps) {
     if (btnHudTorch) btnHudTorch.style.display = 'none';
     if (zoomControlBar) zoomControlBar.classList.remove('active');
+    if (focusControlBar) focusControlBar.classList.remove('active');
+    if (focusDistanceGroup) focusDistanceGroup.style.display = 'none';
     return;
   }
   if (btnHudTorch) {
@@ -348,6 +500,23 @@ function updateHardwareCapabilitiesUI() {
   } else if (zoomControlBar) {
     zoomControlBar.classList.remove('active');
   }
+
+  if (caps.focusDistance) {
+    const min = caps.focusDistance.min !== undefined ? caps.focusDistance.min : 0;
+    const max = caps.focusDistance.max !== undefined ? caps.focusDistance.max : 1;
+    const step = caps.focusDistance.step !== undefined ? caps.focusDistance.step : 0.05;
+    if (focusDistanceSlider) {
+      focusDistanceSlider.min = min;
+      focusDistanceSlider.max = max;
+      focusDistanceSlider.step = step;
+    }
+    if (focusSlider) {
+      focusSlider.min = min;
+      focusSlider.max = max;
+      focusSlider.step = step;
+    }
+  }
+  updateFocusUI();
 }
 
 if (btnSharePreLink) {
@@ -622,6 +791,9 @@ async function applyDynamicSourceChange() {
       }
     }
 
+    await applyCurrentFocusSettings();
+    updateHardwareCapabilitiesUI();
+
     updateVitals({
       fps: actualFps,
       resolution: (actualWidth && actualHeight) ? `${actualWidth} × ${actualHeight}` : null
@@ -762,6 +934,7 @@ if (viewerPeers.size > 0) {
       logDiagnostic('Camera capture started.', 'INFO');
     }
 
+    await applyCurrentFocusSettings();
     updateHardwareCapabilitiesUI();
     wakeLockController.request().catch(() => {});
 
@@ -825,6 +998,7 @@ if (viewerPeers.size > 0) {
     }
 
     logDiagnostic(`Joined room "${roomId}" as ${role} [mode: ${response.mediaMode}].`);
+    broadcastBatteryToViewers();
 
     // Display Share QR Code for Viewer
     const viewerUrl = `${window.location.origin}/viewer?room=${encodeURIComponent(roomId)}`;
@@ -1261,6 +1435,7 @@ function setupSocketListeners() {
 
   socket.on('peer:joined', async (data) => {
     const joinedId = data.peerId;
+    broadcastBatteryToViewers();
     logDiagnostic(`[ROOM] Viewer joined (${joinedId}) [mode: ${data.mediaMode || currentMediaMode}].`, 'INFO');
     if (currentMediaMode === 'tunnel-relay') {
       updateStatus('live', 'Live (zrok Tunnel Relay)');

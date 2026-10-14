@@ -92,6 +92,10 @@
                 <circle cx="12" cy="12" r="3" fill="currentColor"/>
               </svg>
             </button>
+            <div id="hudBatteryPill" class="hud-pill" style="display: none;" title="Sender Device Battery">
+              <span id="hudBatteryIcon">🔋</span>
+              <span id="hudBatteryText">--%</span>
+            </div>
             <button type="button" id="btnHudAudio" class="hud-btn" title="Toggle Audio Playback">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
@@ -148,6 +152,10 @@
           <div class="vital-item">
             <span class="vital-label">Latency</span>
             <span class="vital-value" id="vitalLatency">--</span>
+          </div>
+          <div class="vital-item" id="vitalBatteryItem" style="display: none;">
+            <span class="vital-label">Battery</span>
+            <span class="vital-value" id="vitalBattery">--</span>
           </div>
         </div>
       </section>

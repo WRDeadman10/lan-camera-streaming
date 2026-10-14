@@ -580,6 +580,38 @@ function createViewerPeer(iceServers) {
     }
   });
 
+  socket.on('sender:battery', (data) => {
+    if (!data || typeof data.level !== 'number') return;
+    const vitalBatteryItem = document.getElementById('vitalBatteryItem');
+    const vitalBattery = document.getElementById('vitalBattery');
+    const hudBatteryPill = document.getElementById('hudBatteryPill');
+    const hudBatteryIcon = document.getElementById('hudBatteryIcon');
+    const hudBatteryText = document.getElementById('hudBatteryText');
+
+    const chargingIcon = data.charging ? ' ⚡' : '';
+    let color = '#22c55e'; // green
+    if (data.level <= 20) {
+      color = '#ef4444'; // red
+    } else if (data.level <= 50) {
+      color = '#eab308'; // yellow
+    }
+
+    if (vitalBatteryItem && vitalBattery) {
+      vitalBatteryItem.style.display = 'flex';
+      vitalBattery.textContent = `${data.level}%${chargingIcon}`;
+      vitalBattery.style.color = color;
+    }
+
+    if (hudBatteryPill && hudBatteryText) {
+      hudBatteryPill.style.display = 'inline-flex';
+      hudBatteryText.textContent = `${data.level}%${chargingIcon}`;
+      hudBatteryText.style.color = color;
+      if (hudBatteryIcon) {
+        hudBatteryIcon.textContent = data.charging ? '⚡' : (data.level <= 20 ? '🪫' : '🔋');
+      }
+    }
+  });
+
   socket.on('peer:left', () => {
     logDiagnostic('[ROOM] Sender left the room.', 'INFO');
     updateStatus('waiting', 'Sender Left. Waiting...');
@@ -589,6 +621,10 @@ function createViewerPeer(iceServers) {
     if (remoteVideo.srcObject) {
       remoteVideo.srcObject = null;
     }
+    const vitalBatteryItem = document.getElementById('vitalBatteryItem');
+    const hudBatteryPill = document.getElementById('hudBatteryPill');
+    if (vitalBatteryItem) vitalBatteryItem.style.display = 'none';
+    if (hudBatteryPill) hudBatteryPill.style.display = 'none';
     showOverlay('Sender Disconnected', 'Sender left the room. Waiting for reconnection...', true);
     stopStatsPolling();
     if (webrtcPeer) {
@@ -751,6 +787,10 @@ function leaveRoom() {
   if (remoteVideo.srcObject) {
     remoteVideo.srcObject = null;
   }
+  const vitalBatteryItem = document.getElementById('vitalBatteryItem');
+  const hudBatteryPill = document.getElementById('hudBatteryPill');
+  if (vitalBatteryItem) vitalBatteryItem.style.display = 'none';
+  if (hudBatteryPill) hudBatteryPill.style.display = 'none';
   if (remoteCanvas && canvasContext) {
     canvasContext.clearRect(0, 0, remoteCanvas.width, remoteCanvas.height);
   }

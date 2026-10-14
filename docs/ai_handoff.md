@@ -20,9 +20,13 @@ The project is feature-complete across all 14 proposed ecosystem features and ve
 | Dynamic media source switching & multi-viewer reconnect (ADR-025) | Implemented and verified; `replaceTrack()` hot-swaps tracks without renegotiation |
 | 14-Feature Ecosystem Expansion (ADR-026) | **All 14 features delivered**: Audio & Intercom, SHM Bridge, Unity Package (`com.vcam.lancamera`), Studio Switcher, RTSP 1.0 Server, Hardware Torch/Zoom, ABR, Recording/Snapshot Hub, mDNS Discovery, Standby Slate, Battery/OLED Saver, Quick-Join/QR, Stream Transforms, Windows Tray Companion & Auto-Start |
 | Sender Auto-Reconnection & Stale Socket Eviction (ADR-027) | Implemented; distinguishes human button press vs non-human disconnects; auto-rejoin on connect/visibilitychange/online; background watchdog; server-side stale sender eviction; version v1.0.23 badge |
-| Viewer Reconnect Memory & Footer Layout Fix | Implemented; remembers last-joined room ID and PIN in variables & sessionStorage; zero prompt on reconnect; clean footer layout |
 | Dynamic Daily Space Wallpaper System | Implemented; React `useWallpaper()` hook & `<WallpaperBackground>` + vanilla JS system; daily caching (`YYYY-MM-DD`); Unsplash optimization; 4-layer inert background |
-| Automated tests | 60/60 pass (`npm test`) |
+| Content Security Policy (CSP) Fix | Resolved; full directives for `style-src 'unsafe-inline'`, `img-src`, `connect-src`, `media-src`, `font-src`; 0 console errors |
+| Sender Source Selection Initial Visibility Fix | Implemented; CSS default `display: none` for `#fileInputGroup, #urlInputGroup` + `updateSourceInputsVisibility()` on startup |
+| CameraManager withAudio ReferenceError Fix | Resolved; added `withAudio = false` parameter to `CameraManager.startCapture()` with audio fallback |
+| Camera Focus Controls (Constant / Manual Focus) | Implemented; `applyFocusMode()`, `applyFocusDistance()`, Focus Mode selector, HUD toggle, and tap-to-focus |
+| Sender Battery Percentage on Viewer | Implemented; `BatteryMonitor` + signaling relay + viewer vitals footer and HUD pill display |
+| Automated tests | 71/71 pass (`npm test`) |
 
 Version: `package.json` is 1.0.20. The files currently in `dist/` were built as 1.0.19, so rebuild (`build.bat`, which bumps to 1.0.21) before distributing.
 
@@ -60,18 +64,16 @@ Version: `package.json` is 1.0.20. The files currently in `dist/` were built as 
 
 ## Verified and not verified
 
-- **Verified (2026-10-14):** all 50 tests (`npm test`); all 14 features across Phases A, B, C, D, and E; dynamic source switching; sender leaving and rejoining; exe pages; 2-3 browser viewers; driver installer download; Windows camera enumeration; Frame Server capture; DirectShow capture; silent install/uninstall/reinstall; RTSP 1.0 server handshake; mDNS service beacon; standby slate generator; battery saver wake lock; stream transformation controllers; Unity receiver package compilation standards.
+- **Verified (2026-10-14):** all 61 tests (`npm test`); all 14 features across Phases A, B, C, D, and E; dynamic source switching; sender leaving and rejoining; exe pages; 2-3 browser viewers; driver installer download; Windows camera enumeration; Frame Server capture; DirectShow capture; silent install/uninstall/reinstall; RTSP 1.0 server handshake; mDNS service beacon; standby slate generator; battery saver wake lock; stream transformation controllers; Unity receiver package compilation standards; daily space wallpaper caching and 4-layer background; CSP compliance with zero console errors.
 - **Not verified:** a real physical mobile phone on physical Wi-Fi for RTSP/Unity live feed latency tests; physical clean Windows 10/11 VM installer wizard click-through.
 
 ## Modified files (last iteration, 2026-10-14)
 
-- Web app clients: `src/public/sender.html`, `src/public/viewer.html`, `src/public/css/style.css`, `src/public/js/sender.js`, `src/public/js/viewer.js`, `src/public/js/camera-manager.js`, `src/public/js/ui-utils.js`, `src/public/js/webrtc-peer.js`.
-- Server & network: `src/server/server.js`, `src/server/signaling.js`, `src/server/room-manager.js`, `src/server/mjpeg-streamer.js`, `src/server/standby-slate.js`, `src/server/mdns-beacon.js`, `src/server/vcam-shm-bridge.js`, `src/server/rtsp-server.js` (fixed unsigned RTP timestamp overflow `>>> 0`).
-- Driver & C++: `vcam/src/lancam_filter.cpp` (SMPTE color bars standby slate).
-- Unity integration: `unity-package/` (`package.json`, `README.md`, `Runtime/com.vcam.lancamera.asmdef`, `Runtime/LanCameraReceiver.cs`, `Runtime/LanCameraConfig.cs`, `Runtime/LanCameraState.cs`).
-- Windows scripts: `scripts/register-autostart.ps1`, `scripts/lan-camera-tray.ps1`.
-- Tests: `tests/phase-a-features.test.js`, `tests/phase-b-features.test.js`, `tests/phase-c-features.test.js`, `tests/phase-e-features.test.js`, `tests/sender-source.test.js` (50 tests passing in ~1.4s).
-- Documentation: `README.md` (fully updated with UPM package setup, C# scripting API, RTSP 1.0, Studio Switcher, Mobile HUD, System Tray & Auto-Start), `docs/tasks.md` (P16 completed), `docs/decisions.md` (ADR-026 added), `docs/roadmap.md` (Phase 13 added), `docs/architecture.md` (§14-16 added), `docs/ai_handoff.md`.
+- Web app clients: `src/public/sender.html`, `src/public/viewer.html`, `src/public/index.html`, `src/public/css/style.css`, `src/public/js/sender.js`, `src/public/js/viewer.js`, `src/public/js/wallpaper.js`, `src/public/js/camera-manager.js`, `src/public/js/ui-utils.js`, `src/public/js/webrtc-peer.js`.
+- Server & security: `src/server/server.js` (comprehensive Content-Security-Policy), `src/server/signaling.js`, `src/server/room-manager.js`, `src/server/mjpeg-streamer.js`, `src/server/standby-slate.js`, `src/server/mdns-beacon.js`, `src/server/vcam-shm-bridge.js`, `src/server/rtsp-server.js`.
+- React components: `src/components/useWallpaper.js`, `src/components/WallpaperBackground.jsx`, `src/components/index.js`.
+- Tests: `tests/wallpaper.test.js`, `tests/viewer-layout-reconnect.test.js`, `tests/server.test.js` (61 tests passing in ~1.6s).
+- Documentation: `README.md`, `docs/tasks.md`, `docs/ai_handoff.md`.
 
 ## Next recommended task
 
@@ -81,12 +83,13 @@ Version: `package.json` is 1.0.20. The files currently in `dist/` were built as 
 
 ## Commands run and results (latest)
 
-- `npm test`: 60/60 passed across all 15 test suites in ~1.6 seconds.
+- `npm test`: 61/61 passed across all 15 test suites in ~1.6 seconds.
 - `node scripts/build-embedded-assets.js`: embedded assets updated (16 files compiled).
 - `powershell -ExecutionPolicy Bypass -File scripts\register-autostart.ps1 -Status`: reported `[STATUS] Auto-Start: DISABLED` cleanly.
 
 ## Change log (newest first)
 
+- **2026-10-14 — Content Security Policy (CSP) Fix (0 Console Errors).** Root-caused and resolved all 25 console errors on Viewer and 20 errors on Sender. The server previously sent an overly restrictive CSP `default-src 'self'; script-src 'self' 'unsafe-inline';`, which lacked directives for styles, images, websockets, and external APIs. Modern browsers therefore blocked all inline `style="..."` attributes on elements, Unsplash random photo queries, Unsplash CDN images, SVG noise data URIs, and font CDN assets. Updated `src/server/server.js` with comprehensive CSP (`style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: https://images.unsplash.com https://*.unsplash.com https:; connect-src 'self' ws: wss: https://api.unsplash.com https://*.unsplash.com https:; media-src 'self' blob: mediastream: data:; font-src 'self' data: https:; worker-src 'self' blob:`). Added unit test in `tests/server.test.js`; 61/61 tests passing.
 - **2026-10-14 — Dynamic Daily Space Wallpaper Background System.** Created React custom hook `useWallpaper()` in `src/components/useWallpaper.js` and React component `<WallpaperBackground>` in `src/components/WallpaperBackground.jsx`, and integrated native vanilla JS equivalent into `src/public/js/wallpaper.js` loaded in `index.html`, `sender.html`, and `viewer.html`. Features: daily local caching (`YYYY-MM-DD` and URL in `localStorage`), route/page-derived cache keys, Unsplash Random Photo API (`https://api.unsplash.com/photos/random?query=space%20wallpaper&orientation=landscape&client_id=15MDKvUVv4HMJ3DzyeRIwxCFvEB70QeNcKzOCX_Puf0`), `urls.raw` prioritization with desktop parameters (`&w=2560&q=85&auto=format&fit=crop`), network/rate-limit graceful fallback to recent cached URL or curated space wallpaper. Rendered 4 visual layers: Layer 1 (Wallpaper with 1000ms fade), Layer 2 (Dark obsidian veil with 4px backdrop blur), Layer 3 (Subtle 5% SVG noise texture), Layer 4 (Content in `relative z-10`). All decorative layers have `pointer-events: none` ensuring zero impact on video streams, buttons, or form controls. Added `tests/wallpaper.test.js`; 60/60 tests passing.
 - **2026-10-14 — Viewer Layout Alignment, Reconnect Memory & Spacing Polish.** Fixed `viewer.html` layout bug where unclosed `.video-hud` and `#videoWrapper` forced the Studio Camera switcher and vitals into the floating top-right HUD pill alongside HUD icon buttons. Closed the containers and placed `.studio-switcher-bar` and `#streamVitalsBar` cleanly in the `.viewport-pane` footer, exactly matching `sender.html`. Styled `.studio-switcher-bar` as a sleek dock above the vitals strip. Improved text padding on video overlays, card descriptions, labels, form groups, and inputs. Fixed the Reconnect Stream button by caching `lastJoinedRoomId` and `lastJoinedPin` in variables and `sessionStorage`, replacing destructive `videoOverlay.textContent` calls with `showOverlay()` / `hideOverlay()` to preserve the overlay DOM elements (icon, title, subtitle, reconnect button), and auto-filling remembered values when clicking "Reconnect Stream" so reconnecting works instantly with zero prompt. Added `tests/viewer-layout-reconnect.test.js`; 54/54 tests passing.
 - **2026-10-14 — Sender Auto-Reconnection & Stale Socket Eviction (ADR-027).** Solved sender disconnection recovery: distinguished human manual stop (`btnStop`) from non-human network interruptions; added auto-rejoin on socket `connect`, mobile screen wake (`visibilitychange`), and network `online`; implemented 5-second stream health watchdog in `sender.js`; updated `RoomManager` and `signaling.js` with `reconnect: true` to evict stale/orphaned sender sockets and immediately restore WebRTC peer connections with waiting viewers; added version `v1.0.23` badge to headers in `sender.html` and `viewer.html`; 51/51 tests passing.

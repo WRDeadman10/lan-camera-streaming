@@ -33,7 +33,14 @@ export class CameraManager {
     }
   }
 
-  async startCapture({ deviceId, facingMode, width = 'max', height = 'max', frameRate = 30 } = {}) {
+  async startCapture({
+    deviceId,
+    facingMode,
+    width = 'max',
+    height = 'max',
+    frameRate = 30,
+    withAudio = false
+  } = {}) {
     if (!CameraManager.isSecureContext()) {
       throw new Error('Camera access requires a secure context (HTTPS or localhost).');
     }
@@ -73,15 +80,34 @@ export class CameraManager {
       videoConstraints.facingMode = { ideal: this.facingMode };
     }
 
+    const audioConstraint = typeof withAudio === 'object' && withAudio !== null
+      ? withAudio
+      : Boolean(withAudio);
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: videoConstraints,
-        audio: withAudio
+        audio: audioConstraint
       });
 
       this.currentStream = stream;
       return stream;
     } catch (err) {
+      if (audioConstraint) {
+        // If capture failed with audio requested, attempt video-only fallback
+        try {
+          const videoOnlyStream = await navigator.mediaDevices.getUserMedia({
+            video: videoConstraints,
+            audio: false
+          });
+          console.warn('Audio capture failed; falling back to video-only capture stream.', err);
+          this.currentStream = videoOnlyStream;
+          return videoOnlyStream;
+        } catch (_videoErr) {
+          // Both failed, proceed to standard error categorization
+        }
+      }
+
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
         throw new Error('Camera permission denied by user or system policy.');
       }
@@ -95,7 +121,7 @@ export class CameraManager {
         // Fallback to minimal constraints if resolution is overconstrained
         const fallbackStream = await navigator.mediaDevices.getUserMedia({
           video: true,
-          audio: withAudio
+          audio: audioConstraint
         });
         this.currentStream = fallbackStream;
         return fallbackStream;
@@ -151,6 +177,56 @@ export class CameraManager {
       }
     }
     return false;
+  }
+
+  async applyFocusMode(mode) {
+    if (!this.currentStream) {
+      return false;
+    }
+    const track = this.currentStream.getVideoTracks()[0];
+    if (track && typeof track.applyConstraints === 'function') {
+      try {
+        await track.applyConstraints({ advanced: [{ focusMode: mode }] });
+        return true;
+      } catch (err) {
+        console.warn(`Failed to apply focusMode '${mode}':`, err);
+        return false;
+      }
+    }
+    return false;
+  }
+
+  async applyFocusDistance(distance) {
+    if (!this.currentStream) {
+      return false;
+    }
+    const track = this.currentStream.getVideoTracks()[0];
+    if (track && typeof track.applyConstraints === 'function') {
+      try {
+        await track.applyConstraints({
+          advanced: [{
+            focusMode: 'manual',
+            focusDistance: Number(distance)
+          }]
+        });
+        return true;
+      } catch (err) {
+        console.warn(`Failed to apply focusDistance '${distance}':`, err);
+        return false;
+      }
+    }
+    return false;
+  }
+
+  getFocusCapabilities() {
+    const caps = this.getCapabilities();
+    if (!caps) {
+      return null;
+    }
+    return {
+      focusMode: Array.isArray(caps.focusMode) ? caps.focusMode : null,
+      focusDistance: caps.focusDistance && typeof caps.focusDistance === 'object' ? caps.focusDistance : null
+    };
   }
 
   toggleFacingMode() {

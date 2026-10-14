@@ -515,6 +515,11 @@ video {
   margin-bottom: 0;
 }
 
+#fileInputGroup,
+#urlInputGroup {
+  display: none;
+}
+
 .form-row {
   display: flex;
   gap: 8px;
@@ -1692,6 +1697,52 @@ input:focus, select:focus {
   width: 110px;
   accent-color: var(--accent-cyan);
   cursor: pointer;
+}
+
+/* Hardware Focus Control Floating Bar */
+.focus-control-bar {
+  display: none;
+  position: absolute;
+  bottom: 48px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: rgba(14, 22, 36, 0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 5px 12px;
+  border-radius: var(--radius-pill);
+  align-items: center;
+  gap: 8px;
+  z-index: 10;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+.focus-control-bar.active {
+  display: flex;
+}
+.focus-slider {
+  width: 110px;
+  accent-color: var(--accent-cyan);
+  cursor: pointer;
+}
+
+/* HUD Pill (e.g. Sender Battery Pill in Fullscreen HUD) */
+.hud-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background-color: rgba(14, 22, 36, 0.8);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  user-select: none;
 }
 
 /* Share Link Button */

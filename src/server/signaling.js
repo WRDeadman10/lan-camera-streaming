@@ -383,6 +383,24 @@ export function setupSignaling(httpServer, config, logger) {
       });
     });
 
+    // Sender battery status broadcast to viewers
+    socket.on('sender:battery', (payload) => {
+      const membership = roomManager.getMembership(socket.id);
+      if (!membership || membership.role !== 'sender') {
+        return;
+      }
+      const room = roomManager.getRoom(membership.roomId);
+      if (room && payload) {
+        const batteryData = {
+          level: typeof payload.level === 'number' ? Math.round(payload.level) : null,
+          charging: Boolean(payload.charging)
+        };
+        for (const viewerId of room.viewerSocketIds) {
+          io.to(viewerId).emit('sender:battery', batteryData);
+        }
+      }
+    });
+
     // Leave room
     socket.on('room:leave', () => {
       const leaveResult = roomManager.leave(socket.id);
