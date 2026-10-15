@@ -30,6 +30,8 @@ let tunnelBytesReceived = 0;
 const accessPinInput = document.getElementById('accessPin');
 const roomIdInput = document.getElementById('roomId');
 const mediaModeSelect = document.getElementById('mediaMode');
+const qualityPrioritySelect = document.getElementById('qualityPriority');
+const QualityPriorityStorageKey = 'lancam_quality_priority';
 const btnJoin = document.getElementById('btnJoin');
 const btnLeave = document.getElementById('btnLeave');
 const btnFullscreen = document.getElementById('btnFullscreen');
@@ -87,6 +89,33 @@ function setSessionLastRoom(roomId, pin) {
       sessionStorage.setItem('lancam_last_pin', pin);
     }
   } catch (err) {}
+}
+
+function sendQualityPriority() {
+  if (!socket || !socket.connected || !qualityPrioritySelect) {
+    return;
+  }
+  socket.emit('viewer:quality-priority', { mode: qualityPrioritySelect.value });
+  logDiagnostic(`[QUALITY] Requested constant ${qualityPrioritySelect.value === 'both' ? 'FPS and resolution' : qualityPrioritySelect.value === 'fps' ? 'FPS' : 'resolution'} from the sender.`, 'INFO');
+}
+
+if (qualityPrioritySelect) {
+  try {
+    const savedPriority = localStorage.getItem(QualityPriorityStorageKey);
+    if (savedPriority === 'fps' || savedPriority === 'resolution' || savedPriority === 'both') {
+      qualityPrioritySelect.value = savedPriority;
+    }
+  } catch (err) {
+    // Storage unavailable (private mode); keep the default.
+  }
+  qualityPrioritySelect.addEventListener('change', () => {
+    try {
+      localStorage.setItem(QualityPriorityStorageKey, qualityPrioritySelect.value);
+    } catch (err) {
+      // Non-fatal: the choice still applies to this session.
+    }
+    sendQualityPriority();
+  });
 }
 
 function showOverlay(title, subtitle, showReconnect = false) {
@@ -322,6 +351,7 @@ async function joinRoom() {
     activeViewerPin = pin;
     btnLeave.disabled = false;
     logDiagnostic(`Joined room "${roomId}" successfully [mode: ${response.mediaMode}].`);
+    sendQualityPriority();
 
     if (appWorkspace) {
       appWorkspace.classList.add('streaming-active');
@@ -664,6 +694,7 @@ function createViewerPeer(iceServers) {
       socket.emit('room:join', { roomId: currentRoomId, role: 'viewer', pin: activeViewerPin, mediaMode: currentMediaMode }, (response) => {
         if (response && response.success) {
           logDiagnostic(`[AutoReconnect] Viewer rejoined room "${currentRoomId}" successfully.`, 'INFO');
+          sendQualityPriority();
           if (response.hasPeer) {
             updateStatus('connecting', 'Sender present. Awaiting offer...');
           } else {

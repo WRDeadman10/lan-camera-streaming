@@ -8,6 +8,10 @@ import { showError, clearError, showInfo, clearInfo, updateStatus, logDiagnostic
 import { CameraManager } from './camera-manager.js';
 import { WebRtcPeer } from './webrtc-peer.js';
 import { BatteryMonitor } from './battery-monitor.js';
+import { AbrLevel, createAbrState, getAbrLimits, stepAbr } from './abr-policy.js';
+import { getRecommendedBitrateHints, isQualityMode, readVideoBitrateParams } from './sdp-bitrate.js';
+import { classifyEncoder } from './encoder-info.js';
+import { formatSenderStats } from './sender-stats.js';
 
 const cameraManager = new CameraManager();
 let socket = null;
@@ -35,6 +39,228 @@ let watchdogInterval = null;
 let activeRoomId = null;
 let activePin = null;
 let isStudioSender = false;
+
+// Per-viewer choice of what stays constant: 'fps' (default), 'resolution' or 'both'. Bitrate ceilings live in sdp-bitrate.js.
+const DefaultQualityMode = 'fps';
+const viewerQualityPriority = new Map();
+const viewerAbrState = new Map();
+
+// Declared here (not with the other DOM lookups) because the encoder logic below runs at module load.
+const encoderPreferenceSelect = document.getElementById('encoderPreference');
+const screenContentHintSelect = document.getElementById('screenContentHint');
+
+// Hardware H.264: offered first only when Chrome reports a GPU encoder (MediaCapabilities powerEfficient). If a software H.264
+// encoder is detected later we fall back to VP8 and remember it. Viewers that cannot decode H.264 still get VP8 in the same offer.
+const HardwareH264StorageKey = 'lancam_hw_h264_unsupported';
+const HardwareH264LatchTtlMs = 24 * 60 * 60 * 1000;
+const encoderEvaluatedViewers = new Set();
+let hardwareH264Unsupported = false;
+let hardwareH264Available = false;
+try {
+  // The flag stores the time it was set and expires, so a driver update or a misjudgement cannot disable the GPU path forever.
+  const latchedAt = Number(localStorage.getItem(HardwareH264StorageKey));
+  hardwareH264Unsupported = Number.isFinite(latchedAt) && latchedAt > 1 && (Date.now() - latchedAt) < HardwareH264LatchTtlMs;
+  if (!hardwareH264Unsupported) {
+    localStorage.removeItem(HardwareH264StorageKey);
+  }
+} catch (err) {
+  console.warn('Hardware encoder flag storage is unavailable; the check repeats each session:', err);
+}
+
+function setHardwareH264Unsupported(value) {
+  hardwareH264Unsupported = value;
+  try {
+    if (value) {
+      localStorage.setItem(HardwareH264StorageKey, String(Date.now()));
+    } else {
+      localStorage.removeItem(HardwareH264StorageKey);
+    }
+  } catch (err) {
+    console.warn('Could not store the hardware encoder flag; it applies to this session only:', err);
+  }
+}
+
+// Chrome reports hardware encode per H.264 profile: on an RTX 3060 the constrained-baseline id (42e01f) says false while
+// baseline (42001f), main (4d001f) and high (640028) say true, and the GPU encoder is then really used. So ask for several.
+const HardwareH264ProbeProfiles = ['42001f', '4d001f', '640028'];
+
+async function detectHardwareH264() {
+  try {
+    if (!navigator.mediaCapabilities || typeof navigator.mediaCapabilities.encodingInfo !== 'function') {
+      hardwareH264Available = false;
+    } else {
+      const results = await Promise.all(HardwareH264ProbeProfiles.map(async (profileLevelId) => {
+        try {
+          const info = await navigator.mediaCapabilities.encodingInfo({
+            type: 'webrtc',
+            video: {
+              contentType: `video/H264;level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=${profileLevelId}`,
+              width: 1920,
+              height: 1080,
+              bitrate: getRecommendedBitrateHints(DefaultQualityMode).encodingMaxBitrateBps,
+              framerate: 30
+            }
+          });
+          return Boolean(info.supported && info.powerEfficient);
+        } catch (err) {
+          return false;
+        }
+      }));
+      hardwareH264Available = results.some(Boolean);
+    }
+  } catch (err) {
+    hardwareH264Available = false;
+  }
+  logDiagnostic(hardwareH264Available
+    ? '[ENCODER] GPU H.264 encoder detected. Auto mode will use it (VP8 stays as fallback for viewers that cannot decode H.264).'
+    : '[ENCODER] No GPU H.264 encoder detected by this browser. Auto mode keeps VP8 (software).', 'INFO');
+  return hardwareH264Available;
+}
+
+const hardwareH264Detection = detectHardwareH264();
+
+function getEncoderChoice() {
+  return encoderPreferenceSelect ? encoderPreferenceSelect.value : 'auto';
+}
+
+function getPreferredVideoMime() {
+  const choice = getEncoderChoice();
+  if (choice === 'h264') {
+    return 'video/H264';
+  }
+  if (choice === 'vp8' || hardwareH264Unsupported || !hardwareH264Available) {
+    return null;
+  }
+  return 'video/H264';
+}
+
+// Runs once per viewer connection, after the first frames were encoded and Chrome reports which encoder it picked.
+function evaluateVideoEncoder(viewerId, stats) {
+  if (encoderEvaluatedViewers.has(viewerId) || !stats.encoderImplementation || !stats.framesEncoded) {
+    return;
+  }
+  // Chrome only exposes the encoder name to capturing pages; when it does, use it to double-check the GPU claim.
+  const forced = getEncoderChoice() === 'h264';
+  encoderEvaluatedViewers.add(viewerId);
+
+  if (stats.codec !== 'H264') {
+    logDiagnostic(`[ENCODER:${viewerId}] Using ${stats.codec || 'unknown codec'} (${stats.encoderImplementation}); this viewer or browser did not take H.264.`, 'INFO');
+    return;
+  }
+  const encoderClass = classifyEncoder(stats);
+  if (encoderClass === 'hardware') {
+    logDiagnostic(`[ENCODER:${viewerId}] Hardware H.264 active (${stats.encoderImplementation}). GPU is doing the encoding.`, 'INFO');
+    return;
+  }
+  if (encoderClass === 'unknown') {
+    logDiagnostic(`[ENCODER:${viewerId}] H.264 encoder "${stats.encoderImplementation}" is not recognised; keeping H.264 and not switching to VP8.`, 'WARN');
+    return;
+  }
+
+  if (forced) {
+    logDiagnostic(`[ENCODER:${viewerId}] H.264 is running on a software encoder (${stats.encoderImplementation}); kept because H.264 is forced.`, 'WARN');
+    return;
+  }
+  logDiagnostic(`[ENCODER:${viewerId}] H.264 fell back to a software encoder (${stats.encoderImplementation}). Switching to VP8 and remembering this for this machine.`, 'WARN');
+  setHardwareH264Unsupported(true);
+  setTimeout(() => {
+    if (viewerPeers.has(viewerId)) {
+      initiateWebRtcConnectionForViewer(viewerId);
+    }
+  }, 0);
+}
+
+if (encoderPreferenceSelect) {
+  encoderPreferenceSelect.addEventListener('change', () => {
+    if (encoderPreferenceSelect.value === 'auto') {
+      setHardwareH264Unsupported(false);
+    }
+    logDiagnostic(`[ENCODER] Video encoder preference set to "${encoderPreferenceSelect.value}". Applies to the next viewer connection.`, 'INFO');
+  });
+}
+
+// Chrome treats a screen track marked 'motion' like camera video, which allows automatic resolution scaling; 'detail'
+// keeps screen-share handling. The hint belongs to the track (shared by all viewers), so it follows the source, not a viewer.
+function getContentHintForCurrentSource() {
+  const wantsDetail = screenContentHintSelect && screenContentHintSelect.value === 'detail';
+  return sourceSelect && sourceSelect.value === 'screen' && wantsDetail ? 'detail' : 'motion';
+}
+
+function describeQualityMode(mode) {
+  if (mode === 'both') {
+    return 'FPS and resolution';
+  }
+  return mode === 'resolution' ? 'resolution' : 'FPS';
+}
+
+async function applyViewerQualityPriority(viewerId, peer, { armGrace = false } = {}) {
+  try {
+    const mode = viewerQualityPriority.get(viewerId) || DefaultQualityMode;
+    const applied = await peer.applyQualityPriority(mode, { armGrace });
+    const ceilingMbps = getRecommendedBitrateHints(mode).encodingMaxBitrateBps / 1000000;
+    if (applied) {
+      const hold = peer.isInGracePeriod() ? ', holding resolution while the bandwidth estimate ramps up' : '';
+      logDiagnostic(`[MEDIA:${viewerId}] Quality priority "${mode}" applied (${applied}, up to ${ceilingMbps} Mbps${hold}).`, 'INFO');
+    } else {
+      logDiagnostic(`[MEDIA:${viewerId}] Could not apply quality priority "${mode}" yet; will retry once connected.`, 'WARN');
+    }
+  } catch (err) {
+    logDiagnostic(`[MEDIA:${viewerId}] Applying the quality priority failed: ${err.message}`, 'WARN');
+  }
+}
+
+// Viewers that chose a mode before this sender joined are listed in the join acknowledgement.
+function seedViewerQuality(response) {
+  const modes = response && response.viewerQuality;
+  if (!modes || typeof modes !== 'object') {
+    return;
+  }
+  for (const [viewerId, mode] of Object.entries(modes)) {
+    if (isQualityMode(mode)) {
+      viewerQualityPriority.set(viewerId, mode);
+    }
+  }
+}
+
+function getAbrState(viewerId) {
+  if (!viewerAbrState.has(viewerId)) {
+    viewerAbrState.set(viewerId, createAbrState());
+  }
+  return viewerAbrState.get(viewerId);
+}
+
+function logSenderStats(tag, viewerId, peer, stats) {
+  const pairInfo = `${stats.localCandidateType || '?'} (${stats.localAddress || '?'}) <-> ${stats.remoteCandidateType || '?'} (${stats.remoteAddress || '?'})`;
+  const line = formatSenderStats({
+    stats,
+    diagnostics: peer.getSenderDiagnostics(),
+    mode: viewerQualityPriority.get(viewerId) || DefaultQualityMode,
+    abrLevel: getAbrState(viewerId).level,
+    pairInfo
+  });
+  logDiagnostic(`[${tag}:${viewerId}] ${line}`, 'INFO');
+}
+
+// Snapshots shortly after connecting show whether the resolution drop happens during the bandwidth ramp-up.
+function scheduleDiagnosticSnapshots(viewerId, peer) {
+  for (const delayMs of [3000, 8000, 15000]) {
+    setTimeout(async () => {
+      if (viewerPeers.get(viewerId) !== peer) {
+        return;
+      }
+      const stats = await peer.getStatsReport();
+      if (!stats) {
+        return;
+      }
+      logSenderStats(`DIAG +${delayMs / 1000}s`, viewerId, peer, stats);
+      if (delayMs === 3000 && peer.peerConnection && peer.peerConnection.remoteDescription) {
+        const hints = readVideoBitrateParams(peer.peerConnection.remoteDescription.sdp)
+          .map((entry) => `${entry.codec}#${entry.payload} ${JSON.stringify(entry.params)}`);
+        logDiagnostic(`[SDP:${viewerId}] Bitrate hints in the viewer answer: ${hints.length > 0 ? hints.join('; ') : 'none'}`, 'INFO');
+      }
+    }, delayMs);
+  }
+}
 
 const MjpegMaxWidth = 1280;
 const MjpegMaxFrameBytes = 900000;
@@ -849,6 +1075,9 @@ async function applyDynamicSourceChange() {
 
     const newVideoTrack = newStream.getVideoTracks()[0];
     const newAudioTrack = newStream.getAudioTracks()[0];
+    if (newVideoTrack) {
+      newVideoTrack.contentHint = getContentHintForCurrentSource();
+    }
 
     // Replace tracks on all active viewer peer connections
     if (viewerPeers.size > 0 && newVideoTrack) {
@@ -861,6 +1090,7 @@ async function applyDynamicSourceChange() {
             try {
               await videoSender.replaceTrack(newVideoTrack);
               logDiagnostic(`[MEDIA:${viewerId}] Successfully replaced video track with new source.`, 'INFO');
+              await applyViewerQualityPriority(viewerId, peer, { armGrace: true });
             } catch (err) {
               logDiagnostic(`[MEDIA:${viewerId}] Failed to replace video track: ${err.message}`, 'WARN');
             }
@@ -986,7 +1216,10 @@ if (viewerPeers.size > 0) {
       if (videoTrack) {
         const videoSender = senders.find(s => s.track && s.track.kind === 'video');
         if (videoSender) {
-          videoSender.replaceTrack(videoTrack).catch(err => {
+          videoTrack.contentHint = getContentHintForCurrentSource();
+          videoSender.replaceTrack(videoTrack).then(() => {
+            return applyViewerQualityPriority(viewerId, peer, { armGrace: true });
+          }).catch(err => {
             logDiagnostic(`[MEDIA:${viewerId}] Failed to replace video track: ${err.message}`, 'WARN');
           });
         } else {
@@ -1086,6 +1319,7 @@ if (viewerPeers.size > 0) {
     }
 
     hasJoinedRoom = true;
+    seedViewerQuality(response);
     logDiagnostic(`Joined room "${roomId}" as ${role} [mode: ${response.mediaMode}].`);
     broadcastBatteryToViewers();
 
@@ -1225,6 +1459,7 @@ async function rejoinRoomAsSender() {
     }
 
     hasJoinedRoom = true;
+    seedViewerQuality(response);
     logDiagnostic(`[AutoReconnect] Successfully rejoined room "${activeRoomId}" as ${role} [mode: ${response.mediaMode}].`, 'INFO');
     showInfo('✓ Stream reconnected to room');
     setTimeout(clearInfo, 2500);
@@ -1406,6 +1641,8 @@ function createSenderPeerForViewer(viewerId, iceServers) {
       logDiagnostic(`[P2P:${viewerId}] Peer connection state: ${state}`, 'INFO');
       updateStreamingStatus();
       if (state === 'connected') {
+        applyViewerQualityPriority(viewerId, peer, { armGrace: true });
+        scheduleDiagnosticSnapshots(viewerId, peer);
         startStatsPolling();
       } else if (state === 'failed') {
         logDiagnostic(`[P2P:${viewerId}] Connection failed.`, 'ERROR');
@@ -1438,19 +1675,16 @@ function createSenderPeerForViewer(viewerId, iceServers) {
       cameraManager.currentStream.getTracks().forEach((track) => {
         logDiagnostic(`[MEDIA:${viewerId}] Added local ${track.kind} track to peer (${track.label || 'camera'}).`, 'INFO');
         const sender = peer.addTrack(track, cameraManager.currentStream);
-        if (track.kind === 'video' && sender && sender.getParameters) {
-          try {
-            const params = sender.getParameters();
-            if (!params.encodings) { params.encodings = [{}]; }
-            params.encodings[0].scaleResolutionDownBy = 1.0; // keep original resolution
-            params.encodings[0].maxBitrate = 5000000; // optional higher bitrate
-            // Prefer maintaining resolution over framerate when bandwidth is limited
-            params.degradationPreference = 'maintain-resolution';
-            sender.setParameters(params);
-            logDiagnostic(`[MEDIA:${viewerId}] Enforced full‑resolution on video sender.`, 'INFO');
-          } catch (e) {
-            logDiagnostic(`[MEDIA:${viewerId}] Failed to set full‑resolution parameters: ${e.message}`, 'WARN');
+        if (track.kind === 'video') {
+          track.contentHint = getContentHintForCurrentSource();
+        }
+        if (track.kind === 'video' && sender) {
+          encoderEvaluatedViewers.delete(viewerId);
+          const preferredMime = getPreferredVideoMime();
+          if (preferredMime && peer.preferVideoCodec(preferredMime)) {
+            logDiagnostic(`[ENCODER:${viewerId}] Offering ${preferredMime.replace('video/', '')} first (GPU encode when available), other codecs kept as fallback.`, 'INFO');
           }
+          applyViewerQualityPriority(viewerId, peer);
         }
       });
     }
@@ -1472,6 +1706,7 @@ function createSenderPeerForViewer(viewerId, iceServers) {
 async function initiateWebRtcConnectionForViewer(viewerId) {
   logDiagnostic(`[SDP] Creating WebRTC offer for viewer ${viewerId}...`, 'INFO');
   const iceServers = await fetchIceServers();
+  await hardwareH264Detection;
   const peer = createSenderPeerForViewer(viewerId, iceServers);
 
   try {
@@ -1619,22 +1854,44 @@ function setupSocketListeners() {
     }
   });
 
+  socket.on('viewer:quality-priority', async (data) => {
+    if (!data || !data.viewerId || !isQualityMode(data.mode)) {
+      return;
+    }
+    if (viewerQualityPriority.get(data.viewerId) === data.mode) {
+      return;
+    }
+    viewerQualityPriority.set(data.viewerId, data.mode);
+    logDiagnostic(`[ROOM] Viewer ${data.viewerId} requested constant ${describeQualityMode(data.mode)}.`, 'INFO');
+    const peer = viewerPeers.get(data.viewerId);
+    if (peer) {
+      await applyViewerQualityPriority(data.viewerId, peer, { armGrace: true });
+    }
+  });
+
   socket.on('peer:left', (data) => {
     const leftId = data ? data.peerId : null;
     logDiagnostic(`[ROOM] Viewer ${leftId || ''} left the room.`, 'INFO');
 
-    if (leftId && viewerPeers.has(leftId)) {
-      const peer = viewerPeers.get(leftId);
-      peer.close();
-      viewerPeers.delete(leftId);
+    if (leftId) {
+      if (viewerPeers.has(leftId)) {
+        viewerPeers.get(leftId).close();
+        viewerPeers.delete(leftId);
+      }
       pendingCandidatesByViewer.delete(leftId);
-    } else if (!leftId) {
+      viewerQualityPriority.delete(leftId);
+      viewerAbrState.delete(leftId);
+      encoderEvaluatedViewers.delete(leftId);
+    } else {
       // Clear all
       for (const peer of viewerPeers.values()) {
         peer.close();
       }
       viewerPeers.clear();
       pendingCandidatesByViewer.clear();
+      viewerQualityPriority.clear();
+      viewerAbrState.clear();
+      encoderEvaluatedViewers.clear();
     }
 
     updateStreamingStatus();
@@ -1696,21 +1953,21 @@ function startStatsPolling() {
           if (stats.rtt && !primaryRtt) {
             primaryRtt = stats.rtt;
           }
+          evaluateVideoEncoder(vId, stats);
           if (stats.rtt) {
-            const pairInfo = `${stats.localCandidateType || '?'} (${stats.localAddress || '?'}) <-> ${stats.remoteCandidateType || '?'} (${stats.remoteAddress || '?'})`;
-            logDiagnostic(`[STATS:${vId}] Pair: ${pairInfo} | RTT: ${stats.rtt} | FPS: ${stats.framesPerSecond || 'active'}`, 'INFO');
+            logSenderStats('STATS', vId, peer, stats);
           }
 
-          // Adaptive Bitrate (ABR) Controller
-          if (stats.rawRttMs !== null) {
-            if (stats.rawRttMs > 350) {
-              await peer.applyBitrateLimit(600000, 2.0);
-              logDiagnostic(`[ABR:${vId}] High RTT (${stats.rawRttMs}ms): Throttled to 600 kbps (0.5x scale)`, 'WARN');
-            } else if (stats.rawRttMs > 150) {
-              await peer.applyBitrateLimit(1500000, 1.5);
-              logDiagnostic(`[ABR:${vId}] Moderate RTT (${stats.rawRttMs}ms): Scaled to 1.5 Mbps (0.66x scale)`, 'INFO');
-            } else if (stats.rawRttMs < 80) {
-              await peer.applyBitrateLimit(4000000, 1.0);
+          // Adaptive bitrate: a level change needs two consecutive RTT samples; only 'fps' viewers get a smaller picture
+          const abrStep = stepAbr(getAbrState(vId), stats.rawRttMs);
+          if (abrStep.changed) {
+            const viewerMode = viewerQualityPriority.get(vId) || DefaultQualityMode;
+            const ceilingBps = peer.qualityCeilingBps || getRecommendedBitrateHints(viewerMode).encodingMaxBitrateBps;
+            const limits = getAbrLimits(abrStep.level, viewerMode, ceilingBps);
+            await peer.applyBitrateLimit(limits.maxBitrateBps, limits.scaleResolutionDownBy);
+            logDiagnostic(`[ABR:${vId}] RTT ${stats.rawRttMs} ms: ${abrStep.previousLevel} -> ${abrStep.level} (max ${(limits.maxBitrateBps / 1000000).toFixed(1)} Mbps, scale ${limits.scaleResolutionDownBy}).`, abrStep.level === AbrLevel.Ok ? 'INFO' : 'WARN');
+            if (abrStep.level === AbrLevel.Ok) {
+              await applyViewerQualityPriority(vId, peer, { armGrace: true });
             }
           }
         }
@@ -1952,6 +2209,9 @@ function stopSession() {
   }
   viewerPeers.clear();
   pendingCandidatesByViewer.clear();
+  viewerQualityPriority.clear();
+  viewerAbrState.clear();
+  encoderEvaluatedViewers.clear();
 
   cleanupSourceVideoElement();
   cameraManager.stopCapture();
@@ -1997,12 +2257,35 @@ if (btnStop) {
 
 // Sharing a screen means switching to another window, which hides this tab. A full rejoin would tear down healthy
 // viewer connections (and renegotiate every viewer), so only re-offer to viewers whose connection actually died.
+const repairsInFlight = new Set();
+const DisconnectedRepairDelayMs = 5000;
+
+async function repairViewerPeer(viewerId, state) {
+  if (repairsInFlight.has(viewerId)) {
+    return;
+  }
+  repairsInFlight.add(viewerId);
+  try {
+    logDiagnostic(`[Lifecycle] Viewer ${viewerId} connection is ${state}; re-offering to this viewer only.`, 'INFO');
+    await initiateWebRtcConnectionForViewer(viewerId);
+  } finally {
+    repairsInFlight.delete(viewerId);
+  }
+}
+
+// 'disconnected' often heals by itself within seconds after a tab switch, so it is only repaired if it persists.
 async function repairUnhealthyViewerPeers() {
   for (const [viewerId, peer] of Array.from(viewerPeers.entries())) {
     const state = peer.peerConnection ? peer.peerConnection.connectionState : 'closed';
-    if (state === 'failed' || state === 'disconnected' || state === 'closed') {
-      logDiagnostic(`[Lifecycle] Viewer ${viewerId} connection is ${state}; re-offering to this viewer only.`, 'INFO');
-      await initiateWebRtcConnectionForViewer(viewerId);
+    if (state === 'failed' || state === 'closed') {
+      await repairViewerPeer(viewerId, state);
+    } else if (state === 'disconnected') {
+      setTimeout(() => {
+        const current = viewerPeers.get(viewerId);
+        if (current === peer && current.peerConnection && current.peerConnection.connectionState !== 'connected') {
+          repairViewerPeer(viewerId, 'disconnected');
+        }
+      }, DisconnectedRepairDelayMs);
     }
   }
 }

@@ -44,6 +44,8 @@ export function updateStatus(state, text) {
   }
 }
 
+const DiagnosticsLogMaxChars = 120000;
+
 export function logDiagnostic(message, level = 'INFO') {
   const logEl = document.getElementById('diagnosticsLog');
   const now = new Date();
@@ -51,7 +53,8 @@ export function logDiagnostic(message, level = 'INFO') {
   const prefix = `[${timestamp}] [${level}]`;
   const entry = `${prefix} ${message}\n`;
   if (logEl) {
-    logEl.textContent = entry + logEl.textContent;
+    // Newest first; trimming the oldest text keeps every call cheap (the whole log is rewritten on each call).
+    logEl.textContent = (entry + logEl.textContent).slice(0, DiagnosticsLogMaxChars);
   }
   if (level === 'ERROR') {
     console.error(`${prefix} ${message}`);

@@ -285,6 +285,23 @@
                   </select>
                 </div>
 
+                <div class="form-group">
+                  <label for="screenContentHint">Screen Share Content Type</label>
+                  <select id="screenContentHint">
+                    <option value="motion" selected>Motion — treat the screen like video (default)</option>
+                    <option value="detail">Detail — screen-share handling (A/B test for resolution drops)</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="encoderPreference">Video Encoder</label>
+                  <select id="encoderPreference">
+                    <option value="auto" selected>Auto — GPU H.264 when detected, otherwise VP8</option>
+                    <option value="h264">H.264 — force (try it even if no GPU is detected)</option>
+                    <option value="vp8">VP8 — software encoder only</option>
+                  </select>
+                </div>
+
                 <div id="tunnelQuotaWarning" class="alert alert-warning" style="display: none;">
                   Fallback relay routes video frames through the server tunnel and consumes quota.
                 </div>

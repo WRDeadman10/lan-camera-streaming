@@ -462,4 +462,129 @@ test('Evicted sender is notified with sender:evicted so it can stop instead of l
   }
 });
 
+test('viewer:quality-priority is relayed to the sender with the viewer id and rejects invalid modes', async () => {
+  const config = loadConfig({ PORT: '3008', ACCESS_PIN: 'testpass' });
+  const logger = new Logger('error');
+  const { httpServer } = createServer(config, logger);
+  setupSignaling(httpServer, config, logger);
 
+  await new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+  const address = httpServer.address();
+  const socketUrl = `http://127.0.0.1:${address.port}`;
+
+  const sender = Client(socketUrl);
+  const viewer = Client(socketUrl);
+
+  try {
+    await Promise.all([
+      new Promise((res) => sender.on('connect', res)),
+      new Promise((res) => viewer.on('connect', res))
+    ]);
+
+    await new Promise((res) => sender.emit('room:join', { roomId: 'quality-room', role: 'sender', pin: 'testpass' }, res));
+    await new Promise((res) => viewer.emit('room:join', { roomId: 'quality-room', role: 'viewer', pin: 'testpass' }, res));
+
+    const received = [];
+    sender.on('viewer:quality-priority', (evt) => received.push(evt));
+
+    viewer.emit('viewer:quality-priority', { mode: 'both' });
+    viewer.emit('viewer:quality-priority', { mode: 'turbo' });
+    viewer.emit('viewer:quality-priority', {});
+    // A sender must not be able to set a viewer's preference on itself
+    sender.emit('viewer:quality-priority', { mode: 'fps' });
+
+    await new Promise((res) => setTimeout(res, 150));
+
+    assert.equal(received.length, 1, 'only the valid viewer request is relayed');
+    assert.equal(received[0].mode, 'both');
+    assert.equal(received[0].viewerId, viewer.id);
+  } finally {
+    sender.disconnect();
+    viewer.disconnect();
+    await new Promise((resolve) => httpServer.close(resolve));
+  }
+});
+
+test('a viewer mode chosen before the sender joins is delivered in the sender join acknowledgement', async () => {
+  const config = loadConfig({ PORT: '3009', ACCESS_PIN: 'testpass' });
+  const logger = new Logger('error');
+  const { httpServer } = createServer(config, logger);
+  setupSignaling(httpServer, config, logger);
+
+  await new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+  const socketUrl = `http://127.0.0.1:${httpServer.address().port}`;
+
+  const viewerA = Client(socketUrl);
+  const viewerB = Client(socketUrl);
+  const sender = Client(socketUrl);
+
+  try {
+    await Promise.all([viewerA, viewerB, sender].map((client) => new Promise((res) => client.on('connect', res))));
+
+    await new Promise((res) => viewerA.emit('room:join', { roomId: 'seed-room', role: 'viewer', pin: 'testpass' }, res));
+    await new Promise((res) => viewerB.emit('room:join', { roomId: 'seed-room', role: 'viewer', pin: 'testpass' }, res));
+    viewerA.emit('viewer:quality-priority', { mode: 'both' });
+    viewerB.emit('viewer:quality-priority', { mode: 'resolution' });
+    await new Promise((res) => setTimeout(res, 100));
+
+    const senderJoin = await new Promise((res) => sender.emit('room:join', { roomId: 'seed-room', role: 'sender', pin: 'testpass' }, res));
+    assert.equal(senderJoin.success, true);
+    assert.deepEqual(senderJoin.viewerQuality, { [viewerA.id]: 'both', [viewerB.id]: 'resolution' });
+  } finally {
+    viewerA.disconnect();
+    viewerB.disconnect();
+    sender.disconnect();
+    await new Promise((resolve) => httpServer.close(resolve));
+  }
+});
+
+test('viewer quality events are de-duplicated, rate limited and forgotten when the viewer leaves', async () => {
+  const config = loadConfig({ PORT: '3010', ACCESS_PIN: 'testpass' });
+  const logger = new Logger('error');
+  const { httpServer } = createServer(config, logger);
+  setupSignaling(httpServer, config, logger);
+
+  await new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+  const socketUrl = `http://127.0.0.1:${httpServer.address().port}`;
+
+  const sender = Client(socketUrl);
+  const viewer = Client(socketUrl);
+  const sender2 = Client(socketUrl);
+
+  try {
+    await Promise.all([sender, viewer, sender2].map((client) => new Promise((res) => client.on('connect', res))));
+    await new Promise((res) => sender.emit('room:join', { roomId: 'limit-room', role: 'sender', pin: 'testpass' }, res));
+    await new Promise((res) => viewer.emit('room:join', { roomId: 'limit-room', role: 'viewer', pin: 'testpass' }, res));
+
+    const received = [];
+    sender.on('viewer:quality-priority', (evt) => received.push(evt.mode));
+
+    // 50 identical events: only the first is relayed
+    for (let i = 0; i < 50; i += 1) {
+      viewer.emit('viewer:quality-priority', { mode: 'resolution' });
+    }
+    await new Promise((res) => setTimeout(res, 150));
+    assert.deepEqual(received, ['resolution']);
+
+    // Flooding alternating modes: the per-socket limit (5 events / 5 s) caps what reaches the sender
+    for (let i = 0; i < 40; i += 1) {
+      viewer.emit('viewer:quality-priority', { mode: i % 2 === 0 ? 'fps' : 'both' });
+    }
+    await new Promise((res) => setTimeout(res, 150));
+    assert.ok(received.length <= 5, `relayed ${received.length} events, expected at most 5`);
+
+    // After leaving, a new sender must not be told about the departed viewer
+    viewer.emit('room:leave');
+    await new Promise((res) => setTimeout(res, 100));
+    sender.disconnect();
+    await new Promise((res) => setTimeout(res, 100));
+    const join = await new Promise((res) => sender2.emit('room:join', { roomId: 'limit-room', role: 'sender', pin: 'testpass' }, res));
+    assert.equal(join.success, true);
+    assert.equal(join.viewerQuality, undefined);
+  } finally {
+    sender.disconnect();
+    viewer.disconnect();
+    sender2.disconnect();
+    await new Promise((resolve) => httpServer.close(resolve));
+  }
+});

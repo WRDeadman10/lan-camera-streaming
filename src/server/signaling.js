@@ -22,6 +22,30 @@ export function setupSignaling(httpServer, config, logger) {
 
   const failedAttempts = new Map(); // socketId -> { count: number, blockedUntil: number }
 
+  // A viewer's chosen video priority is kept server-side so a sender that joins (or restarts) later still learns it
+  const QualityModes = new Set(['fps', 'resolution', 'both']);
+  const QualityEventLimit = 5;
+  const QualityEventWindowMs = 5000;
+  const viewerQualityModes = new Map(); // viewer socketId -> 'fps' | 'resolution' | 'both'
+  const qualityEventTimes = new Map(); // viewer socketId -> recent event timestamps
+
+  function allowQualityEvent(socketId) {
+    const now = Date.now();
+    const recent = (qualityEventTimes.get(socketId) || []).filter((time) => now - time < QualityEventWindowMs);
+    if (recent.length >= QualityEventLimit) {
+      qualityEventTimes.set(socketId, recent);
+      return false;
+    }
+    recent.push(now);
+    qualityEventTimes.set(socketId, recent);
+    return true;
+  }
+
+  function forgetViewerQuality(socketId) {
+    viewerQualityModes.delete(socketId);
+    qualityEventTimes.delete(socketId);
+  }
+
   // Tell the room's sender when MJPEG consumers appear or disappear so it uploads frames only on demand
   if (config.mjpegStreamer) {
     config.mjpegStreamer.onDemandChange = (roomId, active) => {
@@ -101,6 +125,18 @@ export function setupSignaling(httpServer, config, logger) {
 
         socket.join(roomId);
         logger.info(`Socket ${socket.id} joined room "${roomId}" as ${role} [mode: ${result.mediaMode}]`);
+
+        if (result.role === 'sender') {
+          const viewerQuality = {};
+          for (const viewerId of Array.isArray(result.peerSocketIds) ? result.peerSocketIds : []) {
+            if (viewerQualityModes.has(viewerId)) {
+              viewerQuality[viewerId] = viewerQualityModes.get(viewerId);
+            }
+          }
+          if (Object.keys(viewerQuality).length > 0) {
+            result.viewerQuality = viewerQuality;
+          }
+        }
 
         if (typeof callback === 'function') {
           callback(result);
@@ -385,6 +421,27 @@ export function setupSignaling(httpServer, config, logger) {
       });
     });
 
+    // A viewer chooses whether its video stays at constant FPS, constant resolution, or both; relay it to the sender
+    socket.on('viewer:quality-priority', (payload) => {
+      const membership = roomManager.getMembership(socket.id);
+      if (!membership || membership.role !== 'viewer') {
+        return;
+      }
+      const mode = payload && typeof payload.mode === 'string' ? payload.mode : '';
+      if (!QualityModes.has(mode) || !allowQualityEvent(socket.id)) {
+        return;
+      }
+      const previous = viewerQualityModes.get(socket.id);
+      viewerQualityModes.set(socket.id, mode);
+      if (previous === mode) {
+        return;
+      }
+      const room = roomManager.getRoom(membership.roomId);
+      if (room && room.senderSocketId) {
+        io.to(room.senderSocketId).emit('viewer:quality-priority', { viewerId: socket.id, mode });
+      }
+    });
+
     // Sender battery status broadcast to viewers
     socket.on('sender:battery', (payload) => {
       const membership = roomManager.getMembership(socket.id);
@@ -405,6 +462,7 @@ export function setupSignaling(httpServer, config, logger) {
 
     // Leave room
     socket.on('room:leave', () => {
+      forgetViewerQuality(socket.id);
       const leaveResult = roomManager.leave(socket.id);
       if (leaveResult) {
         socket.leave(leaveResult.roomId);
@@ -449,6 +507,7 @@ export function setupSignaling(httpServer, config, logger) {
     socket.on('disconnect', (reason) => {
       logger.debug(`Socket disconnected: ${socket.id} (${reason})`);
       failedAttempts.delete(socket.id);
+      forgetViewerQuality(socket.id);
       const leaveResult = roomManager.leave(socket.id);
       if (leaveResult) {
         socket.leave(leaveResult.roomId);

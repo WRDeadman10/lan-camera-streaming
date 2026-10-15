@@ -474,6 +474,37 @@ Users frequently need to broadcast desktop screens, application windows, or brow
 **Consequences:**
 Desktop and mobile senders can share any screen, window, or tab at 1:1 full fidelity or bandwidth-friendly 1080p/720p/480p resolutions with exact aspect ratio preservation. All downstream pipelines (WebRTC P2P, Mode B Tunnel Relay, HTTP MJPEG, and RTSP) seamlessly distribute the screen feed.
 
+## ADR-029: Per-viewer constant FPS / constant resolution priority
+
+**Status:** Accepted (2026-10-14)
+
+**Context:** Measured on a live screen share: 6-15 FPS at 1920x1080 (VP8, ~4 Mbps, no packet loss). The sender forced `degradationPreference = 'maintain-resolution'` and the ABR controller reset `maxBitrate` to 4 Mbps every 4 s, so the encoder dropped frames to protect resolution. Switching to frame-rate priority gave 30 FPS but a lower resolution.
+
+**Decision:**
+1. Each viewer chooses in Advanced Settings: `fps` (default, constant 30 FPS, resolution may drop), `resolution` (constant Full HD, FPS may drop) or `both` (best effort). The choice is stored in the viewer's localStorage and sent as `viewer:quality-priority`; the server validates it (viewers only, three allowed values) and relays it to the room's sender with the viewer id.
+2. The sender stores the mode per viewer and applies it to that viewer's peer connection only (`WebRtcPeer.applyQualityPriority`): `maintain-framerate`, `maintain-resolution`, or for `both` try `disabled` then fall back to `maintain-resolution`. It is re-applied once the peer is `connected` because `setParameters` can be rejected before negotiation, and ABR updates preserve it.
+3. Bitrate ceiling is 8 Mbps (`LanMaxBitrateBps`), 12 Mbps for `both`.
+4. Chrome 155 rejects `degradationPreference: 'disabled'` (TypeError), so no setting can force 1080p AND 30 FPS; `both` only succeeds when the sender CPU and the network have headroom. The sender STATS line reports `Limited by: none|cpu|bandwidth` and the encoder in use.
+
+**Consequences:** Two viewers can ask for different trade-offs at once. If `both` still misses 30 FPS and the sender reports `cpu`, the follow-up is hardware H.264 (below) or a smaller capture size.
+
+**Addendum - GPU H.264 with VP8 fallback (2026-10-14):**
+- Sender Advanced Settings has a Video Encoder select: Auto (default) / H.264 force / VP8.
+- Auto asks `navigator.mediaCapabilities.encodingInfo({type: 'webrtc', ...H264 1080p30})` once at load; only when `supported && powerEfficient` (Chrome's hardware-encode signal) does `WebRtcPeer.preferVideoCodec('video/H264')` put H.264 first in each viewer's offer. Every other codec stays in the offer, so a viewer that cannot decode H.264 negotiates VP8 (verified in Chrome 155 with a VP8-only receiver, 30 FPS).
+- Chrome hides `encoderImplementation` / `powerEfficientEncoder` from pages that are not capturing, so they are only a secondary check: if they are exposed and show a software H.264 encoder, the sender re-offers that viewer with VP8 and stores `lancam_hw_h264_unsupported` in localStorage (re-selecting Auto clears it). Forced H.264 skips this fallback.
+- Detection correction (RTX 3060, Chrome 155): `encodingInfo` with the constrained-baseline id `42e01f` reports `powerEfficient: false` even though Chrome really encodes H.264 on the GPU (`MediaFoundationVideoEncodeAccelerator (NVIDIA H.264 Encoder MFT)`, `powerEfficientEncoder: true`). Baseline `42001f` and high `640028` report `true`. The sender therefore asks for `42001f`, `4d001f` and `640028` and treats any `powerEfficient` as a GPU encoder. Verified: the sender page in real Chrome on the RTX 3060 PC logs `[ENCODER] GPU H.264 encoder detected`; headless / the Claude in-app browser (no GPU) correctly log "No GPU H.264 encoder detected" and stay on VP8.
+- The sender log line `[ENCODER] GPU H.264 encoder detected ...` or `No GPU H.264 encoder detected ...` shows what a given sender found.
+
+**Addendum 2 - measured package for Full HD at 30 FPS (2026-10-15):**
+- Findings (real Chrome 155, GPU H.264, loopback, demanding synthetic 1080p30 sources; investigation workflow `bwe-fps-investigation`):
+  - In Constant FPS mode (`maintain-framerate`) Chrome's quality scaler downscaled 1080p to 720p about 2.25 s after connect in 36 of 36 baseline runs, while the bandwidth estimate was 5-14 Mbps. `Limited by: bandwidth` is only the label libwebrtc uses for a quality-driven downscale, not proof of a low estimate. maxBitrate 12/20 Mbps, maxFramerate, scaleResolutionDownBy=1 and priority did not prevent it.
+  - Holding `maintain-resolution` for the first 6 s and then switching to `maintain-framerate` kept 1080p in 8 of 8 runs (4 s: 3/8, 8 s: 7/8); switching the preference clears Chrome's adaptation restrictions.
+  - Chrome reads `x-google-*-bitrate` for the sender's own stream only from the sender's REMOTE description, so the hints go into the viewer's answer before `setRemoteDescription`. Munging the sender's own offer has no effect. `x-google-min-bitrate` had no effect and `min > max` makes Chrome reject the answer, so only start and max are used.
+  - `'disabled'` is not a valid `degradationPreference`; Chrome 155 accepts `maintain-framerate-and-resolution`, which is the real "both".
+- Decision: ceilings 12 Mbps (fps, resolution) and 16 Mbps (both); answer hints start 10000/max 12000 kbps (fps, resolution) and start 12000/max 16000 kbps (both); 6 s resolution hold in Constant FPS mode, re-armed after every successful `replaceTrack`, viewer mode change and ABR restore; mode-aware ABR (two consecutive samples to change level, restore below 120 ms, only Constant FPS viewers scale resolution); the server stores one mode per viewer socket, rate-limits the event (5 per 5 s per socket), de-duplicates repeats and includes `viewerQuality` in the sender's join acknowledgement.
+- Validation of the production code (`WebRtcPeer`) on the RTX 3060 hardware encoder: 12 of 12 new-code runs (3 modes x 2 sources x 2 repeats, 20 s) held 1920x1080 at 29.9-30.1 FPS with no downscale; 4 of 4 runs reproducing the previous behaviour dropped to 1280x720 at 2.5 s.
+- Not proven: the user's real session (D3D12 encoder on this driver is disabled in the test profile, real `getDisplayMedia` capture on Windows 10 was not tested). Screen capture on Windows 10 can itself cap near 21 FPS (DXGI/GDI path); the sender STATS line now prints source fps next to sent fps to tell the two apart.
+
 ## Open decisions to revisit after the first working stream
 
 - Whether to code-sign the installer and executables (ADR-024).

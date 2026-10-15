@@ -233,6 +233,14 @@
                   <option value="tunnel-relay">Fallback — Video through zrok (uses zrok quota)</option>
                 </select>
               </div>
+              <div class="form-group">
+                <label for="qualityPriority">Quality Priority</label>
+                <select id="qualityPriority">
+                  <option value="fps" selected>Constant FPS — keep 30 FPS, resolution may drop</option>
+                  <option value="resolution">Constant Resolution — keep Full HD, FPS may drop</option>
+                  <option value="both">Both — Full HD + 30 FPS (best effort, needs a fast sender and network)</option>
+                </select>
+              </div>
             </div>
           </details>
 

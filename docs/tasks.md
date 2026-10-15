@@ -337,4 +337,13 @@ Decision: **ADR-025**.
   - Added `fullscreenchange` and `webkitfullscreenchange` listeners in `viewer.js` and `sender.js` to synchronize `.is-fullscreen` class on container and body.
   - Added double-click to toggle fullscreen on `videoWrapper` (viewer) and `videoContainer` (sender).
   - Added automated test in `tests/viewer-layout-reconnect.test.js` (92/92 passing tests, 1 skipped).
-
+- [x] Constant Full HD / 30 FPS work (ADR-029 addendum 2):
+  - [x] Viewer Advanced Settings > Quality Priority (Constant FPS / Constant Resolution / Both), relayed per viewer; server stores the mode and hands it to a sender that joins later.
+  - [x] Sender seeds the bandwidth estimate through the viewer's answer SDP (`src/public/js/sdp-bitrate.js`), raises the per-viewer ceiling to 12 Mbps (16 Mbps for Both), holds resolution for 6 s after connect / source switch in Constant FPS mode, and uses `maintain-framerate-and-resolution` for Both.
+  - [x] Mode-aware ABR with hysteresis (`src/public/js/abr-policy.js`); only Constant FPS viewers ever get a smaller picture.
+  - [x] Sender diagnostics line: sent vs source FPS, target bitrate, available bandwidth, limit reason and durations, resolution changes, content type, content hint, ABR level, grace state; snapshots at connect +3 s / +8 s / +15 s.
+  - [x] Hardware encoder detection recognises `D3D12VideoEncodeAccelerator`, unknown encoders never force VP8, the VP8 latch expires after 24 h.
+  - [x] Screen Share Content Type switch (Motion / Detail) for A/B testing on real screen capture.
+  - [ ] Verify on the real sender: 120 s per mode with a moving test page; read `src` fps vs `sent` fps in the `[STATS]` line to see whether Windows 10 screen capture itself caps at about 21 fps (then share a window or a tab instead of the whole screen).
+  - [ ] Decide the default Screen Share Content Type (Motion vs Detail) from those runs.
+  - [ ] Multi-viewer load test (2-3 viewers at 12-16 Mbps each) and real Wi-Fi start-bitrate tuning.
