@@ -9,7 +9,7 @@ echo.
 cd /d "%~dp0"
 
 :: 1. Bump the last digit of the version in package.json
-echo [1/3] Updating project version...
+echo [1/4] Updating project version...
 node scripts/bump-version.js
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Failed to update project version.
@@ -19,7 +19,7 @@ if %ERRORLEVEL% neq 0 (
 echo.
 
 :: 2. Build C++ DirectShow Virtual Camera Driver
-echo [2/3] Building C++ virtual camera driver + Inno Setup installer...
+echo [2/4] Building C++ virtual camera driver + Inno Setup installer...
 if exist "vcam\build.bat" (
     call "vcam\build.bat"
     if !ERRORLEVEL! neq 0 (
@@ -32,8 +32,22 @@ if exist "vcam\build.bat" (
 )
 echo.
 
-:: 3. Execute the standalone executable build
-echo [3/3] Building standalone executable (.exe)...
+:: 3. Build C++ Remote Desktop Control Helper
+echo [3/4] Building C++ remote desktop control helper + Inno Setup installer...
+if exist "remote-control-helper\build.bat" (
+    call "remote-control-helper\build.bat"
+    if !ERRORLEVEL! neq 0 (
+        echo [ERROR] Remote control helper build failed.
+        pause
+        exit /b !ERRORLEVEL!
+    )
+) else (
+    echo [SKIP] remote-control-helper\build.bat not found.
+)
+echo.
+
+:: 4. Execute the standalone executable build
+echo [4/4] Building standalone executable (.exe)...
 call npm run build:exe
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Build failed.
@@ -44,9 +58,10 @@ if %ERRORLEVEL% neq 0 (
 echo.
 echo ===================================================
 echo  BUILD SUCCEEDED!
-echo  Executable: dist\lan-camera-streaming.exe
-echo  Driver Setup: dist\lan-camera-setupv^<version^>.exe
-echo  Config:     dist\.env
+echo  Main App:      dist\lan-camera-streaming.exe
+echo  Virtual Camera: dist\lan-camera-setupv^<version^>.exe
+echo  Control Helper: dist\control-helper-setup.exe
+echo  Config:        dist\.env
 echo ===================================================
 echo.
 
