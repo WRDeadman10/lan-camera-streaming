@@ -372,13 +372,13 @@ Decision: **ADR-025**.
   - [x] Automated unit tests in `tests/remote-control-manager.test.js`.
 
 ### Phase 2: Native Windows Input Helper (C++ Submodule)
-- [ ] Configure `CMakeLists.txt` for MSVC / C++17 build in `remote-control-helper/`.
-- [ ] Implement loopback Winsock2 TCP/WebSocket server on `127.0.0.1:8765` with authentication handshake token.
-- [ ] Implement `SendInput` mouse movement (normalized 0.0-1.0 mapped to target screen bounds).
-- [ ] Implement `SendInput` mouse buttons (`left`, `right`, `middle`, `down`, `up`, `click`) and wheel.
-- [ ] Implement `SendInput` keyboard events (`code` to Windows virtual key / scan code, modifiers).
-- [ ] Implement held-input registry (`std::set<WORD>`) with safety release on disconnect, lease expiry, or emergency stop.
-- [ ] Native tests and build verification with MSVC CMake. Commit inside submodule first.
+- [x] Configure `CMakeLists.txt` for MSVC / C++17 build in `remote-control-helper/`.
+- [x] Implement loopback Winsock2 TCP/WebSocket server on `127.0.0.1:8765` with authentication handshake token.
+- [x] Implement `SendInput` mouse movement (normalized 0.0-1.0 mapped to target screen bounds).
+- [x] Implement `SendInput` mouse buttons (`left`, `right`, `middle`, `down`, `up`, `click`) and wheel.
+- [x] Implement `SendInput` keyboard events (`code` to Windows virtual key / scan code, modifiers).
+- [x] Implement held-input registry (`std::set<WORD>`) with safety release on disconnect, lease expiry, or emergency stop.
+- [x] Native tests and build verification with MSVC CMake. Commit inside submodule first.
 
 ### Phase 3: Signaling Protocol & Server Control Bridge
 - [ ] Extend Socket.IO signaling in `src/server/signaling.js` with control events (`control:request-lease`, `control:lease-granted`, `control:lease-rejected`, `control:revoke`, `control:release`, `control:input`).
