@@ -371,6 +371,31 @@
                   </div>
                 </div>
 
+                <!-- Local Remote Desktop Control Helper Status & Installer Card -->
+                <div id="controlHelperAlert" style="display: none; margin-top: 10px; padding: 10px; border-radius: var(--radius-sm); font-size: 0.8rem; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.3); color: var(--accent-amber);">
+                  <div style="display: flex; align-items: flex-start; gap: 8px;">
+                    <div style="flex: 1;">
+                      <strong id="controlHelperAlertTitle">Native Helper Required</strong>
+                      <p id="controlHelperAlertMsg" style="margin: 4px 0 8px 0; font-size: 0.76rem; color: var(--text-secondary); line-height: 1.4;">
+                        To allow remote mouse and keyboard control on this PC, the native control helper must be running on this computer.
+                      </p>
+                      <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                        <button type="button" id="btnLaunchControlHelper" class="btn btn-secondary btn-sm" style="font-size: 0.76rem; padding: 4px 10px;">
+                          🚀 Launch Helper
+                        </button>
+                        <a id="btnDownloadControlHelper" href="/download/control-helper-setup" class="btn btn-primary btn-sm" style="font-size: 0.76rem; padding: 4px 10px; text-decoration: none; display: inline-flex; align-items: center;" download>
+                          ⬇ Download Helper Setup
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div id="controlHelperRunningIndicator" style="display: none; align-items: center; gap: 6px; margin-top: 8px; font-size: 0.78rem; color: var(--accent-emerald);">
+                  <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-emerald);"></span>
+                  <span id="controlHelperRunningText">Control Helper active on this PC</span>
+                </div>
+
                 <div style="display: flex; gap: 8px; margin-top: 8px;">
                   <button type="button" id="btnOpenPasswordModal" class="btn btn-secondary btn-sm flex-1" style="font-size: 0.8rem; padding: 6px 10px;">
                     Permanent Password

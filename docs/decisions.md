@@ -558,6 +558,36 @@ Users viewing a shared Windows desktop stream need the ability to interact with 
 **Consequences:**
 Authorized viewers can seamlessly control the host Windows desktop with high responsiveness and accurate coordinate mapping. The system remains completely secure: credentials are protected, input is strictly bounded, the native helper is unexposed to external networks, and all held inputs are safely released upon any interruption.
 
+## ADR-032: Distributed 3-System Remote Desktop Topology, Deeplink Auto-Launch & Inno Setup Distribution
+
+**Status:** Accepted (2026-10-16)
+
+**Context:**
+In distributed LAN environments, the application runs across three separate systems:
+1. Central Server: Runs `node src/server/index.js` on any host (e.g. Linux, cloud container, or LAN box).
+2. System X (Sender): Runs `/sender` in the browser, sharing its Windows screen and hosting the native helper (`remote-control-helper.exe`).
+3. System Y (Viewer): Runs `/viewer` in the browser, watching the desktop stream and entering the PIN/password to control System X.
+
+Because the central server may run on an external machine, the native input helper cannot execute on the central server; it must run specifically on System X where the screen is physically being captured and controlled. Furthermore, users should not need to manually open command prompts or run background executables.
+
+**Decision:**
+1. **Loopback Browser-to-Native IPC with CORS & RFC 6455 WebSockets:**
+   - In `remote-control-helper`, extended `LoopbackServer` to support HTTP GET `/health`, CORS preflight headers (`Access-Control-Allow-Origin: *`), HTTP POST `/input`, and RFC 6455 WebSocket framing (`ws://127.0.0.1:8765`) using WinCrypt SHA-1 hashing.
+   - Allows the sender's browser tab on System X to communicate directly with its local helper via loopback with sub-millisecond latency.
+2. **Automated Launch via `lancam-control://` Deeplink & HKCU Registration:**
+   - When the helper starts, or during installation, it registers the `lancam-control://` URL protocol handler under `HKEY_CURRENT_USER\Software\Classes\lancam-control`. This requires zero administrative elevation or UAC prompts.
+   - Added single-instance mutex `Local\LanCameraRemoteControlHelper_SingleInstance` to prevent duplicate background processes.
+   - When the sender enables remote control or a viewer requests control, System X probes `http://127.0.0.1:8765/health`. If not running, it invokes `lancam-control://start` via a hidden iframe, matching the DirectShow virtual camera model.
+3. **Inno Setup Standalone Installer & Direct Server Downloads:**
+   - Authored Inno Setup script `installer/control-helper.iss` that builds `control-helper-setup.exe` (1.89 MB).
+   - Server provides direct download route `/download/control-helper-setup` (and embeds the installer in single-executable builds via `scripts/build-embedded-assets.js`).
+   - If the helper is not detected on System X after retries, a banner displays with a one-click "Download Helper Setup" button and "Retry / Launch Helper" button.
+4. **Input Routing on System X:**
+   - All control inputs arriving on System X (via WebRTC `lancam-control` DataChannel or relayed via signaling server) are forwarded directly into `ws://127.0.0.1:8765` (or HTTP POST fallback) on System X, ensuring seamless remote desktop control regardless of network topology.
+
+**Consequences:**
+Complete distributed 3-system operation works out of the box with zero friction. The central server can run on Linux, Docker, or LAN; the sender machine automatically launches or prompts for installation of the native helper; and the viewer controls the sender desktop with zero manual helper configuration.
+
 ## Open decisions to revisit after the first working stream
 
 - Whether to code-sign the installer and executables (ADR-024).

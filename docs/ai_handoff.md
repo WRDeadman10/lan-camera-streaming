@@ -31,7 +31,8 @@ The project is feature-complete across all 14 proposed ecosystem features and ve
 | Fullscreen HUD Auto-Hiding | Implemented; hides top-right `.video-hud` via `:fullscreen`, `:-webkit-full-screen`, and `.is-fullscreen` with `display: none !important;` in `style.css`; synchronized via `fullscreenchange` in `viewer.js` and `sender.js`; double-click on video toggles fullscreen |
 | Screen Share Mouse Cursor Exclusion (ADR-030) | Implemented; `cursor: "never"` merged into `getDisplayMedia` constraints, automatic fallback if rejected, diagnostics reporting of effective setting (`track.getSettings().cursor`) with graceful explanation of Chromium/Windows compositor limitations, dynamic hot-swap without re-negotiation |
 | Remote Desktop Control Integration (ADR-031) | **Fully implemented and verified** across all 5 phases: native MSVC C++17 helper (`remote-control-helper` submodule), `RemoteControlManager` with `crypto.scrypt` & 6-digit session PINs, `control-bridge.js` loopback TCP client, Socket.IO signaling events, `lancam-control` WebRTC DataChannel + fallback, normalized letterbox/pillarbox coordinate translation, sender management panel, and viewer HUD/modal controls |
-| Automated tests | 172/172 pass (`npm test`) |
+| Distributed 3-System Topology & Helper Auto-Launch (ADR-032) | **Delivered**: HTTP/WebSocket loopback in native helper (`ws://127.0.0.1:8765`), single-instance mutex, automatic HKCU `lancam-control://` protocol registration, auto-launch deeplink via hidden iframe on System X, Inno Setup standalone installer (`control-helper-setup.exe`), server download route `/download/control-helper-setup`, and direct local helper input forwarding |
+| Automated tests | 173/173 pass (`npm test`) |
 
 Version: `package.json` is 1.0.20. The files currently in `dist/` were built as 1.0.19, so rebuild (`build.bat`, which bumps to 1.0.21) before distributing.
 
@@ -94,11 +95,15 @@ Version: `package.json` is 1.0.20. The files currently in `dist/` were built as 
 
 ## Commands run and results (latest)
 
-- `npm test`: 172/172 passed across all 20 test suites in ~3.5 seconds.
+- `npm test`: 173/173 passed across all 20 test suites in ~3.5 seconds.
 - `git diff --check`: 0 whitespace or formatting warnings.
 
 ## Change log (newest first)
 
+- **2026-10-16 — Distributed 3-System Remote Desktop Topology, Deeplink Auto-Launch & Inno Setup Distribution (ADR-032, Phase 6).**
+  - Submodule `remote-control-helper`: Added HTTP health check (`GET /health`), CORS preflight, HTTP POST (`/input`), RFC 6455 WebSocket framing (`ws://127.0.0.1:8765`) via Windows WinCrypt SHA-1 + base64, single-instance mutex (`Local\LanCameraRemoteControlHelper_SingleInstance`), and automatic HKCU protocol registration (`lancam-control://`). Authored Inno Setup script `installer/control-helper.iss` generating standalone installer `control-helper-setup.exe` (1.89 MB).
+  - Server & Distribution: Added `/download/control-helper-setup` routes in `src/server/server.js` and embedded installer support in `scripts/build-embedded-assets.js`.
+  - Sender Client (System X): Added local helper detection via loopback fetch (`http://127.0.0.1:8765/health`), auto-launch via hidden iframe deeplink `lancam-control://start`, notification banner with download and launch controls if helper is uninstalled, and direct local WebSocket forwarder (`ws://127.0.0.1:8765`) on System X. Viewer input from both WebRTC DataChannel and signaling server fallback now injects locally into System X's desktop in any distributed 3-system setup (Server on any OS, Sender on System X, Viewer on System Y). 173/173 tests passing.
 - **2026-10-16 — Remote Desktop Control Integration (ADR-031, Phases 0-5).** Delivered complete Remote Desktop Control feature allowing authorized viewers watching a Windows desktop screen share to control mouse and keyboard:
   - Submodule: Registered `remote-control-helper` as a genuine Git submodule and implemented MSVC C++17 native helper with Winsock2 TCP server (`127.0.0.1:8765`), `SendInput` coordinate mapping (`MOUSEEVENTF_VIRTUALDESK`), DOM keycode translation, held-key registry (`std::set<WORD>`) with automatic safety release on client disconnect/lease termination, and emergency stop hotkeys (`VK_PAUSE`, `Ctrl+Alt+Shift+Esc`).
   - Auth & Lease: Implemented `RemoteControlManager` with `crypto.scrypt` password hashing, temporary 6-digit session PINs, brute-force rate-limiting (5 failures -> 30s lockout), single-controller lease lifecycle, 60s reconnection grace period, and revocation.

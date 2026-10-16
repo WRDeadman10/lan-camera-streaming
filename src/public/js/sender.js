@@ -320,6 +320,13 @@ const btnRegenControlPin = document.getElementById('btnRegenControlPin');
 const btnOpenPasswordModal = document.getElementById('btnOpenPasswordModal');
 const btnRevokeControl = document.getElementById('btnRevokeControl');
 
+// Control Helper DOM Elements
+const controlHelperAlert = document.getElementById('controlHelperAlert');
+const btnLaunchControlHelper = document.getElementById('btnLaunchControlHelper');
+const btnDownloadControlHelper = document.getElementById('btnDownloadControlHelper');
+const controlHelperRunningIndicator = document.getElementById('controlHelperRunningIndicator');
+const controlHelperRunningText = document.getElementById('controlHelperRunningText');
+
 const passwordModal = document.getElementById('passwordModal');
 const btnClosePasswordModal = document.getElementById('btnClosePasswordModal');
 const btnCancelPasswordModal = document.getElementById('btnCancelPasswordModal');
@@ -434,6 +441,169 @@ if (cameraResolutionSelect) {
   });
 }
 
+// Native Remote Desktop Control Helper Client (runs on System X)
+const HELPER_PORT = 8765;
+const HELPER_HEALTH_URL = `http://127.0.0.1:${HELPER_PORT}/health`;
+const HELPER_WS_URL = `ws://127.0.0.1:${HELPER_PORT}`;
+const HELPER_INPUT_URL = `http://127.0.0.1:${HELPER_PORT}/input`;
+
+let helperWs = null;
+let helperDetected = false;
+let helperCheckInProgress = false;
+
+function launchControlHelperDeeplink() {
+  let iframe = document.getElementById('lancam-control-frame');
+  if (!iframe) {
+    iframe = document.createElement('iframe');
+    iframe.id = 'lancam-control-frame';
+    iframe.style.display = 'none';
+    document.body.appendChild(iframe);
+  }
+  iframe.src = 'lancam-control://start';
+  logDiagnostic('[CONTROL-HELPER] Invoked lancam-control://start deeplink to launch local helper.', 'INFO');
+}
+
+function updateHelperUIState(isRunning) {
+  helperDetected = isRunning;
+  if (!controlToggle || !controlToggle.checked) {
+    if (controlHelperAlert) {
+      controlHelperAlert.style.display = 'none';
+    }
+    if (controlHelperRunningIndicator) {
+      controlHelperRunningIndicator.style.display = 'none';
+    }
+    return;
+  }
+
+  if (isRunning) {
+    if (controlHelperAlert) {
+      controlHelperAlert.style.display = 'none';
+    }
+    if (controlHelperRunningIndicator) {
+      controlHelperRunningIndicator.style.display = 'inline-flex';
+    }
+  } else {
+    if (controlHelperAlert) {
+      controlHelperAlert.style.display = 'block';
+    }
+    if (controlHelperRunningIndicator) {
+      controlHelperRunningIndicator.style.display = 'none';
+    }
+  }
+}
+
+async function checkControlHelperRunning() {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1200);
+    const res = await fetch(HELPER_HEALTH_URL, {
+      method: 'GET',
+      mode: 'cors',
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+    if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      return Boolean(data && data.status === 'ok');
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function connectHelperWebSocket() {
+  if (helperWs && (helperWs.readyState === WebSocket.OPEN || helperWs.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+  try {
+    helperWs = new WebSocket(HELPER_WS_URL);
+    helperWs.onopen = () => {
+      logDiagnostic('[CONTROL-HELPER] Connected to local helper via WebSocket.', 'INFO');
+      updateHelperUIState(true);
+    };
+    helperWs.onclose = () => {
+      helperWs = null;
+    };
+    helperWs.onerror = () => {
+      // Will fallback to HTTP POST if WebSocket connection drops
+    };
+  } catch (err) {
+    logDiagnostic(`[CONTROL-HELPER] WebSocket connection error: ${err.message}`, 'WARN');
+  }
+}
+
+async function probeControlHelper(autoLaunch = false) {
+  if (helperCheckInProgress) {
+    return;
+  }
+  helperCheckInProgress = true;
+
+  const isRunning = await checkControlHelperRunning();
+  if (isRunning) {
+    helperCheckInProgress = false;
+    updateHelperUIState(true);
+    connectHelperWebSocket();
+    return;
+  }
+
+  // Not running
+  if (autoLaunch) {
+    launchControlHelperDeeplink();
+    const pollIntervals = [1000, 1500, 2000];
+    let attempt = 0;
+    const pollNext = async () => {
+      const active = await checkControlHelperRunning();
+      if (active) {
+        helperCheckInProgress = false;
+        updateHelperUIState(true);
+        connectHelperWebSocket();
+        return;
+      }
+      attempt += 1;
+      if (attempt < pollIntervals.length) {
+        setTimeout(pollNext, pollIntervals[attempt]);
+      } else {
+        helperCheckInProgress = false;
+        updateHelperUIState(false);
+      }
+    };
+    setTimeout(pollNext, pollIntervals[0]);
+    return;
+  }
+
+  helperCheckInProgress = false;
+  updateHelperUIState(false);
+}
+
+function forwardInputToLocalHelper(inputEvent) {
+  if (!inputEvent || !controlToggle || !controlToggle.checked) {
+    return;
+  }
+
+  // Fast path: local WebSocket
+  if (helperWs && helperWs.readyState === WebSocket.OPEN) {
+    try {
+      helperWs.send(JSON.stringify(inputEvent));
+      return;
+    } catch (err) {
+      logDiagnostic(`[CONTROL-HELPER] WebSocket send failed: ${err.message}`, 'WARN');
+    }
+  }
+
+  // Fallback path: local HTTP POST
+  fetch(HELPER_INPUT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(inputEvent),
+    mode: 'cors'
+  }).catch(() => {
+    if (!helperDetected) {
+      probeControlHelper(true);
+    }
+  });
+}
+
 function updateControlUIState(data = {}) {
   if (!controlToggle || !controlStatusBadge) {
     return;
@@ -450,6 +620,7 @@ function updateControlUIState(data = {}) {
     if (btnRevokeControl) {
       btnRevokeControl.style.display = 'none';
     }
+    updateHelperUIState(false);
     return;
   }
 
@@ -482,6 +653,9 @@ function updateControlUIState(data = {}) {
       btnRevokeControl.style.display = 'none';
     }
   }
+
+  // Check helper status when control is enabled
+  probeControlHelper(false);
 }
 
 function setupRemoteControlHandlers() {
@@ -489,6 +663,11 @@ function setupRemoteControlHandlers() {
     controlToggle.addEventListener('change', () => {
       const enabled = controlToggle.checked;
       const roomId = roomIdInput ? roomIdInput.value.trim() : (activeRoomId || currentRoomId);
+      if (enabled) {
+        probeControlHelper(true);
+      } else {
+        updateHelperUIState(false);
+      }
       if (!socket || !socket.connected || !roomId) {
         updateControlUIState();
         return;
@@ -506,6 +685,15 @@ function setupRemoteControlHandlers() {
           updateControlUIState();
         }
       });
+    });
+  }
+
+  if (btnLaunchControlHelper) {
+    btnLaunchControlHelper.addEventListener('click', () => {
+      launchControlHelperDeeplink();
+      probeControlHelper(false);
+      setTimeout(() => probeControlHelper(false), 1200);
+      setTimeout(() => probeControlHelper(false), 2500);
     });
   }
 
@@ -1610,6 +1798,10 @@ if (viewerPeers.size > 0) {
 
     showLocalViewerLink(roomId);
 
+    if (controlToggle && controlToggle.checked) {
+      probeControlHelper(true);
+    }
+
     // Display Direct Python Stream Link
     const streamUrl = `${window.location.origin}/stream/${roomId}?pin=${encodeURIComponent(pin)}`;
     if (pythonStreamUrl) {
@@ -1930,12 +2122,7 @@ function createSenderPeerForViewer(viewerId, iceServers) {
       }
     },
     onControlInput: (inputEvent) => {
-      if (socket && socket.connected) {
-        socket.emit('control:input', {
-          roomId: activeRoomId || currentRoomId,
-          event: inputEvent
-        });
-      }
+      forwardInputToLocalHelper(inputEvent);
     },
     onControlChannelStateChange: (state) => {
       logDiagnostic(`[CONTROL:${viewerId}] DataChannel state: ${state}`, 'INFO');
@@ -2195,6 +2382,7 @@ function setupSocketListeners() {
       controllerId: data.controllerId,
       inGrace: false
     });
+    probeControlHelper(true);
   });
 
   socket.on('control:controller-left', (data) => {
@@ -2220,6 +2408,13 @@ function setupSocketListeners() {
       controlToggle.checked = data.enabled;
     }
     updateControlUIState(data);
+    if (data.enabled) {
+      probeControlHelper(true);
+    }
+  });
+
+  socket.on('control:input', (event) => {
+    forwardInputToLocalHelper(event);
   });
 }
 

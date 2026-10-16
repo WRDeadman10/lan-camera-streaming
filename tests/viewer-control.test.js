@@ -97,6 +97,19 @@ describe('Remote Desktop Control UI and Coordinate Mapping Verification', () => 
 
     const btnClearPassword = doc.getElementById('btnClearPassword');
     assert.ok(btnClearPassword, 'btnClearPassword must exist');
+
+    const controlHelperAlert = doc.getElementById('controlHelperAlert');
+    assert.ok(controlHelperAlert, 'controlHelperAlert must exist in sender.html');
+
+    const btnLaunchControlHelper = doc.getElementById('btnLaunchControlHelper');
+    assert.ok(btnLaunchControlHelper, 'btnLaunchControlHelper must exist in sender.html');
+
+    const btnDownloadControlHelper = doc.getElementById('btnDownloadControlHelper');
+    assert.ok(btnDownloadControlHelper, 'btnDownloadControlHelper must exist in sender.html');
+    assert.equal(btnDownloadControlHelper.getAttribute('href'), '/download/control-helper-setup', 'btnDownloadControlHelper must link to /download/control-helper-setup');
+
+    const controlHelperRunningIndicator = doc.getElementById('controlHelperRunningIndicator');
+    assert.ok(controlHelperRunningIndicator, 'controlHelperRunningIndicator must exist in sender.html');
   });
 
   test('style.css defines control UI styling rules', () => {

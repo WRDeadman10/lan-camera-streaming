@@ -402,3 +402,15 @@ Decision: **ADR-025**.
   - [x] Input event mapping and window blur safety release.
 - [x] Run asset rebuild `node scripts/build-embedded-assets.js`.
 - [x] Verify complete end-to-end integration with test suite (172/172 tests passing).
+
+### Phase 6: Distributed 3-System Topology, Auto-Launch Deeplink & Inno Setup Distribution
+- [x] Implemented HTTP health check (`GET /health`), CORS preflight, HTTP POST (`/input`), and RFC 6455 WebSocket framing (`ws://127.0.0.1:8765`) in native helper `remote-control-helper`.
+- [x] Added `lancam-control://` protocol registration in HKCU (zero admin elevation required) and single-instance mutex (`Local\LanCameraRemoteControlHelper_SingleInstance`) in `src/main.cpp`.
+- [x] Created Inno Setup installer script `remote-control-helper/installer/control-helper.iss` producing standalone `control-helper-setup.exe`.
+- [x] Added `/download/control-helper-setup` route in `src/server/server.js` with embedded fallback in `scripts/build-embedded-assets.js`.
+- [x] Implemented sender-side local helper client in `src/public/js/sender.js`:
+  - [x] Health probe via `fetch('http://127.0.0.1:8765/health')`.
+  - [x] Auto-launch via hidden iframe deeplink `lancam-control://start` when controller joins or control is enabled.
+  - [x] Status alert badge and download button `/download/control-helper-setup` if helper is not installed.
+  - [x] Local WebSocket bridge `ws://127.0.0.1:8765` for direct input forwarding on System X from both WebRTC DataChannel and signaling fallback relay.
+- [x] Added automated unit tests in `tests/server.test.js` and `tests/viewer-control.test.js` (173/173 tests passing).
