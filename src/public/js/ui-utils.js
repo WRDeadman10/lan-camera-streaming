@@ -611,8 +611,9 @@ export function parseUrlStreamParams() {
   const roomId = urlParams.get('room') || urlParams.get('roomId') || '';
   const pin = urlParams.get('pin') || '';
   const mode = urlParams.get('mode') || '';
+  const controlPin = urlParams.get('controlPin') || urlParams.get('control') || '';
   const autostart = urlParams.get('autostart') === '1' || urlParams.get('autostart') === 'true';
-  return { roomId, pin, mode, autostart };
+  return { roomId, pin, mode, controlPin, autostart };
 }
 
 /**

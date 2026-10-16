@@ -52,6 +52,18 @@ describe('Remote Desktop Control UI and Coordinate Mapping Verification', () => 
 
     const controlModalStatus = doc.getElementById('controlModalStatus');
     assert.ok(controlModalStatus, 'controlModalStatus must exist');
+
+    const viewerControlSidebarCard = doc.getElementById('viewerControlSidebarCard');
+    assert.ok(viewerControlSidebarCard, 'viewerControlSidebarCard must exist in viewer.html');
+
+    const btnSidebarRequestControl = doc.getElementById('btnSidebarRequestControl');
+    assert.ok(btnSidebarRequestControl, 'btnSidebarRequestControl must exist in viewer.html');
+
+    const btnSidebarReleaseControl = doc.getElementById('btnSidebarReleaseControl');
+    assert.ok(btnSidebarReleaseControl, 'btnSidebarReleaseControl must exist in viewer.html');
+
+    const autoControlPinInput = doc.getElementById('autoControlPinInput');
+    assert.ok(autoControlPinInput, 'autoControlPinInput must exist in joinCard');
   });
 
   test('sender.html contains remote control management panel and password modal', () => {

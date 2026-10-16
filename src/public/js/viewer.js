@@ -72,6 +72,17 @@ const btnSubmitControl = document.getElementById('btnSubmitControl');
 const controlCredentialInput = document.getElementById('controlCredentialInput');
 const controlModalStatus = document.getElementById('controlModalStatus');
 
+const btnSidebarRequestControl = document.getElementById('btnSidebarRequestControl');
+const btnSidebarReleaseControl = document.getElementById('btnSidebarReleaseControl');
+const viewerControlSidebarCard = document.getElementById('viewerControlSidebarCard');
+const viewerControlStatusBadge = document.getElementById('viewerControlStatusBadge');
+const viewerControlInactiveState = document.getElementById('viewerControlInactiveState');
+const viewerControlActiveState = document.getElementById('viewerControlActiveState');
+const viewerControlHelpText = document.getElementById('viewerControlHelpText');
+const autoControlPinInput = document.getElementById('autoControlPinInput');
+const btnToggleAutoControlPin = document.getElementById('btnToggleAutoControlPin');
+const btnToggleControlCred = document.getElementById('btnToggleControlCred');
+
 let isControlActive = false;
 let controlSessionToken = null;
 let isHostControlEnabled = false;
@@ -370,6 +381,12 @@ async function joinRoom() {
 
     isHostControlEnabled = Boolean(response.controlState && response.controlState.enabled);
     updateControlUIState();
+
+    if (autoControlPinInput && autoControlPinInput.value.trim()) {
+      setTimeout(() => {
+        submitControlRequest(autoControlPinInput.value.trim());
+      }, 500);
+    }
 
     if (appWorkspace) {
       appWorkspace.classList.add('streaming-active');
@@ -1144,14 +1161,62 @@ window.addEventListener('beforeunload', () => {
 });
 
 function updateControlUIState() {
-  if (btnHudControl) {
-    if (isHostControlEnabled) {
-      btnHudControl.style.display = 'inline-flex';
-      btnHudControl.style.color = isControlActive ? 'var(--accent-cyan)' : 'inherit';
-      btnHudControl.title = isControlActive ? 'Active Remote Desktop Control' : 'Request Remote Desktop Control';
-    } else {
-      btnHudControl.style.display = 'none';
+  if (viewerControlSidebarCard) {
+    viewerControlSidebarCard.style.display = isViewerSessionActive ? 'block' : 'none';
+  }
+
+  if (isControlActive) {
+    if (viewerControlStatusBadge) {
+      viewerControlStatusBadge.textContent = 'Controlling Host';
+      viewerControlStatusBadge.style.background = 'rgba(16, 185, 129, 0.2)';
+      viewerControlStatusBadge.style.color = 'var(--accent-emerald)';
     }
+    if (viewerControlInactiveState) {
+      viewerControlInactiveState.style.display = 'none';
+    }
+    if (viewerControlActiveState) {
+      viewerControlActiveState.style.display = 'block';
+    }
+  } else if (isHostControlEnabled) {
+    if (viewerControlStatusBadge) {
+      viewerControlStatusBadge.textContent = 'Host Enabled';
+      viewerControlStatusBadge.style.background = 'rgba(56, 189, 248, 0.2)';
+      viewerControlStatusBadge.style.color = 'var(--accent-cyan)';
+    }
+    if (viewerControlInactiveState) {
+      viewerControlInactiveState.style.display = 'block';
+    }
+    if (viewerControlActiveState) {
+      viewerControlActiveState.style.display = 'none';
+    }
+    if (viewerControlHelpText) {
+      viewerControlHelpText.textContent = 'Host has enabled remote control. Click below to enter the 6-digit PIN or permanent password.';
+      viewerControlHelpText.style.color = 'var(--text-secondary)';
+    }
+  } else {
+    if (viewerControlStatusBadge) {
+      viewerControlStatusBadge.textContent = 'Host Disabled';
+      viewerControlStatusBadge.style.background = 'rgba(255, 255, 255, 0.1)';
+      viewerControlStatusBadge.style.color = 'var(--text-muted)';
+    }
+    if (viewerControlInactiveState) {
+      viewerControlInactiveState.style.display = 'block';
+    }
+    if (viewerControlActiveState) {
+      viewerControlActiveState.style.display = 'none';
+    }
+    if (viewerControlHelpText) {
+      viewerControlHelpText.textContent = 'Host has not enabled remote control yet. You can still enter your PIN or password.';
+      viewerControlHelpText.style.color = 'var(--text-muted)';
+    }
+  }
+
+  if (btnHudControl) {
+    btnHudControl.style.display = isViewerSessionActive ? 'inline-flex' : 'none';
+    btnHudControl.style.color = isControlActive ? 'var(--accent-cyan)' : 'inherit';
+    btnHudControl.title = isControlActive
+      ? 'Active Remote Desktop Control (Click to Release)'
+      : (isHostControlEnabled ? 'Request Remote Desktop Control (Ready)' : 'Remote Desktop Control (Host Disabled)');
   }
   if (hudControlPill) {
     hudControlPill.style.display = isControlActive ? 'inline-flex' : 'none';
@@ -1163,19 +1228,22 @@ function openControlModal() {
     showError('Join a live room first to request remote desktop control.');
     return;
   }
-  if (!isHostControlEnabled) {
-    showError('Host has not enabled remote desktop control for this session.');
-    return;
-  }
   if (controlModal) {
     controlModal.style.display = 'flex';
     if (controlCredentialInput) {
-      controlCredentialInput.value = '';
+      if (autoControlPinInput && autoControlPinInput.value.trim() && !controlCredentialInput.value) {
+        controlCredentialInput.value = autoControlPinInput.value.trim();
+      }
       controlCredentialInput.focus();
     }
     if (controlModalStatus) {
-      controlModalStatus.textContent = '';
-      controlModalStatus.style.color = 'inherit';
+      if (!isHostControlEnabled) {
+        controlModalStatus.textContent = 'Note: Remote Control is currently disabled on the host PC. You may enter the PIN now, or ask the host to check "Remote Desktop Control".';
+        controlModalStatus.style.color = 'var(--accent-amber)';
+      } else {
+        controlModalStatus.textContent = '';
+        controlModalStatus.style.color = 'inherit';
+      }
     }
   }
 }
@@ -1186,11 +1254,14 @@ function closeControlModal() {
   }
 }
 
-function submitControlRequest() {
-  if (!controlCredentialInput || !currentRoomId || !socket) {
+function submitControlRequest(credentialOverride = null) {
+  if (!currentRoomId || !socket) {
     return;
   }
-  const credential = controlCredentialInput.value.trim();
+  const credential = (credentialOverride !== null && typeof credentialOverride === 'string')
+    ? credentialOverride.trim()
+    : (controlCredentialInput ? controlCredentialInput.value.trim() : '');
+
   if (!credential) {
     if (controlModalStatus) {
       controlModalStatus.textContent = 'Please enter PIN or password.';
@@ -1217,6 +1288,9 @@ function submitControlRequest() {
       showInfo('Remote desktop control active. Press Release button to exit.');
     } else {
       const errMsg = response && response.error ? response.error : 'Failed to acquire control lease';
+      if (controlModal && controlModal.style.display !== 'flex') {
+        openControlModal();
+      }
       if (controlModalStatus) {
         controlModalStatus.textContent = errMsg;
         controlModalStatus.style.color = 'var(--accent-red)';
@@ -1277,6 +1351,18 @@ function setupRemoteControlHandlers() {
     });
   }
 
+  if (btnSidebarRequestControl) {
+    btnSidebarRequestControl.addEventListener('click', () => {
+      openControlModal();
+    });
+  }
+
+  if (btnSidebarReleaseControl) {
+    btnSidebarReleaseControl.addEventListener('click', () => {
+      releaseControl();
+    });
+  }
+
   if (btnReleaseControl) {
     btnReleaseControl.addEventListener('click', () => {
       releaseControl();
@@ -1292,7 +1378,15 @@ function setupRemoteControlHandlers() {
   }
 
   if (btnSubmitControl) {
-    btnSubmitControl.addEventListener('click', submitControlRequest);
+    btnSubmitControl.addEventListener('click', () => submitControlRequest());
+  }
+
+  if (btnToggleControlCred && controlCredentialInput) {
+    setupPasswordToggle('controlCredentialInput', 'btnToggleControlCred');
+  }
+
+  if (btnToggleAutoControlPin && autoControlPinInput) {
+    setupPasswordToggle('autoControlPinInput', 'btnToggleAutoControlPin');
   }
 
   if (controlCredentialInput) {
@@ -1485,6 +1579,9 @@ if (initPin) {
 }
 if (streamParams.mode && mediaModeSelect) {
   mediaModeSelect.value = streamParams.mode;
+}
+if (streamParams.controlPin && autoControlPinInput) {
+  autoControlPinInput.value = streamParams.controlPin;
 }
 if (streamParams.autostart && initRoom) {
   logDiagnostic(`[AutoStart] Autostart query parameter detected. Automatically joining room "${initRoom}"...`, 'INFO');

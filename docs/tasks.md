@@ -432,4 +432,5 @@ Decision: **ADR-025**.
 - [x] Initialize Socket.IO connection on sender page load (`ensureSocket()`) and emit control requests with PIN prior to streaming.
 - [x] Enhance helper deeplink launch with user-gesture anchor click fallback.
 - [x] Eliminate spurious stream teardown/reconnect loops on tab focus (`visibilitychange`).
+- [x] Add prominent Remote Desktop Control card in viewer sidebar with request/release buttons, status badges, show/hide password toggle, and optional pre-join control PIN input.
 - [x] Rebuild embedded assets and verify all 176 test cases pass (176/176 passing).
