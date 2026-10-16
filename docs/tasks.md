@@ -413,3 +413,23 @@ Decision: **ADR-025**.
   - [x] Status alert badge and download button `/download/control-helper-setup` if helper is not installed.
   - [x] Local WebSocket bridge `ws://127.0.0.1:8765` for direct input forwarding on System X from both WebRTC DataChannel and signaling fallback relay.
 - [x] Added automated unit tests in `tests/server.test.js` and `tests/viewer-control.test.js` (173/173 tests passing).
+
+## P4.7 — Persistent and Resilient zrok Share Reservation (ADR-033)
+
+- [x] Resolve `Could not bind to reserved 'public:lan'` and regex parsing errors in `src/server/cli.js` and `start.ps1`.
+- [x] Implement robust zrok JSON overview parsing in `src/server/zrok-helper.js` extracting true `frontendEndpoint` and `shareToken`.
+- [x] Prioritize existing reserved shares and port-matching shares before creating new shares.
+- [x] Implement deterministic candidate word generation (`lancam`, `lancamera`, `lancamstream`, `lancam` + 4-char suffix) with auto-generated fallback via `zrok reserve public`.
+- [x] Host on reserved shares using `zrok share reserved <shareToken> --override-endpoint <targetUrl> --headless`.
+- [x] Preserve reserved shares across restarts; release only dynamic shares on SIGINT/SIGTERM.
+- [x] Add automated unit tests covering word generation, share matching prioritization, and JSON extraction in `tests/zrok-reserve.test.js` (176/176 tests passing).
+
+## P4.8 — Chrome Private Network Access, CSP & Pre-Stream Remote Control (ADR-034)
+
+- [x] Add loopback addresses (`http://127.0.0.1:*`, `http://localhost:*`, `ws://127.0.0.1:*`, `ws://localhost:*`) and `frame-src lancam-control: lancam:` to Content Security Policy in `src/server/server.js`.
+- [x] Add `Access-Control-Allow-Private-Network: true` to CORS preflight `OPTIONS`, `GET /health`, and `POST /input` responses in `remote-control-helper` loopback server.
+- [x] Enable pre-streaming Remote Control configuration (PIN generation and permanent password setting) in `src/server/signaling.js` with access PIN verification.
+- [x] Initialize Socket.IO connection on sender page load (`ensureSocket()`) and emit control requests with PIN prior to streaming.
+- [x] Enhance helper deeplink launch with user-gesture anchor click fallback.
+- [x] Eliminate spurious stream teardown/reconnect loops on tab focus (`visibilitychange`).
+- [x] Rebuild embedded assets and verify all 176 test cases pass (176/176 passing).

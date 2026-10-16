@@ -174,6 +174,8 @@ test('createServer sends comprehensive Content-Security-Policy allowing inline s
     assert.ok(csp.includes('data:'), 'CSP img-src must allow data: URIs');
     assert.ok(csp.includes('blob:'), 'CSP img-src and media-src must allow blob: URIs');
     assert.ok(csp.includes('mediastream:'), 'CSP media-src must allow mediastream:');
+    assert.ok(csp.includes('127.0.0.1'), 'CSP connect-src must allow loopback 127.0.0.1 for native helper');
+    assert.ok(csp.includes('lancam-control:'), 'CSP frame-src must allow lancam-control: protocol');
   } finally {
     await new Promise((resolve) => httpServer.close(resolve));
   }

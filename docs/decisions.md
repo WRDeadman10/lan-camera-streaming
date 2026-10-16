@@ -588,6 +588,62 @@ Because the central server may run on an external machine, the native input help
 **Consequences:**
 Complete distributed 3-system operation works out of the box with zero friction. The central server can run on Linux, Docker, or LAN; the sender machine automatically launches or prompts for installation of the native helper; and the viewer controls the sender desktop with zero manual helper configuration.
 
+## ADR-033: Persistent and Resilient zrok Share Reservation
+
+**Status:** Accepted (2026-10-16)
+
+**Context:**
+Previously, `cli.js` and `start.ps1` attempted to launch a public share using `zrok share public <target> -n public:lan`. This failed because:
+1. `-n` is not a valid parameter of `zrok share public` (it is a parameter of `zrok reserve public`).
+2. `public:lan` and `lan` violate zrok's unique naming rules (lowercase alphanumeric only, between 4 and 32 characters in length).
+3. The fallback dynamic share polled `zrok overview` using a regular expression that matched the first 10-16 alphanumeric characters following the port string. In zrok's JSON overview, the 13-digit Unix timestamp `createdAt` (e.g. `1792164730133`) immediately follows `backendProxyEndpoint`, causing the CLI to report an invalid URL (`https://1792164730133.shares.zrok.io`) instead of the true share URL (`https://<token>.share.zrok.io`).
+4. On subsequent runs, existing shares were destroyed or disregarded, creating unnecessary dynamic churn.
+
+**Decision:**
+1. **Existing Share Discovery & Prioritization:**
+   - Both `cli.js` (via modular `src/server/zrok-helper.js`) and `start.ps1` query `zrok overview` and parse the pure JSON output.
+   - The system checks if any active share exists in the environment, prioritizing explicitly reserved shares (`reserved: true`) and shares targeting the configured port.
+   - If an existing share is found, the system binds to it directly using `zrok share reserved <shareToken> --override-endpoint <targetUrl> --headless`.
+2. **Deterministic Candidate Generation & Auto-Reservation:**
+   - When no share exists, the system attempts to reserve candidate words (e.g. `lancam`, `lancamera`, `lancamstream`, `lancamlive`, or `lancam` + 4-char lowercase alphanumeric suffixes) using `zrok reserve public <target> -n <word> --backend-mode proxy --json-output`.
+   - If candidate words conflict or fail, it falls back to zrok's auto-generated unique reservation (`zrok reserve public <target> --backend-mode proxy --json-output`).
+   - The returned `token` and `frontend_endpoints` are extracted directly from the parsed JSON, and the backend is started on that reservation.
+3. **Persistence Across Runs & Teardown Lifecycle:**
+   - Reserved shares remain reserved across process restarts, guaranteeing identical public URLs for subsequent sessions.
+   - On process termination (SIGINT/SIGTERM), only ephemeral dynamic shares are released via `zrok release <shareToken>`; reserved shares are preserved for subsequent runs.
+
+**Consequences:**
+Public URLs are permanent and consistent across runs. Terminal output and ASCII QR codes reliably display the true `frontendEndpoint` (`https://<token>.share.zrok.io`). The error "Could not bind to reserved 'public:lan'" is completely eliminated.
+
+## ADR-034: Chrome Private Network Access (PNA), Loopback CSP & Pre-Stream Remote Control
+
+**Status:** Accepted (2026-10-16)
+
+**Context:**
+Real-world field testing over a public zrok tunnel (`*.share.zrok.io`) revealed three blockers:
+1. Browser CSP violations blocked loopback health checks (`http://127.0.0.1:8765/health`) and custom protocol deeplink framing (`lancam-control:`).
+2. When a public HTTPS origin queries loopback (`127.0.0.1`), Chrome enforces the Private Network Access (PNA) specification, which requires `Access-Control-Allow-Private-Network: true` on both preflight `OPTIONS` and actual responses.
+3. In `sender.js`, the signaling socket was only connected inside `startSession()` ("Start Streaming"). Consequently, users trying to enable Remote Control, generate a session PIN, or set a permanent password prior to clicking "Start Streaming" encountered "Signaling socket not connected" or missing PINs.
+4. Switching tabs or window focus triggered `document.visibilityState === 'visible'`, which invoked `rejoinRoomAsSender()` unconditionally when viewer peers were 0, causing frequent stream teardowns and reconnection loops.
+
+**Decision:**
+1. **CSP & Private Network Access:**
+   - Updated `Content-Security-Policy` header in `src/server/server.js`:
+     - Added `http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*` to `connect-src`.
+     - Added `frame-src 'self' lancam-control: lancam:` to allow silent protocol launcher iframes.
+   - Updated `remote-control-helper` loopback HTTP server:
+     - Added `Access-Control-Allow-Private-Network: true` to CORS preflight `OPTIONS`, `GET /health`, and `POST /input` responses.
+2. **Pre-Stream Control & Signaling Auth:**
+   - Extended `ensureSocket()` in `sender.js` to initialize the Socket.IO connection at page load.
+   - Updated `control:enable`, `control:pin:regenerate`, `control:password:set`, and `control:password:clear` in `signaling.js` to authorize requests when the sender is already joined OR when the payload PIN matches `config.accessPin`.
+   - Updated `sender.js` to emit `pin` with pre-streaming control requests and handle asynchronous socket connection.
+3. **Deeplink Invocations & Tab Focus Health:**
+   - Enhanced `launchControlHelperDeeplink(userGesture)` to trigger an invisible anchor click on manual user button clicks for maximum browser activation.
+   - Refined `visibilitychange` in `sender.js` so it only repairs damaged viewer peers if viewers exist and only rejoins if `!hasJoinedRoom`. It never tears down an intact session on tab focus.
+
+**Consequences:**
+Remote desktop control functions seamlessly over public zrok tunnels and LAN connections. Senders can configure control PINs and permanent passwords before starting streaming. The helper is detected without PNA or CSP errors, and tab switching does not disrupt active streams.
+
 ## Open decisions to revisit after the first working stream
 
 - Whether to code-sign the installer and executables (ADR-024).

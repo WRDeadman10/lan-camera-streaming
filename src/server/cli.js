@@ -103,32 +103,12 @@ function getLanIpv4Addresses() {
   return addresses;
 }
 
-function findZrokBinary() {
-  const possibleCommands = ['zrok', 'zrok2'];
-  for (const cmd of possibleCommands) {
-    try {
-      execSync(`where ${cmd}`, { stdio: 'ignore' });
-      return cmd;
-    } catch {
-      // Continue search
-    }
-  }
-
-  const localAppData = process.env.LOCALAPPDATA || '';
-  const possiblePaths = [
-    'C:\\scrcpy-win64-v2.4\\zrok2.exe',
-    path.join(localAppData, 'Programs', 'zrok', 'zrok.exe'),
-    'C:\\Program Files\\zrok\\zrok.exe'
-  ];
-
-  for (const p of possiblePaths) {
-    if (fs.existsSync(p)) {
-      return p;
-    }
-  }
-
-  return null;
-}
+import {
+  findZrokBinary,
+  getZrokShares,
+  findExistingShare,
+  reserveNewShare
+} from './zrok-helper.js';
 
 async function main() {
   const cliOptions = parseCliArgs(process.argv.slice(2));
@@ -198,6 +178,7 @@ async function main() {
 
     let zrokProcess = null;
     let activeShareToken = null;
+    let isShareReserved = false;
     let isShuttingDown = false;
 
     const cleanupAndExit = () => {
@@ -221,20 +202,11 @@ async function main() {
       }
 
       const zrokBinary = findZrokBinary();
-      if (zrokBinary) {
+      if (zrokBinary && !isShareReserved && activeShareToken) {
         try {
-          execSync(`"${zrokBinary}" delete share public:lan`, { stdio: 'ignore' });
+          execSync(`"${zrokBinary}" release ${activeShareToken}`, { stdio: 'ignore' });
         } catch {}
-        if (activeShareToken) {
-          try {
-            execSync(`"${zrokBinary}" delete share ${activeShareToken}`, { stdio: 'ignore' });
-          } catch {}
-        }
       }
-
-      try {
-        io.close();
-      } catch {}
 
       if (typeof httpServer.closeAllConnections === 'function') {
         httpServer.closeAllConnections();
@@ -303,25 +275,51 @@ async function main() {
         }
       }
 
-      // Cleanup stale shares
-      try {
-        execSync(`"${zrokBinary}" delete share public:lan`, { stdio: 'ignore' });
-      } catch {}
-
       const targetUrl = `http://127.0.0.1:${config.port}`;
-      console.log(`Starting zrok public share for ${targetUrl}...`);
+      console.log(`Configuring zrok public share for ${targetUrl}...`);
 
-      let shareUrl = 'https://lan.shares.zrok.io';
+      const existingShares = getZrokShares(zrokBinary);
+      const chosenShare = findExistingShare(existingShares, config.port);
+      let shareToken = null;
+      let shareUrl = null;
 
-      zrokProcess = spawn(zrokBinary, ['share', 'public', targetUrl, '-n', 'public:lan', '--backend-mode', 'proxy', '--headless'], {
-        stdio: 'ignore',
-        detached: false
-      });
+      if (chosenShare) {
+        shareToken = chosenShare.shareToken;
+        shareUrl = chosenShare.frontendEndpoint || `https://${shareToken}.share.zrok.io`;
+        isShareReserved = true;
+        console.log(`Found existing reserved share '${shareToken}' (${shareUrl}).`);
+        console.log(`Hosting on existing reserved share '${shareToken}'...`);
+      } else {
+        console.log('No existing reserved share found. Reserving a new share for future runs...');
+        const reserved = reserveNewShare(zrokBinary, targetUrl);
+        if (reserved) {
+          shareToken = reserved.token;
+          shareUrl = reserved.url;
+          isShareReserved = true;
+          console.log(`Hosting on newly reserved share '${shareToken}'...`);
+        }
+      }
 
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      if (shareToken) {
+        zrokProcess = spawn(zrokBinary, ['share', 'reserved', shareToken, '--override-endpoint', targetUrl, '--headless'], {
+          stdio: 'ignore',
+          detached: false
+        });
 
-      if (zrokProcess.exitCode !== null) {
-        console.log("Could not bind to reserved 'public:lan'. Starting dynamic share...");
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+
+        if (zrokProcess.exitCode !== null) {
+          console.warn(`Could not start reserved share '${shareToken}'. Falling back to dynamic share...`);
+          shareToken = null;
+          shareUrl = null;
+          isShareReserved = false;
+        } else {
+          activeShareToken = shareToken;
+        }
+      }
+
+      if (!shareToken) {
+        console.log('Starting dynamic share...');
         zrokProcess = spawn(zrokBinary, ['share', 'public', targetUrl, '--backend-mode', 'proxy', '--headless'], {
           stdio: 'ignore',
           detached: false
@@ -330,15 +328,21 @@ async function main() {
         for (let attempt = 0; attempt < 15; attempt++) {
           await new Promise((resolve) => setTimeout(resolve, 1000));
           try {
-            const ov = execSync(`"${zrokBinary}" overview`, { encoding: 'utf8' });
-            const match = ov.match(new RegExp(`http://127\\.0\\.0\\.1:${config.port}[\\s\\S]*?([a-z0-9]{10,16})`));
-            if (match && match[1]) {
-              activeShareToken = match[1];
-              shareUrl = `https://${activeShareToken}.shares.zrok.io`;
+            const shares = getZrokShares(zrokBinary);
+            const match = shares.find(
+              (s) => s.backendProxyEndpoint && s.backendProxyEndpoint.includes(`:${config.port}`)
+            ) || shares[shares.length - 1];
+            if (match && match.shareToken) {
+              activeShareToken = match.shareToken;
+              shareUrl = match.frontendEndpoint || `https://${match.shareToken}.share.zrok.io`;
               break;
             }
           } catch {}
         }
+      }
+
+      if (!shareUrl) {
+        shareUrl = `http://127.0.0.1:${config.port}`;
       }
 
       const senderDisplayUrl = `${shareUrl}/sender`;
@@ -356,7 +360,23 @@ async function main() {
   });
 }
 
-main().catch((err) => {
-  console.error('Fatal CLI Error:', err.message);
-  process.exit(1);
-});
+const isMain = process.argv[1] && (
+  process.argv[1].endsWith('cli.js') ||
+  process.argv[1].includes('lan-camera-streaming') ||
+  process.argv[1].endsWith('bundle.cjs')
+);
+
+if (isMain) {
+  main().catch((err) => {
+    console.error('Fatal CLI Error:', err.message);
+    process.exit(1);
+  });
+}
+
+export {
+  parseCliArgs,
+  findZrokBinary,
+  getZrokShares,
+  findExistingShare,
+  reserveNewShare
+};

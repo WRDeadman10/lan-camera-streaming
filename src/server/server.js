@@ -77,9 +77,10 @@ export function createServer(config, logger) {
       "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
       "style-src 'self' 'unsafe-inline' https:; " +
       "img-src 'self' data: blob: https://images.unsplash.com https://*.unsplash.com https:; " +
-      "connect-src 'self' ws: wss: https://api.unsplash.com https://*.unsplash.com https:; " +
+      "connect-src 'self' ws: wss: http: https: https://api.unsplash.com https://*.unsplash.com http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; " +
       "media-src 'self' blob: mediastream: data:; " +
       "font-src 'self' data: https:; " +
+      "frame-src 'self' lancam-control: lancam:; " +
       "worker-src 'self' blob:;"
     );
     next();

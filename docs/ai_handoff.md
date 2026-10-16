@@ -32,16 +32,17 @@ The project is feature-complete across all 14 proposed ecosystem features and ve
 | Screen Share Mouse Cursor Exclusion (ADR-030) | Implemented; `cursor: "never"` merged into `getDisplayMedia` constraints, automatic fallback if rejected, diagnostics reporting of effective setting (`track.getSettings().cursor`) with graceful explanation of Chromium/Windows compositor limitations, dynamic hot-swap without re-negotiation |
 | Remote Desktop Control Integration (ADR-031) | **Fully implemented and verified** across all 5 phases: native MSVC C++17 helper (`remote-control-helper` submodule), `RemoteControlManager` with `crypto.scrypt` & 6-digit session PINs, `control-bridge.js` loopback TCP client, Socket.IO signaling events, `lancam-control` WebRTC DataChannel + fallback, normalized letterbox/pillarbox coordinate translation, sender management panel, and viewer HUD/modal controls |
 | Distributed 3-System Topology & Helper Auto-Launch (ADR-032) | **Delivered**: HTTP/WebSocket loopback in native helper (`ws://127.0.0.1:8765`), single-instance mutex, automatic HKCU `lancam-control://` protocol registration, auto-launch deeplink via hidden iframe on System X, Inno Setup standalone installer (`control-helper-setup.exe`), server download route `/download/control-helper-setup`, and direct local helper input forwarding |
-| Automated tests | 173/173 pass (`npm test`) |
+| Persistent and Resilient zrok Share Reservation (ADR-033) | **Delivered**: Pure JSON `zrok overview` parsing in `src/server/zrok-helper.js` and `start.ps1`; existing share detection and reuse with `zrok share reserved <shareToken> --override-endpoint <targetUrl> --headless`; candidate word generation (`lancam`, `lancamera`, `lancamstream`, `lancamlive`, `lancam<hex>`) with auto-generated fallback; eliminates `Could not bind to reserved 'public:lan'` and `createdAt` regex URL corruption (`1792164730133.shares.zrok.io`); persists reserved share across runs |
+| Automated tests | 176/176 pass (`npm test`) |
 
-Version: `package.json` is 1.0.20. The files currently in `dist/` were built as 1.0.19, so rebuild (`build.bat`, which bumps to 1.0.21) before distributing.
+Version: `package.json` is 1.0.30.
 
 ## Read before implementation
 
 1. `AGENTS.md` — agent behavior, code style and documentation rules (section 16).
 2. `docs/architecture.md` — components, routes (§3), receiver signaling contract (§4), multi-viewer (§11), virtual webcam (§12), build and distribution (§13).
 3. `docs/roadmap.md` and `docs/tasks.md` — plan and backlog (open items are the unchecked boxes).
-4. `docs/decisions.md` — ADR-001 to ADR-025 and the open decisions at the end.
+4. `docs/decisions.md` — ADR-001 to ADR-033 and the open decisions at the end.
 5. `docs/project-overview.md` — goals, scope, MVP definition.
 6. `docs/receiver-guide.md` — how to connect any receiver.
 7. `vcam/docs/` — the driver repository (overview, architecture, decisions, tasks, handoff).
@@ -70,38 +71,43 @@ Version: `package.json` is 1.0.20. The files currently in `dist/` were built as 
 
 ### Verified and not verified
 
-- **Verified (2026-10-16):** all 172 tests (`npm test`); Remote Desktop Control Integration across all 5 phases:
-  - Phase 0: genuine Git submodule `remote-control-helper` and comprehensive architecture spec (§17).
-  - Phase 1: `RemoteControlManager` with `crypto.scrypt` permanent password hash, 6-digit session PINs, rate limiting, and single-controller lease lifecycle (`tests/remote-control-manager.test.js` passes 6/6).
-  - Phase 2: native MSVC C++17 helper with loopback Winsock2 TCP on `127.0.0.1:8765`, `SendInput` mouse/keyboard injection, held-input safety tracking (`std::set<WORD>`), emergency stop (`VK_PAUSE`, `Ctrl+Alt+Shift+Esc`), and native test suite passing.
-  - Phase 3: server `control-bridge.js` loopback TCP client with auth token, input validation, auto-reconnect, and Socket.IO signaling events (`tests/control-bridge.test.js`, `tests/signaling-control.test.js`).
-  - Phase 4: `lancam-control` WebRTC DataChannel transport in `webrtc-peer.js` with Socket.IO relay fallback; aspect-ratio-aware coordinate translation in `control-coords.js` (`tests/control-coords.test.js` passes 3/3).
-  - Phase 5: Sender management UI (`sender.html`, `sender.js`, `style.css`), Viewer control HUD and modal (`viewer.html`, `viewer.js`, `style.css`), input listeners (mouse move, mouse down/up, wheel, keydown/keyup), window blur safety release, and automated integration tests (`tests/viewer-control.test.js` passes 5/5).
+- **Verified (2026-10-16):** all 176 tests (`npm test`); Persistent zrok share reservation & hosting:
+  - Verified `src/server/zrok-helper.js` and `start.ps1` share parsing and reservation.
+  - Verified `lan-camera-streaming.exe` console application hosting on existing share `6zm2qm55zp4w` (`https://6zm2qm55zp4w.share.zrok.io`).
+  - Verified 0 console error messages; correct QR code and public stream URL rendered without timestamp corruption.
 - **Not verified:** Live manual end-to-end control test between two separate physical PCs on a remote Wi-Fi network.
 
 ## Modified files (last iteration, 2026-10-16)
 
-- Virtual Camera Submodule: `vcam/build.bat` (dynamic MSVC toolchain discovery via `vswhere.exe` and standard Visual Studio 2022/2019 fallback paths).
-- Documentation: `docs/tasks.md`, `docs/ai_handoff.md`.
+- Server & CLI: `src/server/zrok-helper.js` (new module), `src/server/cli.js` (zrok reservation and reuse), `start.ps1` (PowerShell zrok reservation and reuse).
+- Tests: `tests/zrok-reserve.test.js` (unit tests for zrok parsing, reservation candidates, and prioritization).
+- Documentation: `docs/decisions.md` (ADR-033), `docs/tasks.md` (P4.7), `docs/ai_handoff.md`.
 
 ## Next recommended task
 
-1. Perform live manual end-to-end testing between a Windows host running `remote-control-helper.exe` and a client viewer browser over WebRTC and Socket.IO fallback.
-2. Package `remote-control-helper.exe` alongside the Windows virtual camera installer or `lan-camera-streaming.exe` single-executable distribution if desired.
+1. Perform live phone connection test scanning the newly verified persistent QR code `https://<token>.share.zrok.io/sender`.
+2. Continue remote desktop control live testing between separate machines.
 
 ## Commands run and results (latest)
 
-- `vcam\build.bat`: C++ compilation (`cl.exe`) of `LanCamFilter.dll`, `LanCamMfSource.dll`, `lancam-setup.exe` and Inno Setup build of `dist/lan-camera-setupv1.0.29.exe` succeeded (exit code 0).
-- `build.bat`: Full automated build pipeline (version bump -> `vcam` build -> `remote-control-helper` build -> `lan-camera-streaming.exe` SEA build) completed successfully (exit code 0).
-- `npm test`: 173/173 passed across all 20 test suites in ~3.8 seconds.
-- `git diff --check`: 0 whitespace or formatting warnings.
+- `npm test`: 176/176 passed across all 20 test suites in ~3.5 seconds.
+- `npm run build:exe`: Standalone binary `dist/lan-camera-streaming.exe` (95.29 MB) generated and verified.
+- `node src/server/cli.js --zrok`: Verified live detection of existing share `6zm2qm55zp4w`, clean startup on `https://6zm2qm55zp4w.share.zrok.io`, and matching QR code generation without errors.
 
 ## Change log (newest first)
 
+- **2026-10-16 — Persistent and Resilient zrok Share Reservation (ADR-033).**
+  - Problem: When running `build.bat` or `lan-camera-streaming.exe`, zrok share startup previously failed with `"Could not bind to reserved 'public:lan'. Starting dynamic share..."` because `zrok share public` does not support `-n`, and `public:lan` violates zrok's unique naming requirements (lowercase alphanumeric only, between 4 and 32 characters). Additionally, the dynamic share regex parsed the 13-digit Unix timestamp `createdAt` (`1792164730133`) from `zrok overview` instead of the token, displaying an invalid URL (`https://1792164730133.shares.zrok.io`).
+  - Solution: Implemented `src/server/zrok-helper.js` and updated `start.ps1` to query `zrok overview` and parse the pure JSON output directly. The system now inspects existing shares, prioritizing active reserved shares and port-matched shares, hosting on them via `zrok share reserved <shareToken> --override-endpoint <targetUrl> --headless`. If no share exists, it generates candidate names (`lancam`, `lancamera`, `lancamstream`, `lancamlive`, or `lancam<hex>`) and reserves via `zrok reserve public <target> -n <word> --backend-mode proxy --json-output` (with auto-generated fallback). Reserved shares persist across runs so the public URL remains constant, and only dynamic shares are released on exit.
+  - Verification: 176/176 tests passing (`npm test`). Rebuilt standalone `dist/lan-camera-streaming.exe`. Tested console output with live zrok tunnel, verifying detection and hosting on existing share `6zm2qm55zp4w` (`https://6zm2qm55zp4w.share.zrok.io`) with exact QR code.
 - **2026-10-16 — Fix MSVC C++ Compiler Discovery in DirectShow Virtual Camera Driver Build (`vcam/build.bat`).**
   - Problem: `vcam/build.bat` failed during `build.bat` with `'cl.exe' is not recognized as an internal or external command` and `[ERROR] DirectShow C++ driver build failed` because the script hardcoded `C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat`. Systems equipped with Visual Studio Build Tools (`C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools`), Professional, Enterprise, or custom install paths failed to initialize MSVC.
   - Solution: Updated `vcam/build.bat` to first check if `cl.exe` is already in PATH. If not, it uses `vswhere.exe` to dynamically find `VC\Auxiliary\Build\vcvars64.bat` across any installed Visual Studio 2022/2019 product edition (Community, BuildTools, Professional, Enterprise) in both 64-bit and x86 Program Files directories, with hardcoded fallbacks if `vswhere` is absent.
   - Verification: Verified compilation of `LanCamFilter.dll`, `LanCamMfSource.dll`, and `lancam-setup.exe`. Ran full automated pipeline `build.bat` end-to-end; all 4 steps succeeded without errors. All 173 unit/integration tests passing.
+- **2026-10-16 — Chrome Private Network Access (PNA), Loopback CSP & Pre-Stream Remote Control (ADR-034).**
+  - Problem & Cause: Browser CSP violations blocked loopback health checks (`http://127.0.0.1:8765/health`) and protocol deeplink framing (`lancam-control:`). Chrome PNA rejected requests from public zrok HTTPS tunnels to `127.0.0.1` without PNA response headers. Signaling socket was only connected on "Start Streaming", preventing pre-stream PIN generation and permanent password setting. Tab switching triggered `rejoinRoomAsSender()` repeatedly when viewer count was 0.
+  - Solution: Added loopback addresses and `frame-src lancam-control: lancam:` to CSP in `src/server/server.js`. Added `Access-Control-Allow-Private-Network: true` to CORS preflight, GET, and POST in `LoopbackServer.cpp`. Allowed pre-stream control configuration in `signaling.js` with access PIN verification, and initialized Socket.IO on page load (`ensureSocket()`). Added user-gesture anchor fallback to deeplink launcher. Refined `visibilitychange` to guard rejoining behind `!hasJoinedRoom`.
+  - Verification: Rebuilt embedded assets and native helper executable. All 176 Node.js unit/integration tests and native helper test suite passing with 0 errors.
 - **2026-10-16 — Distributed 3-System Remote Desktop Topology, Deeplink Auto-Launch & Inno Setup Distribution (ADR-032, Phase 6).**
   - Submodule `remote-control-helper`: Added HTTP health check (`GET /health`), CORS preflight, HTTP POST (`/input`), RFC 6455 WebSocket framing (`ws://127.0.0.1:8765`) via Windows WinCrypt SHA-1 + base64, single-instance mutex (`Local\LanCameraRemoteControlHelper_SingleInstance`), and automatic HKCU protocol registration (`lancam-control://`). Authored Inno Setup script `installer/control-helper.iss` generating standalone installer `control-helper-setup.exe` (1.89 MB).
   - Server & Distribution: Added `/download/control-helper-setup` routes in `src/server/server.js` and embedded installer support in `scripts/build-embedded-assets.js`.

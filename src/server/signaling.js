@@ -529,9 +529,11 @@ export function setupSignaling(httpServer, config, logger) {
           }
           return;
         }
-        const { roomId, enabled } = payload;
+        const { roomId, enabled, pin } = payload;
         const membership = roomManager.getMembership(socket.id);
-        if (!membership || membership.roomId !== roomId || membership.role !== 'sender') {
+        const isAuthorizedSender = (membership && membership.roomId === roomId && membership.role === 'sender') ||
+          (pin && pin === config.accessPin);
+        if (!isAuthorizedSender) {
           if (typeof callback === 'function') {
             callback({ success: false, error: 'Unauthorized. Only sender can toggle remote control.' });
           }
@@ -580,9 +582,11 @@ export function setupSignaling(httpServer, config, logger) {
           }
           return;
         }
-        const { roomId } = payload;
+        const { roomId, pin } = payload;
         const membership = roomManager.getMembership(socket.id);
-        if (!membership || membership.roomId !== roomId || membership.role !== 'sender') {
+        const isAuthorizedSender = (membership && membership.roomId === roomId && membership.role === 'sender') ||
+          (pin && pin === config.accessPin);
+        if (!isAuthorizedSender) {
           if (typeof callback === 'function') {
             callback({ success: false, error: 'Unauthorized. Only sender can regenerate PIN.' });
           }
@@ -612,7 +616,10 @@ export function setupSignaling(httpServer, config, logger) {
           return;
         }
         const membership = roomManager.getMembership(socket.id);
-        if (!membership || membership.role !== 'sender') {
+        const pin = payload.pin;
+        const isAuthorized = (membership && membership.role === 'sender') ||
+          (pin && pin === config.accessPin);
+        if (!isAuthorized) {
           if (typeof callback === 'function') {
             callback({ success: false, error: 'Unauthorized. Only sender can set control password.' });
           }
@@ -622,11 +629,14 @@ export function setupSignaling(httpServer, config, logger) {
         const res = remoteControlManager.setPermanentPassword(payload.password);
         if (res.success) {
           logger.info(`Permanent control password updated by sender ${socket.id}`);
-          io.to(membership.roomId).emit('control:state', {
-            enabled: remoteControlManager.isControlEnabled(membership.roomId),
-            hasController: Boolean(remoteControlManager.getActiveController(membership.roomId)),
-            hasPermanentPassword: true
-          });
+          const targetRoomId = membership ? membership.roomId : null;
+          if (targetRoomId) {
+            io.to(targetRoomId).emit('control:state', {
+              enabled: remoteControlManager.isControlEnabled(targetRoomId),
+              hasController: Boolean(remoteControlManager.getActiveController(targetRoomId)),
+              hasPermanentPassword: true
+            });
+          }
         }
         if (typeof callback === 'function') {
           callback(res);
@@ -640,28 +650,36 @@ export function setupSignaling(httpServer, config, logger) {
     });
 
     // Remote Desktop Control: Clear permanent password
-    socket.on('control:password:clear', (callback) => {
+    socket.on('control:password:clear', (payload, callback) => {
       try {
+        const cb = typeof callback === 'function' ? callback : (typeof payload === 'function' ? payload : null);
+        const pin = payload && typeof payload === 'object' && typeof payload.pin === 'string' ? payload.pin : null;
         const membership = roomManager.getMembership(socket.id);
-        if (!membership || membership.role !== 'sender') {
-          if (typeof callback === 'function') {
-            callback({ success: false, error: 'Unauthorized.' });
+        const isAuthorized = (membership && membership.role === 'sender') ||
+          (pin && pin === config.accessPin);
+        if (!isAuthorized) {
+          if (typeof cb === 'function') {
+            cb({ success: false, error: 'Unauthorized.' });
           }
           return;
         }
 
         const res = remoteControlManager.clearPermanentPassword();
-        io.to(membership.roomId).emit('control:state', {
-          enabled: remoteControlManager.isControlEnabled(membership.roomId),
-          hasController: Boolean(remoteControlManager.getActiveController(membership.roomId)),
-          hasPermanentPassword: false
-        });
-        if (typeof callback === 'function') {
-          callback(res);
+        const targetRoomId = membership ? membership.roomId : null;
+        if (targetRoomId) {
+          io.to(targetRoomId).emit('control:state', {
+            enabled: remoteControlManager.isControlEnabled(targetRoomId),
+            hasController: Boolean(remoteControlManager.getActiveController(targetRoomId)),
+            hasPermanentPassword: false
+          });
+        }
+        if (typeof cb === 'function') {
+          cb(res);
         }
       } catch (err) {
-        if (typeof callback === 'function') {
-          callback({ success: false, error: 'Internal error.' });
+        const cb = typeof callback === 'function' ? callback : (typeof payload === 'function' ? payload : null);
+        if (typeof cb === 'function') {
+          cb({ success: false, error: 'Internal error.' });
         }
       }
     });
