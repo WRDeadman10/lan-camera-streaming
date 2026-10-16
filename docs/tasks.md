@@ -354,3 +354,51 @@ Decision: **ADR-025**.
   - [x] Transparent diagnostics reporting: log browser confirmation when `cursor === 'never'`, warning when browser keeps cursor visible (`'always'`/`'motion'`), or warning explaining browser limitation when cursor is not exposed in settings (Chromium/Windows limitation).
   - [x] Live dynamic source switching via `applyDynamicSourceChange()` when toggle changes during active screen sharing.
   - [x] Verified in automated Node.js tests (156/156 passing) and verified empirically against real Google Chrome and Microsoft Edge on Windows via CDP.
+
+## Remote Desktop Control Integration (ADR-031)
+
+### Phase 0: Submodule & Documentation Foundation
+- [x] Register `remote-control-helper` as a genuine Git submodule pointing to `https://github.com/WRDeadman10/remote-control-helper.git`.
+- [x] Document control architecture, native bridge, authentication lifecycle, and lease state machine in `docs/architecture.md`.
+- [x] Record architectural decision record ADR-031 in `docs/decisions.md`.
+- [x] Update `docs/project-overview.md` and `docs/roadmap.md`.
+
+### Phase 1: Authentication & Lease Management (Node.js Server)
+- [ ] Implement `RemoteControlManager` in `src/server/remote-control-manager.js`:
+  - [ ] Permanent password hash verification with `crypto.scrypt` and 16-byte random salt stored in `.control-auth.json`.
+  - [ ] 6-digit cryptographically secure session PIN generation and expiry.
+  - [ ] Rate-limiting per socket/IP (5 failed attempts locks socket for 30 seconds).
+  - [ ] Single-controller lease management with 60-second reconnection grace period, release, and sender revocation.
+  - [ ] Automated unit tests in `tests/remote-control-manager.test.js`.
+
+### Phase 2: Native Windows Input Helper (C++ Submodule)
+- [ ] Configure `CMakeLists.txt` for MSVC / C++17 build in `remote-control-helper/`.
+- [ ] Implement loopback Winsock2 TCP/WebSocket server on `127.0.0.1:8765` with authentication handshake token.
+- [ ] Implement `SendInput` mouse movement (normalized 0.0-1.0 mapped to target screen bounds).
+- [ ] Implement `SendInput` mouse buttons (`left`, `right`, `middle`, `down`, `up`, `click`) and wheel.
+- [ ] Implement `SendInput` keyboard events (`code` to Windows virtual key / scan code, modifiers).
+- [ ] Implement held-input registry (`std::set<WORD>`) with safety release on disconnect, lease expiry, or emergency stop.
+- [ ] Native tests and build verification with MSVC CMake. Commit inside submodule first.
+
+### Phase 3: Signaling Protocol & Server Control Bridge
+- [ ] Extend Socket.IO signaling in `src/server/signaling.js` with control events (`control:request-lease`, `control:lease-granted`, `control:lease-rejected`, `control:revoke`, `control:release`, `control:input`).
+- [ ] Implement `src/server/control-bridge.js` to communicate with the native helper on `127.0.0.1:8765`.
+- [ ] Add unit tests for signaling events and control bridge.
+
+### Phase 4: WebRTC DataChannel Transport & Coordinate Translation
+- [ ] Implement `lancam-control` DataChannel in `src/public/js/webrtc-peer.js` for sub-5ms low-latency input transport with Socket.IO relay fallback.
+- [ ] Implement coordinate translation in `viewer.js` accounting for letterboxing, pillarboxing, and aspect ratios.
+- [ ] Implement viewer input event capture (mouse move, mouse down/up, wheel, keydown/keyup).
+
+### Phase 5: Sender and Viewer UI Controls
+- [ ] Sender UI (`sender.html`, `sender.js`, `style.css`):
+  - [ ] Session PIN display with one-click copy button.
+  - [ ] Remote Control enable/disable toggle.
+  - [ ] Active controller status indicator badge and Revoke button.
+  - [ ] Permanent password setup/change modal.
+- [ ] Viewer UI (`viewer.html`, `viewer.js`, `style.css`):
+  - [ ] "Request Control" button and modal for entering PIN or permanent password.
+  - [ ] Control active HUD pill with Release button.
+  - [ ] Pointer lock / relative mode option.
+- [ ] Run asset rebuild `node scripts/build-embedded-assets.js`.
+- [ ] Verify complete end-to-end integration with test suite.

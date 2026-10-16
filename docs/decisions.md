@@ -529,6 +529,35 @@ When sharing desktop screens, application windows, or browser tabs, the sender o
 **Consequences:**
 Senders can control cursor inclusion in screen broadcasts. When supported by the underlying browser and compositor, viewers receive clean, cursor-free screen video. If unsupported, the diagnostics panel provides transparent feedback explaining the browser limitation without falsely claiming the cursor is hidden.
 
+## ADR-031: Remote Desktop Control Integration, Credential Verification & Native Helper Submodule
+
+**Status:** Accepted (2026-10-16)
+
+**Context:**
+Users viewing a shared Windows desktop stream need the ability to interact with and control the remote computer using their own mouse and keyboard. The application must support two independent credential pathways: a permanent control password configured on the controlled host, and a dynamic 6-digit session PIN generated whenever desktop screen sharing begins. Control must be restricted to one authorized viewer at a time, with safe disconnection handling and immediate revocation controls for the sender. Furthermore, operating system input must be cleanly segregated into a dedicated native helper rather than executed directly inside the Node.js application process.
+
+**Decision:**
+1. **Dedicated Native Helper Submodule (`remote-control-helper`):**
+   - Maintained as an independent Git submodule (`https://github.com/WRDeadman10/remote-control-helper.git`).
+   - Implemented in C++ utilizing standard Win32 `SendInput` APIs without requiring administrative elevation.
+   - Operates a local loopback server on `127.0.0.1:8765`, requiring an authenticated session handshake.
+   - Enforces normalized coordinate bounds `[0.0, 1.0]` and maintains a registry of depressed keys and buttons, guaranteeing immediate release upon client disconnect, lease expiry, or emergency stop.
+2. **Dual-Credential Authorization Model:**
+   - **Permanent Password:** Hashed using `crypto.scrypt` with a 16-byte random salt and persisted locally in `.control-auth.json` (or `%LOCALAPPDATA%/LanCamera/control-auth.json`). Never stored in plaintext or sent in URLs.
+   - **Session PIN:** Cryptographically generated 6-digit numeric PIN generated on screen-capture initiation, displayed on the sender UI, and invalidated immediately when screen sharing stops.
+   - Either credential authorizes the viewer to acquire the single-controller lease.
+   - 5 failed attempts locks the requesting socket out for 30 seconds.
+3. **Authoritative Single-Controller Lease with Reconnection Grace:**
+   - Server-managed lease in `RemoteControlManager` ensures at most one viewer controls at a time.
+   - When an active controller unexpectedly disconnects, native input is instantly released, and a 60-second reservation grace period holds the lease for that controller to resume without re-entering credentials.
+   - Sender maintains instant "Revoke Control" and "Disable Control" authority.
+4. **Hybrid Control Transport:**
+   - WebRTC DataChannel (label `lancam-control`) provides sub-5ms low-latency mouse and keyboard input directly between controller viewer and sender peer.
+   - Socket.IO control signaling serves as reliable fallback and manages lease state and authorization.
+
+**Consequences:**
+Authorized viewers can seamlessly control the host Windows desktop with high responsiveness and accurate coordinate mapping. The system remains completely secure: credentials are protected, input is strictly bounded, the native helper is unexposed to external networks, and all held inputs are safely released upon any interruption.
+
 ## Open decisions to revisit after the first working stream
 
 - Whether to code-sign the installer and executables (ADR-024).
