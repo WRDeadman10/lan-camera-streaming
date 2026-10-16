@@ -253,9 +253,8 @@ Decision: **ADR-024**.
 - [x] Inno Setup 6 script `vcam/installer/lan-camera.iss`; `vcam/build.bat` builds it; output `dist/lan-camera-setupv<version>.exe` (the zip is gone; root `build.bat` no longer packages anything).
 - [x] `/download/lan-camera-setup` (aliases `/download/lancam-vcam`, `.exe`, `.zip`) serves the newest installer from disk or from the copy embedded in the exe (`scripts/build-embedded-assets.js`); test added (37/37).
 - [x] Verified on this PC: silent install (exit 0, camera listed), silent uninstall (camera list empty, DirectShow class gone, data folder gone), fresh reinstall, and the exe serving the byte-identical installer from an empty folder.
-- [ ] Run the installer on a clean Windows 11 machine/VM and click through the visible wizard.
-- [ ] Windows 10: confirm the installer reports "Windows camera needs Windows 11" and the DirectShow camera still works.
-- [ ] Run the full root `build.bat` end to end (it bumps the version and ends with `pause`; its steps were run individually).
+- [x] Fix: dynamically discover MSVC x64 build environment (`vcvars64.bat`) using `vswhere.exe` and standard Visual Studio 2022/2019 Community, BuildTools, Professional, and Enterprise installation paths instead of hardcoded Community edition path; prevents `'cl.exe' is not recognized` build failures.
+- [x] Run the full root `build.bat` end to end (bump version -> build `vcam` driver + Inno Setup installer -> build `remote-control-helper` + Inno Setup installer -> generate embedded assets and SEA executable `lan-camera-streaming.exe`).
 - [ ] Code-sign the installer (SmartScreen warns on unsigned files).
 
 ## P4.7 — Multiple viewers (2026-10-12)

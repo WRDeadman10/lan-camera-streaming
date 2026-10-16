@@ -1,6 +1,6 @@
 {
   "name": "lan-camera-streaming",
-  "version": "1.0.27",
+  "version": "1.0.30",
   "description": "Production-ready self-hosted LAN camera streaming web application via WebRTC and Socket.IO",
   "main": "src/server/index.js",
   "type": "module",

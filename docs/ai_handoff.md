@@ -81,12 +81,8 @@ Version: `package.json` is 1.0.20. The files currently in `dist/` were built as 
 
 ## Modified files (last iteration, 2026-10-16)
 
-- Submodule: `remote-control-helper` (committed native helper C++ implementation, tests, and build system).
-- Core Server: `src/server/remote-control-manager.js`, `src/server/control-bridge.js`, `src/server/signaling.js`.
-- Frontend & Styling: `src/public/js/webrtc-peer.js`, `src/public/js/control-coords.js`, `src/public/js/sender.js`, `src/public/js/viewer.js`, `src/public/sender.html`, `src/public/viewer.html`, `src/public/css/style.css`.
-- Embedded Assets: `src/server/embedded-assets.js` (rebuilt via `scripts/build-embedded-assets.js`).
-- Test Suites: `tests/remote-control-manager.test.js`, `tests/control-bridge.test.js`, `tests/signaling-control.test.js`, `tests/control-coords.test.js`, `tests/viewer-control.test.js`.
-- Documentation: `docs/project-overview.md`, `docs/architecture.md`, `docs/decisions.md` (ADR-031), `docs/roadmap.md`, `docs/tasks.md`, `docs/ai_handoff.md`.
+- Virtual Camera Submodule: `vcam/build.bat` (dynamic MSVC toolchain discovery via `vswhere.exe` and standard Visual Studio 2022/2019 fallback paths).
+- Documentation: `docs/tasks.md`, `docs/ai_handoff.md`.
 
 ## Next recommended task
 
@@ -95,11 +91,17 @@ Version: `package.json` is 1.0.20. The files currently in `dist/` were built as 
 
 ## Commands run and results (latest)
 
-- `npm test`: 173/173 passed across all 20 test suites in ~3.5 seconds.
+- `vcam\build.bat`: C++ compilation (`cl.exe`) of `LanCamFilter.dll`, `LanCamMfSource.dll`, `lancam-setup.exe` and Inno Setup build of `dist/lan-camera-setupv1.0.29.exe` succeeded (exit code 0).
+- `build.bat`: Full automated build pipeline (version bump -> `vcam` build -> `remote-control-helper` build -> `lan-camera-streaming.exe` SEA build) completed successfully (exit code 0).
+- `npm test`: 173/173 passed across all 20 test suites in ~3.8 seconds.
 - `git diff --check`: 0 whitespace or formatting warnings.
 
 ## Change log (newest first)
 
+- **2026-10-16 — Fix MSVC C++ Compiler Discovery in DirectShow Virtual Camera Driver Build (`vcam/build.bat`).**
+  - Problem: `vcam/build.bat` failed during `build.bat` with `'cl.exe' is not recognized as an internal or external command` and `[ERROR] DirectShow C++ driver build failed` because the script hardcoded `C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat`. Systems equipped with Visual Studio Build Tools (`C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools`), Professional, Enterprise, or custom install paths failed to initialize MSVC.
+  - Solution: Updated `vcam/build.bat` to first check if `cl.exe` is already in PATH. If not, it uses `vswhere.exe` to dynamically find `VC\Auxiliary\Build\vcvars64.bat` across any installed Visual Studio 2022/2019 product edition (Community, BuildTools, Professional, Enterprise) in both 64-bit and x86 Program Files directories, with hardcoded fallbacks if `vswhere` is absent.
+  - Verification: Verified compilation of `LanCamFilter.dll`, `LanCamMfSource.dll`, and `lancam-setup.exe`. Ran full automated pipeline `build.bat` end-to-end; all 4 steps succeeded without errors. All 173 unit/integration tests passing.
 - **2026-10-16 — Distributed 3-System Remote Desktop Topology, Deeplink Auto-Launch & Inno Setup Distribution (ADR-032, Phase 6).**
   - Submodule `remote-control-helper`: Added HTTP health check (`GET /health`), CORS preflight, HTTP POST (`/input`), RFC 6455 WebSocket framing (`ws://127.0.0.1:8765`) via Windows WinCrypt SHA-1 + base64, single-instance mutex (`Local\LanCameraRemoteControlHelper_SingleInstance`), and automatic HKCU protocol registration (`lancam-control://`). Authored Inno Setup script `installer/control-helper.iss` generating standalone installer `control-helper-setup.exe` (1.89 MB).
   - Server & Distribution: Added `/download/control-helper-setup` routes in `src/server/server.js` and embedded installer support in `scripts/build-embedded-assets.js`.
