@@ -364,12 +364,12 @@ Decision: **ADR-025**.
 - [x] Update `docs/project-overview.md` and `docs/roadmap.md`.
 
 ### Phase 1: Authentication & Lease Management (Node.js Server)
-- [ ] Implement `RemoteControlManager` in `src/server/remote-control-manager.js`:
-  - [ ] Permanent password hash verification with `crypto.scrypt` and 16-byte random salt stored in `.control-auth.json`.
-  - [ ] 6-digit cryptographically secure session PIN generation and expiry.
-  - [ ] Rate-limiting per socket/IP (5 failed attempts locks socket for 30 seconds).
-  - [ ] Single-controller lease management with 60-second reconnection grace period, release, and sender revocation.
-  - [ ] Automated unit tests in `tests/remote-control-manager.test.js`.
+- [x] Implement `RemoteControlManager` in `src/server/remote-control-manager.js`:
+  - [x] Permanent password hash verification with `crypto.scrypt` and 16-byte random salt stored in `.control-auth.json`.
+  - [x] 6-digit cryptographically secure session PIN generation and expiry.
+  - [x] Rate-limiting per socket/IP (5 failed attempts locks socket for 30 seconds).
+  - [x] Single-controller lease management with 60-second reconnection grace period, release, and sender revocation.
+  - [x] Automated unit tests in `tests/remote-control-manager.test.js`.
 
 ### Phase 2: Native Windows Input Helper (C++ Submodule)
 - [ ] Configure `CMakeLists.txt` for MSVC / C++17 build in `remote-control-helper/`.
