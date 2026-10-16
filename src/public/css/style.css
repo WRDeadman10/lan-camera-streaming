@@ -529,7 +529,8 @@ video {
 }
 
 #fileInputGroup,
-#urlInputGroup {
+#urlInputGroup,
+#screenCursorGroup {
   display: none;
 }
 

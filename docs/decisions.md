@@ -505,6 +505,30 @@ Desktop and mobile senders can share any screen, window, or tab at 1:1 full fide
 - Validation of the production code (`WebRtcPeer`) on the RTX 3060 hardware encoder: 12 of 12 new-code runs (3 modes x 2 sources x 2 repeats, 20 s) held 1920x1080 at 29.9-30.1 FPS with no downscale; 4 of 4 runs reproducing the previous behaviour dropped to 1280x720 at 2.5 s.
 - Not proven: the user's real session (D3D12 encoder on this driver is disabled in the test profile, real `getDisplayMedia` capture on Windows 10 was not tested). Screen capture on Windows 10 can itself cap near 21 FPS (DXGI/GDI path); the sender STATS line now prints source fps next to sent fps to tell the two apart.
 
+## ADR-030: Screen share mouse cursor exclusion and reporting
+
+**Status:** Accepted (2026-10-16)
+
+**Context:**
+When sharing desktop screens, application windows, or browser tabs, the sender often needs the option to exclude the mouse cursor from the broadcasted video stream (e.g. for clean recordings, presentations, or privacy). Operating system cursors must never be hidden, moved, disabled, or manipulated directly by web applications. The W3C Screen Capture specification defines `MediaTrackConstraints.cursor` with enum values `'always' | 'motion' | 'never'`. However, browser support and implementation behavior vary: Chromium-based browsers (Chrome & Edge on Windows) track compositor cursor capture under Issue #40649204, where `navigator.mediaDevices.getSupportedConstraints().cursor` may be undefined or compositor capture may burn the cursor into frame buffers.
+
+**Decision:**
+1. **Screen Capture API Cursor Constraint:**
+   - Add a "Hide mouse cursor in screen share" checkbox (`#screenCursorToggle`) to `sender.html`, visible only when `sourceSelect` is set to `screen`.
+   - In `CameraManager.getScreenConstraints(resolution, frameRate, cursor)` and `startScreenCapture()`, merge `cursor: 'never'` (or `'always'`) with existing width, height, and frameRate constraints without overwriting other options.
+   - If the browser rejects the constraint with an `OverconstrainedError` or `TypeError`, gracefully retry capture without the `cursor` property so video acquisition never fails.
+2. **Transparent Diagnostics Reporting (No False Claims):**
+   - Provide helper `CameraManager.getEffectiveCursorSetting(track)` reading `track.getSettings().cursor`.
+   - When cursor exclusion is requested:
+     - If `effectiveCursor === 'never'`: log info confirming the browser excluded the cursor.
+     - If `effectiveCursor === 'always' | 'motion'`: warn that the browser kept the cursor visible in the stream.
+     - If `effectiveCursor === undefined`: log a warning noting the browser limitation (e.g. Chromium/Windows) and that the mouse cursor may remain visible in the stream.
+3. **Seamless Dynamic Source Update:**
+   - Attach a change listener to `#screenCursorToggle`. If screen streaming is live, invoke `applyDynamicSourceChange()` to hot-swap the video track across all active WebRTC peers without terminating connections or renegotiating SDP.
+
+**Consequences:**
+Senders can control cursor inclusion in screen broadcasts. When supported by the underlying browser and compositor, viewers receive clean, cursor-free screen video. If unsupported, the diagnostics panel provides transparent feedback explaining the browser limitation without falsely claiming the cursor is hidden.
+
 ## Open decisions to revisit after the first working stream
 
 - Whether to code-sign the installer and executables (ADR-024).

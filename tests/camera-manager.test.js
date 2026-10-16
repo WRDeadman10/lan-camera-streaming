@@ -312,4 +312,100 @@ describe('CameraManager Screen Capture and Aspect-Preserving Scaling', () => {
     );
     assert.strictEqual(callCount, 1, 'A denied picker must not be re-prompted without a user gesture');
   });
+
+  test('getScreenConstraints merges cursor constraint when provided', () => {
+    const manager = new CameraManager();
+    const c1 = manager.getScreenConstraints('max', 30, 'never');
+    assert.strictEqual(c1.cursor, 'never');
+    assert.strictEqual(c1.width.max, 7680);
+
+    const c2 = manager.getScreenConstraints('1080p', 30, 'always');
+    assert.strictEqual(c2.cursor, 'always');
+    assert.strictEqual(c2.width.max, 1920);
+
+    const c3 = manager.getScreenConstraints('max', 30);
+    assert.strictEqual(c3.cursor, undefined);
+  });
+
+  test('isCursorConstraintSupported checks navigator.mediaDevices.getSupportedConstraints', () => {
+    global.navigator.mediaDevices.getSupportedConstraints = () => ({ cursor: true, width: true });
+    assert.strictEqual(CameraManager.isCursorConstraintSupported(), true);
+
+    global.navigator.mediaDevices.getSupportedConstraints = () => ({ width: true });
+    assert.strictEqual(CameraManager.isCursorConstraintSupported(), false);
+
+    delete global.navigator.mediaDevices.getSupportedConstraints;
+    assert.strictEqual(CameraManager.isCursorConstraintSupported(), false);
+  });
+
+  test('getEffectiveCursorSetting inspects track.getSettings().cursor', () => {
+    const trackWithCursor = { getSettings: () => ({ cursor: 'never', width: 1920 }) };
+    assert.strictEqual(CameraManager.getEffectiveCursorSetting(trackWithCursor), 'never');
+
+    const trackWithoutCursor = { getSettings: () => ({ width: 1920 }) };
+    assert.strictEqual(CameraManager.getEffectiveCursorSetting(trackWithoutCursor), undefined);
+
+    assert.strictEqual(CameraManager.getEffectiveCursorSetting(null), undefined);
+  });
+
+  test('startScreenCapture merges cursor: "never" constraint into getDisplayMedia options', async () => {
+    const manager = new CameraManager();
+    const stream = await manager.startScreenCapture({ resolution: '1080p', cursor: 'never' });
+    assert.ok(stream);
+    assert.strictEqual(lastGDMConstraints.video.cursor, 'never');
+    assert.strictEqual(lastGDMConstraints.video.width.max, 1920);
+    assert.strictEqual(lastGDMConstraints.video.height.max, 1080);
+  });
+
+  test('startScreenCapture retries without cursor constraint when browser throws OverconstrainedError', async () => {
+    let callCount = 0;
+    const calls = [];
+    global.navigator.mediaDevices.getDisplayMedia = async (constraints) => {
+      callCount++;
+      calls.push(constraints);
+      if (constraints.video && constraints.video.cursor) {
+        const err = new Error('Constraint not satisfied: cursor');
+        err.name = 'OverconstrainedError';
+        throw err;
+      }
+      return {
+        getTracks: () => mockScreenTracks,
+        getVideoTracks: () => mockScreenTracks,
+        getAudioTracks: () => []
+      };
+    };
+
+    const manager = new CameraManager();
+    const stream = await manager.startScreenCapture({ resolution: '720p', cursor: 'never' });
+    assert.ok(stream);
+    assert.strictEqual(callCount, 2, 'Should retry without cursor constraint');
+    assert.strictEqual(calls[0].video.cursor, 'never');
+    assert.strictEqual(calls[1].video.cursor, undefined);
+    assert.strictEqual(calls[1].video.width.max, 1280);
+  });
+
+  test('startScreenCapture preserves cursor constraint on audio fallback', async () => {
+    let callCount = 0;
+    const calls = [];
+    global.navigator.mediaDevices.getDisplayMedia = async (constraints) => {
+      callCount++;
+      calls.push(constraints);
+      if (constraints.audio) {
+        const audioErr = new Error('Display audio not supported');
+        audioErr.name = 'NotSupportedError';
+        throw audioErr;
+      }
+      return {
+        getTracks: () => mockScreenTracks,
+        getVideoTracks: () => mockScreenTracks,
+        getAudioTracks: () => []
+      };
+    };
+
+    const manager = new CameraManager();
+    const stream = await manager.startScreenCapture({ withAudio: true, cursor: 'never' });
+    assert.ok(stream);
+    assert.strictEqual(callCount, 2, 'Should fall back to video-only if audio fails');
+    assert.strictEqual(calls[1].video.cursor, 'never');
+  });
 });

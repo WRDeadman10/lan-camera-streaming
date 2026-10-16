@@ -217,6 +217,15 @@
               <label for="urlInput">Video URL</label>
               <input type="text" id="urlInput" placeholder="https://example.com/stream.mp4">
             </div>
+            <div class="form-group" id="screenCursorGroup" style="display:none;">
+              <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.85rem;">
+                <input type="checkbox" id="screenCursorToggle">
+                <span>Hide mouse cursor in screen share</span>
+              </label>
+              <span class="help-text" style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-top: 4px;">
+                Requests the browser to exclude the mouse cursor from the captured video stream.
+              </span>
+            </div>
 
             <div class="form-group" id="resolutionGroup">
               <label for="cameraResolution">Quality / Resolution</label>

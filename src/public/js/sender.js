@@ -302,6 +302,8 @@ const fileInput = document.getElementById('fileInput');
 const urlInput = document.getElementById('urlInput');
 const fileInputGroup = document.getElementById('fileInputGroup');
 const urlInputGroup = document.getElementById('urlInputGroup');
+const screenCursorGroup = document.getElementById('screenCursorGroup');
+const screenCursorToggle = document.getElementById('screenCursorToggle');
 const cameraSelectGroup = document.getElementById('cameraSelectGroup');
 const focusModeGroup = document.getElementById('focusModeGroup');
 const focusDistanceGroup = document.getElementById('focusDistanceGroup');
@@ -314,6 +316,7 @@ function updateSourceInputsVisibility() {
   if (value === 'file') {
     if (fileInputGroup) { fileInputGroup.style.display = 'block'; }
     if (urlInputGroup) { urlInputGroup.style.display = 'none'; }
+    if (screenCursorGroup) { screenCursorGroup.style.display = 'none'; }
     if (cameraSelectGroup) { cameraSelectGroup.style.display = 'none'; }
     if (focusModeGroup) { focusModeGroup.style.display = 'none'; }
     if (focusDistanceGroup) { focusDistanceGroup.style.display = 'none'; }
@@ -321,6 +324,7 @@ function updateSourceInputsVisibility() {
   } else if (value === 'url') {
     if (fileInputGroup) { fileInputGroup.style.display = 'none'; }
     if (urlInputGroup) { urlInputGroup.style.display = 'block'; }
+    if (screenCursorGroup) { screenCursorGroup.style.display = 'none'; }
     if (cameraSelectGroup) { cameraSelectGroup.style.display = 'none'; }
     if (focusModeGroup) { focusModeGroup.style.display = 'none'; }
     if (focusDistanceGroup) { focusDistanceGroup.style.display = 'none'; }
@@ -328,6 +332,7 @@ function updateSourceInputsVisibility() {
   } else if (value === 'screen') {
     if (fileInputGroup) { fileInputGroup.style.display = 'none'; }
     if (urlInputGroup) { urlInputGroup.style.display = 'none'; }
+    if (screenCursorGroup) { screenCursorGroup.style.display = 'block'; }
     if (cameraSelectGroup) { cameraSelectGroup.style.display = 'none'; }
     if (focusModeGroup) { focusModeGroup.style.display = 'none'; }
     if (focusDistanceGroup) { focusDistanceGroup.style.display = 'none'; }
@@ -337,6 +342,7 @@ function updateSourceInputsVisibility() {
     // webcam
     if (fileInputGroup) { fileInputGroup.style.display = 'none'; }
     if (urlInputGroup) { urlInputGroup.style.display = 'none'; }
+    if (screenCursorGroup) { screenCursorGroup.style.display = 'none'; }
     if (cameraSelectGroup) { cameraSelectGroup.style.display = 'block'; }
     if (focusModeGroup) { focusModeGroup.style.display = 'block'; }
     if (resolutionGroup) { resolutionGroup.style.display = 'block'; }
@@ -351,6 +357,15 @@ if (sourceSelect) {
   sourceSelect.addEventListener('change', async () => {
     updateSourceInputsVisibility();
     if (isStreamingActive()) {
+      await applyDynamicSourceChange();
+    }
+  });
+}
+
+if (screenCursorToggle) {
+  screenCursorToggle.addEventListener('change', async () => {
+    if (isStreamingActive() && sourceSelect && sourceSelect.value === 'screen') {
+      logDiagnostic(`[SCREEN] Screen cursor setting changed to ${screenCursorToggle.checked ? 'hidden (never)' : 'visible (always)'}; updating screen capture...`, 'INFO');
       await applyDynamicSourceChange();
     }
   });
@@ -1007,14 +1022,34 @@ async function obtainStreamForCurrentSource() {
     const resChoice = cameraResolutionSelect ? cameraResolutionSelect.value : 'max';
     const audioToggle = document.getElementById('audioToggle');
     const withAudio = Boolean(audioToggle && audioToggle.checked);
-    logDiagnostic(`Requesting screen capture (quality: ${resChoice}, audio: ${withAudio})...`, 'INFO');
+    const hideCursor = Boolean(screenCursorToggle && screenCursorToggle.checked);
+    const cursorConstraint = hideCursor ? 'never' : 'always';
+    logDiagnostic(`Requesting screen capture (quality: ${resChoice}, audio: ${withAudio}, cursor: ${cursorConstraint})...`, 'INFO');
     const stream = await cameraManager.startScreenCapture({
       resolution: resChoice,
       frameRate: 30,
-      withAudio
+      withAudio,
+      cursor: cursorConstraint
     });
     const videoTrack = stream.getVideoTracks()[0];
     if (videoTrack) {
+      const effectiveCursor = CameraManager.getEffectiveCursorSetting(videoTrack);
+      if (hideCursor) {
+        if (effectiveCursor === 'never') {
+          logDiagnostic('[SCREEN] Cursor hiding requested (\'never\'); browser confirmed effective cursor setting is \'never\' (cursor excluded from capture).', 'INFO');
+        } else if (effectiveCursor === 'always' || effectiveCursor === 'motion') {
+          logDiagnostic(`[SCREEN] Cursor hiding requested ('never'), but browser reports effective cursor setting as '${effectiveCursor}' (cursor remains visible in captured stream).`, 'WARN');
+        } else {
+          logDiagnostic('[SCREEN] Cursor constraint \'never\' requested; browser does not expose cursor in track settings (Chromium/Windows limitation; mouse cursor may remain visible in captured stream).', 'WARN');
+        }
+      } else {
+        if (effectiveCursor) {
+          logDiagnostic(`[SCREEN] Screen capture active with effective cursor setting '${effectiveCursor}'.`, 'INFO');
+        } else {
+          logDiagnostic('[SCREEN] Screen capture active (browser does not report cursor setting).', 'INFO');
+        }
+      }
+
       videoTrack.addEventListener('ended', () => {
         logDiagnostic('[SCREEN] Screen sharing stopped via browser UI.', 'WARN');
         if (isStreamingActive()) {

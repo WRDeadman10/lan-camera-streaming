@@ -111,3 +111,23 @@ describe('Viewer quality setting', () => {
     assert.match(viewerJs, /sendQualityPriority\(\);/);
   });
 });
+
+describe('Screen share cursor hiding controls', () => {
+  test('sender HTML contains screen cursor toggle and group', () => {
+    assert.match(senderHtml, /id="screenCursorGroup"/);
+    assert.match(senderHtml, /id="screenCursorToggle"/);
+    assert.match(senderHtml, /Hide mouse cursor in screen share/);
+  });
+
+  test('sender JS wires screen cursor toggle change to applyDynamicSourceChange', () => {
+    assert.match(senderJs, /screenCursorToggle\.addEventListener\('change'/);
+    assert.match(senderJs, /applyDynamicSourceChange\(\)/);
+  });
+
+  test('sender JS passes cursor constraint and inspects effective cursor setting', () => {
+    assert.match(senderJs, /cursor: cursorConstraint/);
+    assert.match(senderJs, /CameraManager\.getEffectiveCursorSetting\(videoTrack\)/);
+    assert.match(senderJs, /cursor remains visible/);
+    assert.match(senderJs, /Chromium\/Windows limitation/);
+  });
+});

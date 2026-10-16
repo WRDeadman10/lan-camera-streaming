@@ -233,39 +233,64 @@ export class CameraManager {
     return Boolean(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
   }
 
-  getScreenConstraints(resolution = 'max', frameRate = 30) {
+  static isCursorConstraintSupported() {
+    if (navigator.mediaDevices && typeof navigator.mediaDevices.getSupportedConstraints === 'function') {
+      const supported = navigator.mediaDevices.getSupportedConstraints();
+      return Boolean(supported && supported.cursor);
+    }
+    return false;
+  }
+
+  static getEffectiveCursorSetting(track) {
+    if (track && typeof track.getSettings === 'function') {
+      const settings = track.getSettings();
+      if (settings && typeof settings.cursor === 'string') {
+        return settings.cursor;
+      }
+    }
+    return undefined;
+  }
+
+  getScreenConstraints(resolution = 'max', frameRate = 30, cursor = undefined) {
+    let constraints;
     if (resolution === 'max' || resolution === 'full') {
-      return {
+      constraints = {
         width: { max: 7680 },
         height: { max: 4320 },
         frameRate: { ideal: frameRate, max: 60 }
       };
+    } else {
+      let maxLong = 1920;
+      let maxShort = 1080;
+      if (resolution === '1080p') {
+        maxLong = 1920;
+        maxShort = 1080;
+      } else if (resolution === '720p') {
+        maxLong = 1280;
+        maxShort = 720;
+      } else if (resolution === '480p') {
+        maxLong = 854;
+        maxShort = 480;
+      }
+
+      constraints = {
+        width: { max: maxLong },
+        height: { max: maxShort },
+        frameRate: { ideal: frameRate, max: 60 }
+      };
     }
 
-    let maxLong = 1920;
-    let maxShort = 1080;
-    if (resolution === '1080p') {
-      maxLong = 1920;
-      maxShort = 1080;
-    } else if (resolution === '720p') {
-      maxLong = 1280;
-      maxShort = 720;
-    } else if (resolution === '480p') {
-      maxLong = 854;
-      maxShort = 480;
+    if (cursor !== undefined && cursor !== null && cursor !== '') {
+      constraints.cursor = cursor;
     }
-
-    return {
-      width: { max: maxLong },
-      height: { max: maxShort },
-      frameRate: { ideal: frameRate, max: 60 }
-    };
+    return constraints;
   }
 
   async startScreenCapture({
     resolution = 'max',
     frameRate = 30,
-    withAudio = false
+    withAudio = false,
+    cursor = undefined
   } = {}) {
     if (!CameraManager.isSecureContext()) {
       throw new Error('Screen capture requires a secure context (HTTPS or localhost).');
@@ -289,7 +314,7 @@ export class CameraManager {
       }
     };
 
-    const videoConstraints = this.getScreenConstraints(resolution, frameRate);
+    const videoConstraints = this.getScreenConstraints(resolution, frameRate, cursor);
     const audioConstraint = typeof withAudio === 'object' && withAudio !== null
       ? withAudio
       : Boolean(withAudio);
@@ -302,7 +327,24 @@ export class CameraManager {
         displayMediaOptions.audio = audioConstraint;
       }
 
-      const stream = await navigator.mediaDevices.getDisplayMedia(displayMediaOptions);
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getDisplayMedia(displayMediaOptions);
+      } catch (displayErr) {
+        if (cursor && (displayErr.name === 'OverconstrainedError' || displayErr.name === 'TypeError')) {
+          console.warn(`Screen capture rejected with cursor constraint '${cursor}'; retrying without cursor constraint.`, displayErr);
+          const fallbackOptions = {
+            video: this.getScreenConstraints(resolution, frameRate)
+          };
+          if (audioConstraint) {
+            fallbackOptions.audio = audioConstraint;
+          }
+          stream = await navigator.mediaDevices.getDisplayMedia(fallbackOptions);
+        } else {
+          throw displayErr;
+        }
+      }
+
       releasePreviousStream(stream);
       this.currentStream = stream;
       return stream;
@@ -310,9 +352,21 @@ export class CameraManager {
       const isUserDenial = err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError' || err.name === 'AbortError';
       if (audioConstraint && !isUserDenial) {
         try {
-          const videoOnlyStream = await navigator.mediaDevices.getDisplayMedia({
-            video: videoConstraints
-          });
+          const videoOnlyConstraints = this.getScreenConstraints(resolution, frameRate, cursor);
+          let videoOnlyStream;
+          try {
+            videoOnlyStream = await navigator.mediaDevices.getDisplayMedia({
+              video: videoOnlyConstraints
+            });
+          } catch (audioFallbackErr) {
+            if (cursor && (audioFallbackErr.name === 'OverconstrainedError' || audioFallbackErr.name === 'TypeError')) {
+              videoOnlyStream = await navigator.mediaDevices.getDisplayMedia({
+                video: this.getScreenConstraints(resolution, frameRate)
+              });
+            } else {
+              throw audioFallbackErr;
+            }
+          }
           console.warn('Screen audio capture failed; falling back to video-only screen capture stream.', err);
           releasePreviousStream(videoOnlyStream);
           this.currentStream = videoOnlyStream;

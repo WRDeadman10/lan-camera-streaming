@@ -345,5 +345,12 @@ Decision: **ADR-025**.
   - [x] Hardware encoder detection recognises `D3D12VideoEncodeAccelerator`, unknown encoders never force VP8, the VP8 latch expires after 24 h.
   - [x] Screen Share Content Type switch (Motion / Detail) for A/B testing on real screen capture.
   - [ ] Verify on the real sender: 120 s per mode with a moving test page; read `src` fps vs `sent` fps in the `[STATS]` line to see whether Windows 10 screen capture itself caps at about 21 fps (then share a window or a tab instead of the whole screen).
-  - [ ] Decide the default Screen Share Content Type (Motion vs Detail) from those runs.
   - [ ] Multi-viewer load test (2-3 viewers at 12-16 Mbps each) and real Wi-Fi start-bitrate tuning.
+- [x] Screen Share Mouse Cursor Exclusion & Diagnostics Reporting (ADR-030):
+  - [x] Add screen cursor toggle checkbox (`#screenCursorToggle`) in `src/public/sender.html` and default `#screenCursorGroup { display: none; }` in `src/public/css/style.css`.
+  - [x] Integrate `cursor` constraint into `CameraManager.getScreenConstraints(resolution, frameRate, cursor)` and `startScreenCapture()`.
+  - [x] Graceful fallback retry without `cursor` if the browser rejects the constraint with `OverconstrainedError` or `TypeError`.
+  - [x] Provide static helpers `CameraManager.isCursorConstraintSupported()` and `CameraManager.getEffectiveCursorSetting(track)`.
+  - [x] Transparent diagnostics reporting: log browser confirmation when `cursor === 'never'`, warning when browser keeps cursor visible (`'always'`/`'motion'`), or warning explaining browser limitation when cursor is not exposed in settings (Chromium/Windows limitation).
+  - [x] Live dynamic source switching via `applyDynamicSourceChange()` when toggle changes during active screen sharing.
+  - [x] Verified in automated Node.js tests (156/156 passing) and verified empirically against real Google Chrome and Microsoft Edge on Windows via CDP.
