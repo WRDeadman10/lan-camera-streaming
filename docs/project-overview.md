@@ -30,6 +30,7 @@ The first milestone was one sender and one viewer. Since ADR-018 a room accepts 
 - Provide real-time diagnostics: frame rates, dropped frames, encoding latency, and data transfer rates.
 - Distribute the server as a standalone Windows executable (`lan-camera-streaming.exe`) that needs no Node.js on the target PC.
 - Offer a Windows **virtual webcam** ("LAN Phone Camera") so any Windows application can use the phone camera: a Media Foundation camera for the Windows Camera app, Teams, Zoom, Chrome and Unity (Windows 11), and a DirectShow camera for OBS, ffmpeg and older software. It ships as one Inno Setup installer (`lan-camera-setupv<version>.exe`) built from the `vcam` submodule.
+- Offer **remote desktop control** for Windows desktop screen sharing: an authorized viewer can control the host mouse and keyboard via permanent password or temporary session PIN, using the native `remote-control-helper` submodule and WebRTC DataChannel / loopback IPC.
 - Avoid recording, storing, or uploading video to a cloud service.
 
 ## 4. Non-goals for the MVP
@@ -49,13 +50,15 @@ The first milestone was one sender and one viewer. Since ADR-018 a room accepts 
 | Runtime | Node.js | Runs the server on Windows |
 | Distribution | Single Executable (`.exe`) | Standalone zero-dependency Windows console executable via Node SEA |
 | Virtual webcam | C++ (MSVC, static CRT), DirectShow + Media Foundation, Inno Setup 6 | Separate repository mounted as the `vcam/` submodule; one installer `lan-camera-setupv<version>.exe` |
+| Remote control helper | C++ (MSVC / CMake, SendInput), Winsock2 | Separate repository mounted as `remote-control-helper/` submodule; injects native OS input on Windows |
 | HTTP server | Express | Serves the web pages, static assets, and optional MJPEG stream |
-| Signaling & Relay | Socket.IO | Room membership, WebRTC signaling, and binary tunnel frame relay |
+| Signaling & Relay | Socket.IO | Room membership, WebRTC signaling, binary tunnel frame relay, and control authorization |
 | Camera capture | Browser `getUserMedia()` | Requests permission and captures local camera stream |
-| Standard media transport | WebRTC | Direct peer-to-peer live video between sender and receiver (Mode A) |
+| Screen capture | Browser `getDisplayMedia()` | Captures desktop displays/windows with cursor exclusion option (ADR-028/030) |
+| Standard media transport | WebRTC | Direct peer-to-peer live video and DataChannel control between sender and receiver (Mode A) |
 | Experimental media transport | Binary Canvas JPEG | Relays binary frames through Windows server over WebSocket (Mode B) |
 | External integration | Socket.IO WebRTC & HTTP MJPEG | Versioned contract for external clients (e.g. Python OpenCV / YOLO) |
-| UI | HTML, CSS, browser JavaScript | Responsive sender and viewer interfaces with diagnostics panel |
+| UI | HTML, CSS, browser JavaScript | Responsive sender and viewer interfaces with diagnostics panel and remote control controls |
 | HTTPS / Tunnel | zrok (primary) | Provides public HTTPS tunnel with 5 GB/day free transfer |
 | Media fallback | TURN server, if later required | Relays media when direct ICE connectivity cannot be established |
 

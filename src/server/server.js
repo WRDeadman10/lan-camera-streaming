@@ -77,9 +77,10 @@ export function createServer(config, logger) {
       "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
       "style-src 'self' 'unsafe-inline' https:; " +
       "img-src 'self' data: blob: https://images.unsplash.com https://*.unsplash.com https:; " +
-      "connect-src 'self' ws: wss: https://api.unsplash.com https://*.unsplash.com https:; " +
+      "connect-src 'self' ws: wss: http: https: https://api.unsplash.com https://*.unsplash.com http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; " +
       "media-src 'self' blob: mediastream: data:; " +
       "font-src 'self' data: https:; " +
+      "frame-src 'self' lancam-control: lancam:; " +
       "worker-src 'self' blob:;"
     );
     next();
@@ -330,6 +331,64 @@ export function createServer(config, logger) {
 
     logger.warn('Driver installer requested but no lan-camera-setupv*.exe was found next to the exe, in dist/, or embedded.');
     res.status(404).send('Driver installer not found. Run build.bat to build it.');
+  });
+
+  // Download the remote desktop control helper installer or portable executable
+  const controlHelperRoutes = [
+    '/download/control-helper-setup',
+    '/download/control-helper-setup.exe',
+    '/download/remote-control-helper',
+    '/download/remote-control-helper.exe'
+  ];
+  app.get(controlHelperRoutes, (req, res) => {
+    const exeDir = path.dirname(process.execPath);
+    const searchDirs = [
+      path.resolve(__dirname, '../../remote-control-helper/build/installer'),
+      path.resolve(__dirname, '../../remote-control-helper/build/Release'),
+      path.resolve(__dirname, '../../remote-control-helper'),
+      exeDir,
+      path.join(exeDir, 'dist'),
+      process.cwd(),
+      path.join(process.cwd(), 'dist'),
+      path.resolve(__dirname, '../../dist')
+    ];
+
+    let foundFile = null;
+    // Priority 1: Inno setup installer
+    for (const dir of searchDirs) {
+      const installerPath = path.join(dir, 'control-helper-setup.exe');
+      if (fs.existsSync(installerPath)) {
+        foundFile = { fullPath: installerPath, name: 'control-helper-setup.exe' };
+        break;
+      }
+    }
+    // Priority 2: Standalone helper executable
+    if (!foundFile) {
+      for (const dir of searchDirs) {
+        const helperPath = path.join(dir, 'remote-control-helper.exe');
+        if (fs.existsSync(helperPath)) {
+          foundFile = { fullPath: helperPath, name: 'remote-control-helper.exe' };
+          break;
+        }
+      }
+    }
+
+    if (foundFile) {
+      res.download(foundFile.fullPath, foundFile.name);
+      return;
+    }
+
+    // Embedded fallback if available
+    const embeddedHelper = embeddedAssets ? (embeddedAssets['/download/control-helper-setup.exe'] || embeddedAssets['/download/remote-control-helper.exe']) : null;
+    if (embeddedHelper) {
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Content-Disposition', `attachment; filename="${embeddedHelper.fileName || 'control-helper-setup.exe'}"`);
+      res.send(Buffer.from(embeddedHelper.content, 'base64'));
+      return;
+    }
+
+    logger.warn('Remote control helper installer requested but neither control-helper-setup.exe nor remote-control-helper.exe was found.');
+    res.status(404).send('Remote control helper not found. Build it in remote-control-helper/ first.');
   });
 
   // Static files directory: check filesystem locations, fallback to embedded assets

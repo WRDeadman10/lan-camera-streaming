@@ -1,3 +1,6 @@
 [submodule "vcam"]
 	path = vcam
 	url = https://github.com/WRDeadman10/DirectShow.git
+[submodule "remote-control-helper"]
+	path = remote-control-helper
+	url = https://github.com/WRDeadman10/remote-control-helper.git

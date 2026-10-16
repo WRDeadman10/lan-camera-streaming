@@ -6,10 +6,29 @@
 import { Server } from 'socket.io';
 import { RoomManager } from './room-manager.js';
 import { TunnelRelay } from './tunnel-relay.js';
+import { RemoteControlManager } from './remote-control-manager.js';
+import { ControlBridge } from './control-bridge.js';
 
 export function setupSignaling(httpServer, config, logger) {
   const roomManager = new RoomManager(config.accessPin);
   const tunnelRelay = new TunnelRelay({ maxFrameSizeBytes: 600000, maxFps: 30 });
+  const remoteControlManager = new RemoteControlManager({
+    authFilePath: config.controlAuthFilePath,
+    logger
+  });
+  const controlBridge = new ControlBridge({
+    host: config.controlHelperHost || '127.0.0.1',
+    port: config.controlHelperPort || 8765,
+    authToken: config.controlHelperToken || '',
+    logger
+  });
+  controlBridge.connect().catch(() => {});
+
+  if (httpServer && typeof httpServer.on === 'function') {
+    httpServer.on('close', () => {
+      controlBridge.disconnect();
+    });
+  }
 
   const io = new Server(httpServer, {
     serveClient: false, // the browser client is served by server.js at /vendor/socket.io.js so it also works inside the standalone exe
@@ -127,6 +146,7 @@ export function setupSignaling(httpServer, config, logger) {
         logger.info(`Socket ${socket.id} joined room "${roomId}" as ${role} [mode: ${result.mediaMode}]`);
 
         if (result.role === 'sender') {
+          remoteControlManager.setSenderSocket(roomId, socket.id);
           const viewerQuality = {};
           for (const viewerId of Array.isArray(result.peerSocketIds) ? result.peerSocketIds : []) {
             if (viewerQualityModes.has(viewerId)) {
@@ -136,6 +156,18 @@ export function setupSignaling(httpServer, config, logger) {
           if (Object.keys(viewerQuality).length > 0) {
             result.viewerQuality = viewerQuality;
           }
+          result.controlState = {
+            enabled: remoteControlManager.isControlEnabled(roomId),
+            sessionPin: remoteControlManager.getSessionPin(roomId),
+            hasController: Boolean(remoteControlManager.getActiveController(roomId)),
+            hasPermanentPassword: remoteControlManager.hasPermanentPassword()
+          };
+        } else {
+          result.controlState = {
+            enabled: remoteControlManager.isControlEnabled(roomId),
+            hasController: Boolean(remoteControlManager.getActiveController(roomId)),
+            hasPermanentPassword: remoteControlManager.hasPermanentPassword()
+          };
         }
 
         if (typeof callback === 'function') {
@@ -488,12 +520,343 @@ export function setupSignaling(httpServer, config, logger) {
       }
     });
 
+    // Remote Desktop Control: Enable / Disable toggle by sender
+    socket.on('control:enable', (payload, callback) => {
+      try {
+        if (!payload || typeof payload !== 'object' || typeof payload.roomId !== 'string') {
+          if (typeof callback === 'function') {
+            callback({ success: false, error: 'Invalid payload.' });
+          }
+          return;
+        }
+        const { roomId, enabled, pin } = payload;
+        const membership = roomManager.getMembership(socket.id);
+        const isAuthorizedSender = (membership && membership.roomId === roomId && membership.role === 'sender') ||
+          (pin && pin === config.accessPin);
+        if (!isAuthorizedSender) {
+          if (typeof callback === 'function') {
+            callback({ success: false, error: 'Unauthorized. Only sender can toggle remote control.' });
+          }
+          return;
+        }
+
+        const res = remoteControlManager.setControlEnabled(roomId, enabled);
+        let sessionPin = null;
+        if (enabled) {
+          sessionPin = remoteControlManager.getSessionPin(roomId) || remoteControlManager.generateSessionPin(roomId);
+        }
+
+        if (res.revokedControllerId) {
+          controlBridge.releaseAll();
+          io.to(res.revokedControllerId).emit('control:revoked', { reason: 'control_disabled' });
+        }
+
+        io.to(roomId).emit('control:state', {
+          enabled: Boolean(enabled),
+          hasController: Boolean(remoteControlManager.getActiveController(roomId)),
+          hasPermanentPassword: remoteControlManager.hasPermanentPassword()
+        });
+
+        if (typeof callback === 'function') {
+          callback({
+            success: true,
+            enabled: Boolean(enabled),
+            sessionPin,
+            hasPermanentPassword: remoteControlManager.hasPermanentPassword()
+          });
+        }
+      } catch (err) {
+        logger.error(`Error in control:enable: ${err.message}`);
+        if (typeof callback === 'function') {
+          callback({ success: false, error: 'Internal error.' });
+        }
+      }
+    });
+
+    // Remote Desktop Control: Regenerate ephemeral session PIN
+    socket.on('control:pin:regenerate', (payload, callback) => {
+      try {
+        if (!payload || typeof payload !== 'object' || typeof payload.roomId !== 'string') {
+          if (typeof callback === 'function') {
+            callback({ success: false, error: 'Invalid payload.' });
+          }
+          return;
+        }
+        const { roomId, pin } = payload;
+        const membership = roomManager.getMembership(socket.id);
+        const isAuthorizedSender = (membership && membership.roomId === roomId && membership.role === 'sender') ||
+          (pin && pin === config.accessPin);
+        if (!isAuthorizedSender) {
+          if (typeof callback === 'function') {
+            callback({ success: false, error: 'Unauthorized. Only sender can regenerate PIN.' });
+          }
+          return;
+        }
+
+        const newPin = remoteControlManager.generateSessionPin(roomId);
+        logger.info(`Session PIN regenerated for room "${roomId}"`);
+        if (typeof callback === 'function') {
+          callback({ success: true, sessionPin: newPin });
+        }
+      } catch (err) {
+        logger.error(`Error in control:pin:regenerate: ${err.message}`);
+        if (typeof callback === 'function') {
+          callback({ success: false, error: 'Internal error.' });
+        }
+      }
+    });
+
+    // Remote Desktop Control: Set permanent password
+    socket.on('control:password:set', (payload, callback) => {
+      try {
+        if (!payload || typeof payload !== 'object' || typeof payload.password !== 'string') {
+          if (typeof callback === 'function') {
+            callback({ success: false, error: 'Invalid password format.' });
+          }
+          return;
+        }
+        const membership = roomManager.getMembership(socket.id);
+        const pin = payload.pin;
+        const isAuthorized = (membership && membership.role === 'sender') ||
+          (pin && pin === config.accessPin);
+        if (!isAuthorized) {
+          if (typeof callback === 'function') {
+            callback({ success: false, error: 'Unauthorized. Only sender can set control password.' });
+          }
+          return;
+        }
+
+        const res = remoteControlManager.setPermanentPassword(payload.password);
+        if (res.success) {
+          logger.info(`Permanent control password updated by sender ${socket.id}`);
+          const targetRoomId = membership ? membership.roomId : null;
+          if (targetRoomId) {
+            io.to(targetRoomId).emit('control:state', {
+              enabled: remoteControlManager.isControlEnabled(targetRoomId),
+              hasController: Boolean(remoteControlManager.getActiveController(targetRoomId)),
+              hasPermanentPassword: true
+            });
+          }
+        }
+        if (typeof callback === 'function') {
+          callback(res);
+        }
+      } catch (err) {
+        logger.error(`Error in control:password:set: ${err.message}`);
+        if (typeof callback === 'function') {
+          callback({ success: false, error: 'Internal error.' });
+        }
+      }
+    });
+
+    // Remote Desktop Control: Clear permanent password
+    socket.on('control:password:clear', (payload, callback) => {
+      try {
+        const cb = typeof callback === 'function' ? callback : (typeof payload === 'function' ? payload : null);
+        const pin = payload && typeof payload === 'object' && typeof payload.pin === 'string' ? payload.pin : null;
+        const membership = roomManager.getMembership(socket.id);
+        const isAuthorized = (membership && membership.role === 'sender') ||
+          (pin && pin === config.accessPin);
+        if (!isAuthorized) {
+          if (typeof cb === 'function') {
+            cb({ success: false, error: 'Unauthorized.' });
+          }
+          return;
+        }
+
+        const res = remoteControlManager.clearPermanentPassword();
+        const targetRoomId = membership ? membership.roomId : null;
+        if (targetRoomId) {
+          io.to(targetRoomId).emit('control:state', {
+            enabled: remoteControlManager.isControlEnabled(targetRoomId),
+            hasController: Boolean(remoteControlManager.getActiveController(targetRoomId)),
+            hasPermanentPassword: false
+          });
+        }
+        if (typeof cb === 'function') {
+          cb(res);
+        }
+      } catch (err) {
+        const cb = typeof callback === 'function' ? callback : (typeof payload === 'function' ? payload : null);
+        if (typeof cb === 'function') {
+          cb({ success: false, error: 'Internal error.' });
+        }
+      }
+    });
+
+    // Remote Desktop Control: Check if permanent password exists
+    socket.on('control:password:has', (callback) => {
+      if (typeof callback === 'function') {
+        callback({ hasPassword: remoteControlManager.hasPermanentPassword() });
+      }
+    });
+
+    // Remote Desktop Control: Request lease
+    socket.on('control:request-lease', (payload, callback) => {
+      try {
+        if (!payload || typeof payload !== 'object' || typeof payload.roomId !== 'string' || typeof payload.credential !== 'string') {
+          if (typeof callback === 'function') {
+            callback({ success: false, error: 'Invalid request payload.' });
+          }
+          return;
+        }
+        const { roomId, credential, controllerToken } = payload;
+        const membership = roomManager.getMembership(socket.id);
+        if (!membership || membership.roomId !== roomId || membership.role !== 'viewer') {
+          if (typeof callback === 'function') {
+            callback({ success: false, error: 'Only room viewers can request control.' });
+          }
+          return;
+        }
+
+        const clientIp = socket.handshake.address;
+        const leaseResult = remoteControlManager.requestLease(roomId, socket.id, credential, {
+          controllerToken,
+          clientIp
+        });
+
+        if (leaseResult.success) {
+          logger.info(`Control lease granted to viewer ${socket.id} in room "${roomId}" (reconnected: ${Boolean(leaseResult.reconnected)})`);
+          const room = roomManager.getRoom(roomId);
+          if (room && room.senderSocketId) {
+            io.to(room.senderSocketId).emit('control:controller-joined', {
+              controllerId: socket.id,
+              reconnected: Boolean(leaseResult.reconnected)
+            });
+          }
+          io.to(roomId).emit('control:state', {
+            enabled: true,
+            hasController: true,
+            controllerId: socket.id
+          });
+        } else {
+          logger.warn(`Control lease request rejected for ${socket.id} in room "${roomId}": ${leaseResult.error}`);
+        }
+
+        if (typeof callback === 'function') {
+          callback(leaseResult);
+        }
+      } catch (err) {
+        logger.error(`Error in control:request-lease: ${err.message}`);
+        if (typeof callback === 'function') {
+          callback({ success: false, error: 'Internal error.' });
+        }
+      }
+    });
+
+    // Remote Desktop Control: Release lease
+    socket.on('control:release', (payload, callback) => {
+      try {
+        const roomId = payload && payload.roomId;
+        const membership = roomManager.getMembership(socket.id);
+        if (!membership || !roomId) {
+          if (typeof callback === 'function') {
+            callback({ success: false, error: 'Invalid request.' });
+          }
+          return;
+        }
+
+        const res = remoteControlManager.releaseLease(roomId, socket.id);
+        if (res.success) {
+          controlBridge.releaseAll();
+          logger.info(`Viewer ${socket.id} voluntarily released control in room "${roomId}"`);
+          const room = roomManager.getRoom(roomId);
+          if (room && room.senderSocketId) {
+            io.to(room.senderSocketId).emit('control:controller-left', {
+              controllerId: socket.id,
+              reason: 'released'
+            });
+          }
+          io.to(roomId).emit('control:state', {
+            enabled: remoteControlManager.isControlEnabled(roomId),
+            hasController: false,
+            inGrace: false
+          });
+        }
+        if (typeof callback === 'function') {
+          callback(res);
+        }
+      } catch (err) {
+        logger.error(`Error in control:release: ${err.message}`);
+        if (typeof callback === 'function') {
+          callback({ success: false, error: 'Internal error.' });
+        }
+      }
+    });
+
+    // Remote Desktop Control: Revoke lease by host
+    socket.on('control:revoke', (payload, callback) => {
+      try {
+        const roomId = payload && payload.roomId;
+        const membership = roomManager.getMembership(socket.id);
+        if (!membership || membership.role !== 'sender' || !roomId) {
+          if (typeof callback === 'function') {
+            callback({ success: false, error: 'Unauthorized.' });
+          }
+          return;
+        }
+
+        const res = remoteControlManager.revokeLease(roomId);
+        if (res.revokedControllerId) {
+          controlBridge.releaseAll();
+          logger.info(`Sender ${socket.id} revoked control for ${res.revokedControllerId} in room "${roomId}"`);
+          io.to(res.revokedControllerId).emit('control:revoked', { reason: 'revoked_by_host' });
+          io.to(roomId).emit('control:state', {
+            enabled: remoteControlManager.isControlEnabled(roomId),
+            hasController: false,
+            inGrace: false
+          });
+        }
+        if (typeof callback === 'function') {
+          callback({ success: true, revoked: Boolean(res.revokedControllerId) });
+        }
+      } catch (err) {
+        logger.error(`Error in control:revoke: ${err.message}`);
+        if (typeof callback === 'function') {
+          callback({ success: false, error: 'Internal error.' });
+        }
+      }
+    });
+
+    // Remote Desktop Control: Fallback signaling input relay
+    socket.on('control:input', (payload) => {
+      try {
+        if (!payload || typeof payload !== 'object' || typeof payload.roomId !== 'string' || !payload.event) {
+          return;
+        }
+        const { roomId, event } = payload;
+        const membership = roomManager.getMembership(socket.id);
+        const isDirectController = remoteControlManager.isController(roomId, socket.id);
+        const activeControllerId = remoteControlManager.getActiveController(roomId);
+        const isHostForwarding = Boolean(membership && membership.role === 'sender' && activeControllerId);
+
+        if (!isDirectController && !isHostForwarding) {
+          return;
+        }
+
+        const effectiveControllerId = isDirectController ? socket.id : activeControllerId;
+        remoteControlManager.touchController(roomId, effectiveControllerId);
+        controlBridge.sendInput(event);
+
+        const room = roomManager.getRoom(roomId);
+        if (room && room.senderSocketId && isDirectController) {
+          io.to(room.senderSocketId).emit('control:input', event);
+        }
+      } catch (err) {
+        logger.error(`Error in control:input: ${err.message}`);
+      }
+    });
+
     // Studio camera switcher event
     socket.on('studio:switch', (payload) => {
       const membership = roomManager.getMembership(socket.id);
-      if (!membership || membership.role !== 'viewer') return;
+      if (!membership || membership.role !== 'viewer') {
+        return;
+      }
       const room = roomManager.getRoom(membership.roomId);
-      if (!room || !room.isStudio) return;
+      if (!room || !room.isStudio) {
+        return;
+      }
       const targetCameraId = payload && payload.cameraId;
       if (targetCameraId && room.senderSocketIds && room.senderSocketIds.has(targetCameraId)) {
         room.senderSocketId = targetCameraId;
@@ -508,6 +871,26 @@ export function setupSignaling(httpServer, config, logger) {
       logger.debug(`Socket disconnected: ${socket.id} (${reason})`);
       failedAttempts.delete(socket.id);
       forgetViewerQuality(socket.id);
+
+      const ctrlEvents = remoteControlManager.handleSocketDisconnect(socket.id);
+      for (const ev of ctrlEvents) {
+        if (ev.wasController) {
+          controlBridge.releaseAll();
+          const roomObj = roomManager.getRoom(ev.roomId);
+          if (roomObj && roomObj.senderSocketId) {
+            io.to(roomObj.senderSocketId).emit('control:controller-disconnected', {
+              controllerId: socket.id,
+              inGrace: ev.inGrace
+            });
+          }
+        } else if (ev.wasSender) {
+          controlBridge.releaseAll();
+          if (ev.revokedControllerId) {
+            io.to(ev.revokedControllerId).emit('control:revoked', { reason: 'sender_disconnected' });
+          }
+        }
+      }
+
       const leaveResult = roomManager.leave(socket.id);
       if (leaveResult) {
         socket.leave(leaveResult.roomId);
@@ -517,6 +900,7 @@ export function setupSignaling(httpServer, config, logger) {
             io.to(vId).emit('peer:left', { role: leaveResult.role, peerId: socket.id });
           }
           tunnelRelay.cleanRoom(leaveResult.roomId);
+          remoteControlManager.cleanRoom(leaveResult.roomId);
         } else {
           if (leaveResult.peerSocketId) {
             io.to(leaveResult.peerSocketId).emit('peer:left', { role: leaveResult.role, peerId: socket.id });
@@ -534,5 +918,5 @@ export function setupSignaling(httpServer, config, logger) {
     });
   });
 
-  return { io, roomManager };
+  return { io, roomManager, remoteControlManager, controlBridge };
 }

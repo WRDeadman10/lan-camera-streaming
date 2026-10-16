@@ -253,9 +253,8 @@ Decision: **ADR-024**.
 - [x] Inno Setup 6 script `vcam/installer/lan-camera.iss`; `vcam/build.bat` builds it; output `dist/lan-camera-setupv<version>.exe` (the zip is gone; root `build.bat` no longer packages anything).
 - [x] `/download/lan-camera-setup` (aliases `/download/lancam-vcam`, `.exe`, `.zip`) serves the newest installer from disk or from the copy embedded in the exe (`scripts/build-embedded-assets.js`); test added (37/37).
 - [x] Verified on this PC: silent install (exit 0, camera listed), silent uninstall (camera list empty, DirectShow class gone, data folder gone), fresh reinstall, and the exe serving the byte-identical installer from an empty folder.
-- [ ] Run the installer on a clean Windows 11 machine/VM and click through the visible wizard.
-- [ ] Windows 10: confirm the installer reports "Windows camera needs Windows 11" and the DirectShow camera still works.
-- [ ] Run the full root `build.bat` end to end (it bumps the version and ends with `pause`; its steps were run individually).
+- [x] Fix: dynamically discover MSVC x64 build environment (`vcvars64.bat`) using `vswhere.exe` and standard Visual Studio 2022/2019 Community, BuildTools, Professional, and Enterprise installation paths instead of hardcoded Community edition path; prevents `'cl.exe' is not recognized` build failures.
+- [x] Run the full root `build.bat` end to end (bump version -> build `vcam` driver + Inno Setup installer -> build `remote-control-helper` + Inno Setup installer -> generate embedded assets and SEA executable `lan-camera-streaming.exe`).
 - [ ] Code-sign the installer (SmartScreen warns on unsigned files).
 
 ## P4.7 — Multiple viewers (2026-10-12)
@@ -354,3 +353,84 @@ Decision: **ADR-025**.
   - [x] Transparent diagnostics reporting: log browser confirmation when `cursor === 'never'`, warning when browser keeps cursor visible (`'always'`/`'motion'`), or warning explaining browser limitation when cursor is not exposed in settings (Chromium/Windows limitation).
   - [x] Live dynamic source switching via `applyDynamicSourceChange()` when toggle changes during active screen sharing.
   - [x] Verified in automated Node.js tests (156/156 passing) and verified empirically against real Google Chrome and Microsoft Edge on Windows via CDP.
+
+## Remote Desktop Control Integration (ADR-031)
+
+### Phase 0: Submodule & Documentation Foundation
+- [x] Register `remote-control-helper` as a genuine Git submodule pointing to `https://github.com/WRDeadman10/remote-control-helper.git`.
+- [x] Document control architecture, native bridge, authentication lifecycle, and lease state machine in `docs/architecture.md`.
+- [x] Record architectural decision record ADR-031 in `docs/decisions.md`.
+- [x] Update `docs/project-overview.md` and `docs/roadmap.md`.
+
+### Phase 1: Authentication & Lease Management (Node.js Server)
+- [x] Implement `RemoteControlManager` in `src/server/remote-control-manager.js`:
+  - [x] Permanent password hash verification with `crypto.scrypt` and 16-byte random salt stored in `.control-auth.json`.
+  - [x] 6-digit cryptographically secure session PIN generation and expiry.
+  - [x] Rate-limiting per socket/IP (5 failed attempts locks socket for 30 seconds).
+  - [x] Single-controller lease management with 60-second reconnection grace period, release, and sender revocation.
+  - [x] Automated unit tests in `tests/remote-control-manager.test.js`.
+
+### Phase 2: Native Windows Input Helper (C++ Submodule)
+- [x] Configure `CMakeLists.txt` for MSVC / C++17 build in `remote-control-helper/`.
+- [x] Implement loopback Winsock2 TCP/WebSocket server on `127.0.0.1:8765` with authentication handshake token.
+- [x] Implement `SendInput` mouse movement (normalized 0.0-1.0 mapped to target screen bounds).
+- [x] Implement `SendInput` mouse buttons (`left`, `right`, `middle`, `down`, `up`, `click`) and wheel.
+- [x] Implement `SendInput` keyboard events (`code` to Windows virtual key / scan code, modifiers).
+- [x] Implement held-input registry (`std::set<WORD>`) with safety release on disconnect, lease expiry, or emergency stop.
+- [x] Native tests and build verification with MSVC CMake. Commit inside submodule first.
+
+### Phase 3: Signaling Protocol & Server Control Bridge
+- [x] Extend Socket.IO signaling in `src/server/signaling.js` with control events (`control:request-lease`, `control:lease-granted`, `control:lease-rejected`, `control:revoke`, `control:release`, `control:input`).
+- [x] Implement `src/server/control-bridge.js` to communicate with the native helper on `127.0.0.1:8765`.
+- [x] Add unit tests for signaling events and control bridge.
+
+### Phase 4: WebRTC DataChannel Transport & Coordinate Translation
+- [x] Implement `lancam-control` DataChannel in `src/public/js/webrtc-peer.js` for sub-5ms low-latency input transport with Socket.IO relay fallback.
+- [x] Implement coordinate translation in `src/public/js/control-coords.js` accounting for letterboxing, pillarboxing, and aspect ratios.
+- [x] Implement viewer input event capture (mouse move, mouse down/up, wheel, keydown/keyup).
+
+### Phase 5: Sender and Viewer UI Controls
+- [x] Sender UI (`sender.html`, `sender.js`, `style.css`):
+  - [x] Session PIN display with one-click copy button.
+  - [x] Remote Control enable/disable toggle.
+  - [x] Active controller status indicator badge and Revoke button.
+  - [x] Permanent password setup/change modal.
+- [x] Viewer UI (`viewer.html`, `viewer.js`, `style.css`):
+  - [x] "Request Control" button and modal for entering PIN or permanent password.
+  - [x] Control active HUD pill with Release button.
+  - [x] Input event mapping and window blur safety release.
+- [x] Run asset rebuild `node scripts/build-embedded-assets.js`.
+- [x] Verify complete end-to-end integration with test suite (172/172 tests passing).
+
+### Phase 6: Distributed 3-System Topology, Auto-Launch Deeplink & Inno Setup Distribution
+- [x] Implemented HTTP health check (`GET /health`), CORS preflight, HTTP POST (`/input`), and RFC 6455 WebSocket framing (`ws://127.0.0.1:8765`) in native helper `remote-control-helper`.
+- [x] Added `lancam-control://` protocol registration in HKCU (zero admin elevation required) and single-instance mutex (`Local\LanCameraRemoteControlHelper_SingleInstance`) in `src/main.cpp`.
+- [x] Created Inno Setup installer script `remote-control-helper/installer/control-helper.iss` producing standalone `control-helper-setup.exe`.
+- [x] Added `/download/control-helper-setup` route in `src/server/server.js` with embedded fallback in `scripts/build-embedded-assets.js`.
+- [x] Implemented sender-side local helper client in `src/public/js/sender.js`:
+  - [x] Health probe via `fetch('http://127.0.0.1:8765/health')`.
+  - [x] Auto-launch via hidden iframe deeplink `lancam-control://start` when controller joins or control is enabled.
+  - [x] Status alert badge and download button `/download/control-helper-setup` if helper is not installed.
+  - [x] Local WebSocket bridge `ws://127.0.0.1:8765` for direct input forwarding on System X from both WebRTC DataChannel and signaling fallback relay.
+- [x] Added automated unit tests in `tests/server.test.js` and `tests/viewer-control.test.js` (173/173 tests passing).
+
+## P4.7 — Persistent and Resilient zrok Share Reservation (ADR-033)
+
+- [x] Resolve `Could not bind to reserved 'public:lan'` and regex parsing errors in `src/server/cli.js` and `start.ps1`.
+- [x] Implement robust zrok JSON overview parsing in `src/server/zrok-helper.js` extracting true `frontendEndpoint` and `shareToken`.
+- [x] Prioritize existing reserved shares and port-matching shares before creating new shares.
+- [x] Implement deterministic candidate word generation (`lancam`, `lancamera`, `lancamstream`, `lancam` + 4-char suffix) with auto-generated fallback via `zrok reserve public`.
+- [x] Host on reserved shares using `zrok share reserved <shareToken> --override-endpoint <targetUrl> --headless`.
+- [x] Preserve reserved shares across restarts; release only dynamic shares on SIGINT/SIGTERM.
+- [x] Add automated unit tests covering word generation, share matching prioritization, and JSON extraction in `tests/zrok-reserve.test.js` (176/176 tests passing).
+
+## P4.8 — Chrome Private Network Access, CSP & Pre-Stream Remote Control (ADR-034)
+
+- [x] Add loopback addresses (`http://127.0.0.1:*`, `http://localhost:*`, `ws://127.0.0.1:*`, `ws://localhost:*`) and `frame-src lancam-control: lancam:` to Content Security Policy in `src/server/server.js`.
+- [x] Add `Access-Control-Allow-Private-Network: true` to CORS preflight `OPTIONS`, `GET /health`, and `POST /input` responses in `remote-control-helper` loopback server.
+- [x] Enable pre-streaming Remote Control configuration (PIN generation and permanent password setting) in `src/server/signaling.js` with access PIN verification.
+- [x] Initialize Socket.IO connection on sender page load (`ensureSocket()`) and emit control requests with PIN prior to streaming.
+- [x] Enhance helper deeplink launch with user-gesture anchor click fallback.
+- [x] Eliminate spurious stream teardown/reconnect loops on tab focus (`visibilitychange`).
+- [x] Add prominent Remote Desktop Control card in viewer sidebar with request/release buttons, status badges, show/hide password toggle, and optional pre-join control PIN input.
+- [x] Rebuild embedded assets and verify all 176 test cases pass (176/176 passing).

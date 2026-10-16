@@ -310,6 +310,32 @@ const focusDistanceGroup = document.getElementById('focusDistanceGroup');
 const resolutionGroup = document.getElementById('resolutionGroup');
 const resolutionLabel = document.querySelector('label[for="cameraResolution"]');
 
+// Remote Desktop Control DOM Elements
+const controlToggle = document.getElementById('controlToggle');
+const controlDetailsPanel = document.getElementById('controlDetailsPanel');
+const controlStatusBadge = document.getElementById('controlStatusBadge');
+const controlPinDisplay = document.getElementById('controlPinDisplay');
+const btnCopyControlPin = document.getElementById('btnCopyControlPin');
+const btnRegenControlPin = document.getElementById('btnRegenControlPin');
+const btnOpenPasswordModal = document.getElementById('btnOpenPasswordModal');
+const btnRevokeControl = document.getElementById('btnRevokeControl');
+
+// Control Helper DOM Elements
+const controlHelperAlert = document.getElementById('controlHelperAlert');
+const btnLaunchControlHelper = document.getElementById('btnLaunchControlHelper');
+const btnDownloadControlHelper = document.getElementById('btnDownloadControlHelper');
+const controlHelperRunningIndicator = document.getElementById('controlHelperRunningIndicator');
+const controlHelperRunningText = document.getElementById('controlHelperRunningText');
+
+const passwordModal = document.getElementById('passwordModal');
+const btnClosePasswordModal = document.getElementById('btnClosePasswordModal');
+const btnCancelPasswordModal = document.getElementById('btnCancelPasswordModal');
+const btnSavePassword = document.getElementById('btnSavePassword');
+const btnClearPassword = document.getElementById('btnClearPassword');
+const permPasswordInput = document.getElementById('permPasswordInput');
+const permPasswordConfirm = document.getElementById('permPasswordConfirm');
+const passwordModalStatus = document.getElementById('passwordModalStatus');
+
 // Show/hide appropriate input based on selected source and apply dynamic switch
 function updateSourceInputsVisibility() {
   const value = sourceSelect ? sourceSelect.value : 'webcam';
@@ -414,6 +440,464 @@ if (cameraResolutionSelect) {
     }
   });
 }
+
+// Native Remote Desktop Control Helper Client (runs on System X)
+const HELPER_PORT = 8765;
+const HELPER_HEALTH_URL = `http://127.0.0.1:${HELPER_PORT}/health`;
+const HELPER_WS_URL = `ws://127.0.0.1:${HELPER_PORT}`;
+const HELPER_INPUT_URL = `http://127.0.0.1:${HELPER_PORT}/input`;
+
+let helperWs = null;
+let helperDetected = false;
+let helperCheckInProgress = false;
+
+function launchControlHelperDeeplink(userGesture = false) {
+  let iframe = document.getElementById('lancam-control-frame');
+  if (!iframe) {
+    iframe = document.createElement('iframe');
+    iframe.id = 'lancam-control-frame';
+    iframe.style.display = 'none';
+    document.body.appendChild(iframe);
+  }
+  iframe.src = 'lancam-control://start';
+  if (userGesture) {
+    try {
+      const a = document.createElement('a');
+      a.href = 'lancam-control://start';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try {
+          if (a.parentNode) {
+            a.parentNode.removeChild(a);
+          }
+        } catch {}
+      }, 500);
+    } catch {}
+  }
+  logDiagnostic('[CONTROL-HELPER] Invoked lancam-control://start deeplink to launch local helper.', 'INFO');
+}
+
+function updateHelperUIState(isRunning) {
+  helperDetected = isRunning;
+  if (!controlToggle || !controlToggle.checked) {
+    if (controlHelperAlert) {
+      controlHelperAlert.style.display = 'none';
+    }
+    if (controlHelperRunningIndicator) {
+      controlHelperRunningIndicator.style.display = 'none';
+    }
+    return;
+  }
+
+  if (isRunning) {
+    if (controlHelperAlert) {
+      controlHelperAlert.style.display = 'none';
+    }
+    if (controlHelperRunningIndicator) {
+      controlHelperRunningIndicator.style.display = 'inline-flex';
+    }
+  } else {
+    if (controlHelperAlert) {
+      controlHelperAlert.style.display = 'block';
+    }
+    if (controlHelperRunningIndicator) {
+      controlHelperRunningIndicator.style.display = 'none';
+    }
+  }
+}
+
+async function checkControlHelperRunning() {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1200);
+    const res = await fetch(HELPER_HEALTH_URL, {
+      method: 'GET',
+      mode: 'cors',
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+    if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      return Boolean(data && data.status === 'ok');
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function connectHelperWebSocket() {
+  if (helperWs && (helperWs.readyState === WebSocket.OPEN || helperWs.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+  try {
+    helperWs = new WebSocket(HELPER_WS_URL);
+    helperWs.onopen = () => {
+      logDiagnostic('[CONTROL-HELPER] Connected to local helper via WebSocket.', 'INFO');
+      updateHelperUIState(true);
+    };
+    helperWs.onclose = () => {
+      helperWs = null;
+    };
+    helperWs.onerror = () => {
+      // Will fallback to HTTP POST if WebSocket connection drops
+    };
+  } catch (err) {
+    logDiagnostic(`[CONTROL-HELPER] WebSocket connection error: ${err.message}`, 'WARN');
+  }
+}
+
+async function probeControlHelper(autoLaunch = false) {
+  if (helperCheckInProgress) {
+    return;
+  }
+  helperCheckInProgress = true;
+
+  const isRunning = await checkControlHelperRunning();
+  if (isRunning) {
+    helperCheckInProgress = false;
+    updateHelperUIState(true);
+    connectHelperWebSocket();
+    return;
+  }
+
+  // Not running
+  if (autoLaunch) {
+    launchControlHelperDeeplink();
+    const pollIntervals = [1000, 1500, 2000];
+    let attempt = 0;
+    const pollNext = async () => {
+      const active = await checkControlHelperRunning();
+      if (active) {
+        helperCheckInProgress = false;
+        updateHelperUIState(true);
+        connectHelperWebSocket();
+        return;
+      }
+      attempt += 1;
+      if (attempt < pollIntervals.length) {
+        setTimeout(pollNext, pollIntervals[attempt]);
+      } else {
+        helperCheckInProgress = false;
+        updateHelperUIState(false);
+      }
+    };
+    setTimeout(pollNext, pollIntervals[0]);
+    return;
+  }
+
+  helperCheckInProgress = false;
+  updateHelperUIState(false);
+}
+
+function forwardInputToLocalHelper(inputEvent) {
+  if (!inputEvent || !controlToggle || !controlToggle.checked) {
+    return;
+  }
+
+  // Fast path: local WebSocket
+  if (helperWs && helperWs.readyState === WebSocket.OPEN) {
+    try {
+      helperWs.send(JSON.stringify(inputEvent));
+      return;
+    } catch (err) {
+      logDiagnostic(`[CONTROL-HELPER] WebSocket send failed: ${err.message}`, 'WARN');
+    }
+  }
+
+  // Fallback path: local HTTP POST
+  fetch(HELPER_INPUT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(inputEvent),
+    mode: 'cors'
+  }).catch(() => {
+    if (!helperDetected) {
+      probeControlHelper(true);
+    }
+  });
+}
+
+function updateControlUIState(data = {}) {
+  if (!controlToggle || !controlStatusBadge) {
+    return;
+  }
+
+  const isEnabled = controlToggle.checked;
+  if (!isEnabled) {
+    if (controlDetailsPanel) {
+      controlDetailsPanel.style.display = 'none';
+    }
+    controlStatusBadge.textContent = 'Disabled';
+    controlStatusBadge.style.background = 'rgba(255, 255, 255, 0.1)';
+    controlStatusBadge.style.color = 'var(--text-muted)';
+    if (btnRevokeControl) {
+      btnRevokeControl.style.display = 'none';
+    }
+    updateHelperUIState(false);
+    return;
+  }
+
+  if (controlDetailsPanel) {
+    controlDetailsPanel.style.display = 'block';
+  }
+
+  if (data.sessionPin && controlPinDisplay) {
+    controlPinDisplay.value = data.sessionPin;
+  }
+
+  if (data.hasController) {
+    if (data.inGrace) {
+      controlStatusBadge.textContent = 'Reconnecting (Grace 60s)';
+      controlStatusBadge.style.background = 'rgba(245, 158, 11, 0.2)';
+      controlStatusBadge.style.color = 'var(--accent-amber)';
+    } else {
+      controlStatusBadge.textContent = 'Controlled';
+      controlStatusBadge.style.background = 'rgba(16, 185, 129, 0.2)';
+      controlStatusBadge.style.color = 'var(--accent-emerald)';
+    }
+    if (btnRevokeControl) {
+      btnRevokeControl.style.display = 'inline-block';
+    }
+  } else {
+    controlStatusBadge.textContent = 'Ready (No Controller)';
+    controlStatusBadge.style.background = 'rgba(56, 189, 248, 0.2)';
+    controlStatusBadge.style.color = 'var(--accent-cyan)';
+    if (btnRevokeControl) {
+      btnRevokeControl.style.display = 'none';
+    }
+  }
+
+  // Check helper status when control is enabled
+  probeControlHelper(false);
+}
+
+function requestControlEnable(enabled) {
+  const s = ensureSocket();
+  const roomId = roomIdInput ? roomIdInput.value.trim() : (activeRoomId || currentRoomId);
+  const pin = accessPinInput ? accessPinInput.value.trim() : (activePin || '123456');
+
+  if (enabled) {
+    probeControlHelper(true);
+  } else {
+    updateHelperUIState(false);
+  }
+
+  if (!roomId) {
+    updateControlUIState();
+    return;
+  }
+
+  const doEmit = () => {
+    s.emit('control:enable', { roomId, pin, enabled }, (res) => {
+      if (res && res.success) {
+        if (res.sessionPin && controlPinDisplay) {
+          controlPinDisplay.value = res.sessionPin;
+        }
+        logDiagnostic(`[CONTROL] Remote control ${res.enabled ? 'enabled (PIN active)' : 'disabled'}.`, 'INFO');
+        updateControlUIState(res);
+      } else {
+        showError(res && res.error ? res.error : 'Failed to update remote control state.');
+        if (controlToggle) {
+          controlToggle.checked = !enabled;
+        }
+        updateControlUIState();
+      }
+    });
+  };
+
+  if (s.connected) {
+    doEmit();
+  } else {
+    s.once('connect', doEmit);
+  }
+}
+
+function setupRemoteControlHandlers() {
+  if (controlToggle) {
+    controlToggle.addEventListener('change', () => {
+      requestControlEnable(controlToggle.checked);
+    });
+  }
+
+  if (btnLaunchControlHelper) {
+    btnLaunchControlHelper.addEventListener('click', () => {
+      launchControlHelperDeeplink(true);
+      probeControlHelper(false);
+      setTimeout(() => probeControlHelper(false), 1200);
+      setTimeout(() => probeControlHelper(false), 2500);
+    });
+  }
+
+  if (btnRegenControlPin) {
+    btnRegenControlPin.addEventListener('click', () => {
+      const s = ensureSocket();
+      const roomId = roomIdInput ? roomIdInput.value.trim() : (activeRoomId || currentRoomId);
+      const pin = accessPinInput ? accessPinInput.value.trim() : (activePin || '123456');
+      if (!roomId) {
+        return;
+      }
+      const doEmit = () => {
+        s.emit('control:pin:regenerate', { roomId, pin }, (res) => {
+          if (res && res.success && res.sessionPin && controlPinDisplay) {
+            controlPinDisplay.value = res.sessionPin;
+            showInfo('Generated new Session Control PIN');
+            setTimeout(clearInfo, 2500);
+          }
+        });
+      };
+      if (s.connected) {
+        doEmit();
+      } else {
+        s.once('connect', doEmit);
+      }
+    });
+  }
+
+  if (btnCopyControlPin && controlPinDisplay) {
+    btnCopyControlPin.addEventListener('click', async () => {
+      const pin = controlPinDisplay.value;
+      if (pin && pin !== '------') {
+        const ok = await copyTextToClipboard(pin);
+        if (ok) {
+          showInfo('Copied Session PIN to clipboard!');
+          setTimeout(clearInfo, 2500);
+        }
+      }
+    });
+  }
+
+  if (btnRevokeControl) {
+    btnRevokeControl.addEventListener('click', () => {
+      const s = ensureSocket();
+      const roomId = roomIdInput ? roomIdInput.value.trim() : (activeRoomId || currentRoomId);
+      const pin = accessPinInput ? accessPinInput.value.trim() : (activePin || '123456');
+      if (!roomId) {
+        return;
+      }
+      const doEmit = () => {
+        s.emit('control:revoke', { roomId, pin }, (res) => {
+          if (res && res.success) {
+            showInfo('Revoked controller access.');
+            setTimeout(clearInfo, 2500);
+            updateControlUIState({ hasController: false });
+          }
+        });
+      };
+      if (s.connected) {
+        doEmit();
+      } else {
+        s.once('connect', doEmit);
+      }
+    });
+  }
+
+  // Password Modal
+  if (btnOpenPasswordModal && passwordModal) {
+    btnOpenPasswordModal.addEventListener('click', () => {
+      if (permPasswordInput) {
+        permPasswordInput.value = '';
+      }
+      if (permPasswordConfirm) {
+        permPasswordConfirm.value = '';
+      }
+      if (passwordModalStatus) {
+        passwordModalStatus.textContent = '';
+      }
+      passwordModal.style.display = 'flex';
+    });
+  }
+
+  const closePassModal = () => {
+    if (passwordModal) {
+      passwordModal.style.display = 'none';
+    }
+  };
+
+  if (btnClosePasswordModal) {
+    btnClosePasswordModal.addEventListener('click', closePassModal);
+  }
+  if (btnCancelPasswordModal) {
+    btnCancelPasswordModal.addEventListener('click', closePassModal);
+  }
+
+  if (btnSavePassword) {
+    btnSavePassword.addEventListener('click', () => {
+      const p1 = permPasswordInput ? permPasswordInput.value : '';
+      const p2 = permPasswordConfirm ? permPasswordConfirm.value : '';
+      if (!p1 || p1.length < 6) {
+        if (passwordModalStatus) {
+          passwordModalStatus.textContent = 'Password must be at least 6 characters.';
+          passwordModalStatus.style.color = 'var(--accent-red)';
+        }
+        return;
+      }
+      if (p1 !== p2) {
+        if (passwordModalStatus) {
+          passwordModalStatus.textContent = 'Passwords do not match.';
+          passwordModalStatus.style.color = 'var(--accent-red)';
+        }
+        return;
+      }
+
+      const s = ensureSocket();
+      const pin = accessPinInput ? accessPinInput.value.trim() : (activePin || '123456');
+      if (passwordModalStatus) {
+        passwordModalStatus.textContent = 'Saving password...';
+        passwordModalStatus.style.color = 'var(--text-muted)';
+      }
+      const doEmit = () => {
+        s.emit('control:password:set', { password: p1, pin }, (res) => {
+          if (res && res.success) {
+            showInfo('Permanent control password saved.');
+            setTimeout(clearInfo, 2500);
+            closePassModal();
+          } else {
+            if (passwordModalStatus) {
+              passwordModalStatus.textContent = res && res.error ? res.error : 'Failed to save password.';
+              passwordModalStatus.style.color = 'var(--accent-red)';
+            }
+          }
+        });
+      };
+      if (s.connected) {
+        doEmit();
+      } else {
+        s.once('connect', doEmit);
+      }
+    });
+  }
+
+  if (btnClearPassword) {
+    btnClearPassword.addEventListener('click', () => {
+      const s = ensureSocket();
+      const pin = accessPinInput ? accessPinInput.value.trim() : (activePin || '123456');
+      const doEmit = () => {
+        s.emit('control:password:clear', { pin }, (res) => {
+          if (res && res.success) {
+            showInfo('Permanent control password cleared.');
+            setTimeout(clearInfo, 2500);
+            closePassModal();
+          }
+        });
+      };
+      if (s.connected) {
+        doEmit();
+      } else {
+        s.once('connect', doEmit);
+      }
+    });
+  }
+
+  if (controlToggle && controlToggle.checked) {
+    requestControlEnable(true);
+  }
+}
+
+setupRemoteControlHandlers();
+
 const pythonLinkCard = document.getElementById('pythonLinkCard');
 const pythonStreamUrl = document.getElementById('pythonStreamUrl');
 const btnCopyPythonUrl = document.getElementById('btnCopyPythonUrl');
@@ -1332,10 +1816,7 @@ if (viewerPeers.size > 0) {
   currentMediaMode = mediaModeSelect ? mediaModeSelect.value : 'webrtc';
 
   // Initialize Socket.IO connection
-  if (!socket) {
-    socket = io();
-    setupSocketListeners();
-  }
+  ensureSocket();
 
   startWatchdog();
 
@@ -1380,6 +1861,11 @@ if (viewerPeers.size > 0) {
       .catch(() => {});
 
     showLocalViewerLink(roomId);
+
+    if (controlToggle && controlToggle.checked) {
+      probeControlHelper(true);
+      requestControlEnable(true);
+    }
 
     // Display Direct Python Stream Link
     const streamUrl = `${window.location.origin}/stream/${roomId}?pin=${encodeURIComponent(pin)}`;
@@ -1699,10 +2185,17 @@ function createSenderPeerForViewer(viewerId, iceServers) {
         logDiagnostic('3. A VPN or virtual adapter on the PC hides the real LAN route.', 'WARN');
         logDiagnostic('LAST RESORT: switch Media Transport Mode to "Fallback - Video through zrok" (Mode B). It works anywhere but consumes zrok quota.', 'INFO');
       }
+    },
+    onControlInput: (inputEvent) => {
+      forwardInputToLocalHelper(inputEvent);
+    },
+    onControlChannelStateChange: (state) => {
+      logDiagnostic(`[CONTROL:${viewerId}] DataChannel state: ${state}`, 'INFO');
     }
   });
 
   peer.createPeerConnection();
+  peer.createControlDataChannel();
 
   // Add captured tracks
     // Add captured tracks and enforce full‑resolution encoding
@@ -1756,6 +2249,19 @@ async function initiateWebRtcConnectionForViewer(viewerId) {
   } catch (err) {
     logDiagnostic(`[SDP:${viewerId}] Error creating offer: ${err.message}`, 'ERROR');
   }
+}
+
+function ensureSocket() {
+  if (typeof io !== 'function') {
+    return null;
+  }
+  if (!socket) {
+    socket = io();
+    setupSocketListeners();
+  } else if (!socket.connected) {
+    socket.connect();
+  }
+  return socket;
 }
 
 function setupSocketListeners() {
@@ -1945,6 +2451,48 @@ function setupSocketListeners() {
     playIntercomChime();
     showInfo(`🔔 Intercom chime from viewer!`);
     setTimeout(clearInfo, 3500);
+  });
+
+  socket.on('control:controller-joined', (data) => {
+    logDiagnostic(`[CONTROL] Controller joined: ${data.controllerId} (reconnected: ${Boolean(data.reconnected)})`, 'INFO');
+    updateControlUIState({
+      hasController: true,
+      controllerId: data.controllerId,
+      inGrace: false
+    });
+    probeControlHelper(true);
+  });
+
+  socket.on('control:controller-left', (data) => {
+    logDiagnostic(`[CONTROL] Controller left: ${data.controllerId} (${data.reason})`, 'INFO');
+    updateControlUIState({
+      hasController: false,
+      controllerId: null,
+      inGrace: false
+    });
+  });
+
+  socket.on('control:controller-disconnected', (data) => {
+    logDiagnostic(`[CONTROL] Controller disconnected: ${data.controllerId} (inGrace: ${Boolean(data.inGrace)})`, 'WARN');
+    updateControlUIState({
+      hasController: true,
+      controllerId: data.controllerId,
+      inGrace: Boolean(data.inGrace)
+    });
+  });
+
+  socket.on('control:state', (data) => {
+    if (typeof data.enabled === 'boolean' && controlToggle) {
+      controlToggle.checked = data.enabled;
+    }
+    updateControlUIState(data);
+    if (data.enabled) {
+      probeControlHelper(true);
+    }
+  });
+
+  socket.on('control:input', (event) => {
+    forwardInputToLocalHelper(event);
   });
 }
 
@@ -2345,7 +2893,7 @@ document.addEventListener('visibilitychange', () => {
       if (socket) socket.connect();
     } else if (canRepairViewersInPlace()) {
       repairUnhealthyViewerPeers();
-    } else {
+    } else if (!hasJoinedRoom) {
       rejoinRoomAsSender();
     }
   }
@@ -2354,8 +2902,11 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('online', () => {
   if (isStreamingRequested) {
     logDiagnostic('[Lifecycle] Network connection restored (online). Re-establishing stream...', 'INFO');
-    if (socket) socket.connect();
-    rejoinRoomAsSender();
+    if (!socket || !socket.connected) {
+      if (socket) socket.connect();
+    } else {
+      rejoinRoomAsSender();
+    }
   }
 });
 
@@ -2401,4 +2952,5 @@ if (streamParams.autostart) {
   }, 400);
 }
 
+ensureSocket();
 logDiagnostic('Sender client ready. Click "Start Streaming" to begin.');

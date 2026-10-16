@@ -73,6 +73,22 @@ if (installerNames.length > 0) {
     fileName: installerName
   });
 }
+
+const helperInstallerCandidates = [
+  path.resolve(__dirname, '../dist/control-helper-setup.exe'),
+  path.resolve(__dirname, '../remote-control-helper/build/installer/control-helper-setup.exe')
+];
+const helperInstallerPath = helperInstallerCandidates.find((candidate) => fs.existsSync(candidate));
+if (helperInstallerPath) {
+  files.push({
+    path: '/download/control-helper-setup.exe',
+    mimeType: 'application/octet-stream',
+    content: fs.readFileSync(helperInstallerPath).toString('base64'),
+    isBinary: true,
+    fileName: 'control-helper-setup.exe'
+  });
+}
+
 files.push({
   path: '/vendor/socket.io.js',
   mimeType: 'application/javascript; charset=utf-8',

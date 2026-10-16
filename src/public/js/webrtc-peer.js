@@ -51,6 +51,9 @@ export class WebRtcPeer {
     this.onTrack = config.onTrack || (() => {});
     this.onConnectionStateChange = config.onConnectionStateChange || (() => {});
     this.onIceConnectionStateChange = config.onIceConnectionStateChange || (() => {});
+    this.onControlInput = config.onControlInput || (() => {});
+    this.onControlChannelStateChange = config.onControlChannelStateChange || (() => {});
+    this.controlDataChannel = null;
     this.queuedIceCandidates = [];
     this.hasRemoteDescription = false;
     this.degradationPreference = null;
@@ -106,6 +109,12 @@ export class WebRtcPeer {
     this.peerConnection.oniceconnectionstatechange = () => {
       if (this.peerConnection) {
         this.onIceConnectionStateChange(this.peerConnection.iceConnectionState);
+      }
+    };
+
+    this.peerConnection.ondatachannel = (event) => {
+      if (event.channel && event.channel.label === 'lancam-control') {
+        this._setupControlDataChannel(event.channel);
       }
     };
 
@@ -464,8 +473,93 @@ export class WebRtcPeer {
     }
   }
 
+  /**
+   * Create the lancam-control DataChannel for low-latency remote desktop input.
+   * @returns {RTCDataChannel|null}
+   */
+  createControlDataChannel() {
+    if (!this.peerConnection) {
+      return null;
+    }
+    try {
+      const channel = this.peerConnection.createDataChannel('lancam-control', { ordered: true });
+      this._setupControlDataChannel(channel);
+      return channel;
+    } catch (err) {
+      console.warn('Failed to create lancam-control DataChannel:', err);
+      return null;
+    }
+  }
+
+  /**
+   * Set up event handlers on a control DataChannel.
+   * @private
+   * @param {RTCDataChannel} channel
+   */
+  _setupControlDataChannel(channel) {
+    this.controlDataChannel = channel;
+
+    channel.onopen = () => {
+      this.onControlChannelStateChange('open');
+    };
+
+    channel.onclose = () => {
+      this.onControlChannelStateChange('closed');
+    };
+
+    channel.onerror = (err) => {
+      console.warn('Control DataChannel error:', err);
+      this.onControlChannelStateChange('error');
+    };
+
+    channel.onmessage = (event) => {
+      try {
+        if (typeof event.data === 'string') {
+          const parsed = JSON.parse(event.data);
+          this.onControlInput(parsed);
+        }
+      } catch (err) {
+        console.warn('Malformed control message on DataChannel:', err);
+      }
+    };
+  }
+
+  /**
+   * Dispatch control input event over the open DataChannel.
+   * @param {Object} event
+   * @returns {boolean} True if sent via DataChannel, false otherwise.
+   */
+  sendControlInput(event) {
+    if (this.controlDataChannel && this.controlDataChannel.readyState === 'open') {
+      try {
+        this.controlDataChannel.send(JSON.stringify(event));
+        return true;
+      } catch (err) {
+        console.warn('Failed to send control input over DataChannel:', err);
+        return false;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Check if control DataChannel is open.
+   * @returns {boolean}
+   */
+  isControlDataChannelOpen() {
+    return Boolean(this.controlDataChannel && this.controlDataChannel.readyState === 'open');
+  }
+
   close() {
     this._clearGraceTimer();
+    if (this.controlDataChannel) {
+      try {
+        this.controlDataChannel.close();
+      } catch {
+        // Ignore during teardown
+      }
+      this.controlDataChannel = null;
+    }
     if (this.peerConnection) {
       this.peerConnection.ontrack = null;
       this.peerConnection.onicecandidate = null;
