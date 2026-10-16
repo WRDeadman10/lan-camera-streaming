@@ -121,6 +121,15 @@
                 <polyline points="21 15 16 10 5 21"/>
               </svg>
             </button>
+            <button type="button" id="btnHudControl" class="hud-btn" title="Request Remote Desktop Control">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 3l7 18 3-7 7-3L3 3z"/>
+              </svg>
+            </button>
+            <div id="hudControlPill" class="control-active-pill" style="display: none;" title="Active Remote Desktop Control">
+              <span>🎮 Controlling Host</span>
+              <button type="button" id="btnReleaseControl" class="control-release-btn">Release</button>
+            </div>
             <button type="button" id="btnHudFullscreen" class="hud-btn" title="Toggle Fullscreen">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
@@ -279,6 +288,30 @@
         </details>
       </aside>
     </main>
+  </div>
+
+  <!-- Remote Desktop Control Request Modal -->
+  <div id="controlModal" class="modal-overlay" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Request Remote Desktop Control</h3>
+        <button type="button" id="btnCloseControlModal" class="btn-close-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 0.85rem; opacity: 0.8; margin-bottom: 12px;">
+          Enter the 6-digit Session PIN displayed on the host screen, or the host's permanent control password.
+        </p>
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label for="controlCredentialInput" style="display: block; margin-bottom: 4px; font-size: 0.85rem;">Control PIN or Password</label>
+          <input type="password" id="controlCredentialInput" placeholder="Enter PIN or password" class="form-input" style="width: 100%; font-size: 1rem; letter-spacing: 1px;">
+        </div>
+        <div id="controlModalStatus" style="font-size: 0.82rem; min-height: 20px;"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="btnCancelControlModal" class="btn btn-secondary btn-sm">Cancel</button>
+        <button type="button" id="btnSubmitControl" class="btn btn-primary btn-sm">Start Controlling</button>
+      </div>
+    </div>
   </div>
 
   <script src="/vendor/socket.io.js"></script>

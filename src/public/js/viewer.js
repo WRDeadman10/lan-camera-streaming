@@ -6,6 +6,7 @@
 
 import { showError, clearError, showInfo, clearInfo, updateStatus, logDiagnostic, parseCandidateSummary, setupDiagnosticsControls, setPathIndicator, describePath, isLocalHostname, fetchLocalServerOrigin, updateVitals, captureFrameSnapshot, copyTextToClipboard, setupCollapsibleDrawer, setupPasswordToggle, StreamRecorder, StreamTransformController, parseUrlStreamParams, buildShareUrl } from './ui-utils.js';
 import { WebRtcPeer } from './webrtc-peer.js';
+import { calculateVideoRenderBox, translateScreenCoordinates } from './control-coords.js';
 
 let webrtcPeer = null;
 let socket = null;
@@ -60,6 +61,20 @@ const btnDownloadDriver = document.getElementById('btnDownloadDriver');
 const studioSwitcherBar = document.getElementById('studioSwitcherBar');
 const studioCamerasList = document.getElementById('studioCamerasList');
 let activeStudioCameraId = null;
+
+const btnHudControl = document.getElementById('btnHudControl');
+const hudControlPill = document.getElementById('hudControlPill');
+const btnReleaseControl = document.getElementById('btnReleaseControl');
+const controlModal = document.getElementById('controlModal');
+const btnCloseControlModal = document.getElementById('btnCloseControlModal');
+const btnCancelControlModal = document.getElementById('btnCancelControlModal');
+const btnSubmitControl = document.getElementById('btnSubmitControl');
+const controlCredentialInput = document.getElementById('controlCredentialInput');
+const controlModalStatus = document.getElementById('controlModalStatus');
+
+let isControlActive = false;
+let controlSessionToken = null;
+let isHostControlEnabled = false;
 
 let rememberedRoomId = '';
 let rememberedPin = '';
@@ -353,6 +368,9 @@ async function joinRoom() {
     logDiagnostic(`Joined room "${roomId}" successfully [mode: ${response.mediaMode}].`);
     sendQualityPriority();
 
+    isHostControlEnabled = Boolean(response.controlState && response.controlState.enabled);
+    updateControlUIState();
+
     if (appWorkspace) {
       appWorkspace.classList.add('streaming-active');
     }
@@ -454,6 +472,23 @@ function setupSocketListeners() {
       });
     }
     logDiagnostic(`[Studio] Active studio camera changed to ${activeCameraId}`, 'INFO');
+  });
+
+  socket.on('control:state', (data) => {
+    isHostControlEnabled = Boolean(data && data.enabled);
+    if (!isHostControlEnabled && isControlActive) {
+      releaseControlLocally();
+      showInfo('Host disabled remote desktop control.');
+    }
+    updateControlUIState();
+  });
+
+  socket.on('control:revoked', (data) => {
+    if (isControlActive) {
+      releaseControlLocally();
+      showError(data && data.reason ? data.reason : 'Remote desktop control revoked by host.');
+      logDiagnostic(`[CONTROL] Control lease revoked: ${data && data.reason ? data.reason : 'Revoked by host'}`, 'WARN');
+    }
   });
 
   // Experimental zrok-tunneled binary video frame reception
@@ -560,6 +595,9 @@ function createViewerPeer(iceServers) {
         logDiagnostic('4. Sender and viewer are on different networks and no TURN relay is configured (set TURN_SERVERS in .env). Screen sharing also hides the sender LAN IP behind an mDNS name that other devices may not resolve.', 'WARN');
         logDiagnostic('LAST RESORT: switch Media Transport Mode to "Fallback - Video through zrok" (Mode B) on both sender and viewer. It works anywhere but consumes zrok quota.', 'INFO');
       }
+    },
+    onControlChannelStateChange: (state) => {
+      logDiagnostic(`[CONTROL] DataChannel state: ${state}`, 'INFO');
     }
   });
 
@@ -673,6 +711,11 @@ function createViewerPeer(iceServers) {
     const hudBatteryPill = document.getElementById('hudBatteryPill');
     if (vitalBatteryItem) vitalBatteryItem.style.display = 'none';
     if (hudBatteryPill) hudBatteryPill.style.display = 'none';
+    if (isControlActive) {
+      releaseControlLocally();
+    }
+    isHostControlEnabled = false;
+    updateControlUIState();
     showOverlay('Sender Disconnected', 'Sender left the room. Waiting for reconnection...', true);
     stopStatsPolling();
     if (webrtcPeer) {
@@ -695,6 +738,8 @@ function createViewerPeer(iceServers) {
         if (response && response.success) {
           logDiagnostic(`[AutoReconnect] Viewer rejoined room "${currentRoomId}" successfully.`, 'INFO');
           sendQualityPriority();
+          isHostControlEnabled = Boolean(response.controlState && response.controlState.enabled);
+          updateControlUIState();
           if (response.hasPeer) {
             updateStatus('connecting', 'Sender present. Awaiting offer...');
           } else {
@@ -708,6 +753,9 @@ function createViewerPeer(iceServers) {
   socket.on('disconnect', (reason) => {
     logDiagnostic(`[SOCKET] Disconnected from signaling server (${reason})`, 'WARN');
     stopStatsPolling();
+    if (isControlActive) {
+      releaseControlLocally();
+    }
     if (isViewerSessionActive) {
       updateStatus('connecting', 'Connection Lost - Reconnecting...');
     } else {
@@ -869,6 +917,12 @@ function leaveRoom() {
   } else {
     showOverlay('Stream Inactive', 'Enter the Room ID and click Join Stream to watch live', false);
   }
+
+  if (isControlActive) {
+    releaseControl();
+  }
+  isHostControlEnabled = false;
+  updateControlUIState();
 
   currentRoomId = null;
 
@@ -1089,6 +1143,301 @@ window.addEventListener('beforeunload', () => {
   leaveRoom();
 });
 
+function updateControlUIState() {
+  if (btnHudControl) {
+    if (isHostControlEnabled) {
+      btnHudControl.style.display = 'inline-flex';
+      btnHudControl.style.color = isControlActive ? 'var(--accent-cyan)' : 'inherit';
+      btnHudControl.title = isControlActive ? 'Active Remote Desktop Control' : 'Request Remote Desktop Control';
+    } else {
+      btnHudControl.style.display = 'none';
+    }
+  }
+  if (hudControlPill) {
+    hudControlPill.style.display = isControlActive ? 'inline-flex' : 'none';
+  }
+}
+
+function openControlModal() {
+  if (!isViewerSessionActive || !currentRoomId) {
+    showError('Join a live room first to request remote desktop control.');
+    return;
+  }
+  if (!isHostControlEnabled) {
+    showError('Host has not enabled remote desktop control for this session.');
+    return;
+  }
+  if (controlModal) {
+    controlModal.style.display = 'flex';
+    if (controlCredentialInput) {
+      controlCredentialInput.value = '';
+      controlCredentialInput.focus();
+    }
+    if (controlModalStatus) {
+      controlModalStatus.textContent = '';
+      controlModalStatus.style.color = 'inherit';
+    }
+  }
+}
+
+function closeControlModal() {
+  if (controlModal) {
+    controlModal.style.display = 'none';
+  }
+}
+
+function submitControlRequest() {
+  if (!controlCredentialInput || !currentRoomId || !socket) {
+    return;
+  }
+  const credential = controlCredentialInput.value.trim();
+  if (!credential) {
+    if (controlModalStatus) {
+      controlModalStatus.textContent = 'Please enter PIN or password.';
+      controlModalStatus.style.color = 'var(--accent-red)';
+    }
+    return;
+  }
+
+  if (controlModalStatus) {
+    controlModalStatus.textContent = 'Authenticating...';
+    controlModalStatus.style.color = 'var(--text-secondary)';
+  }
+
+  socket.emit('control:request-lease', {
+    roomId: currentRoomId,
+    credential
+  }, (response) => {
+    if (response && response.success) {
+      isControlActive = true;
+      controlSessionToken = response.sessionToken;
+      updateControlUIState();
+      closeControlModal();
+      logDiagnostic('[CONTROL] Remote desktop control lease granted.', 'INFO');
+      showInfo('Remote desktop control active. Press Release button to exit.');
+    } else {
+      const errMsg = response && response.error ? response.error : 'Failed to acquire control lease';
+      if (controlModalStatus) {
+        controlModalStatus.textContent = errMsg;
+        controlModalStatus.style.color = 'var(--accent-red)';
+      }
+      logDiagnostic(`[CONTROL] Control lease request failed: ${errMsg}`, 'WARN');
+    }
+  });
+}
+
+function releaseControl() {
+  if (isControlActive && socket && socket.connected && currentRoomId) {
+    socket.emit('control:release', { roomId: currentRoomId });
+  }
+  releaseControlLocally();
+}
+
+function releaseControlLocally() {
+  if (isControlActive) {
+    isControlActive = false;
+    controlSessionToken = null;
+    sendControlInput({ type: 'release_all' });
+    updateControlUIState();
+    logDiagnostic('[CONTROL] Remote desktop control released.', 'INFO');
+    showInfo('Remote desktop control released.');
+  }
+}
+
+function sendControlInput(event) {
+  if (!isControlActive && event.type !== 'release_all') {
+    return;
+  }
+  if (controlSessionToken) {
+    event.sessionToken = controlSessionToken;
+  }
+  // Try WebRTC DataChannel first
+  if (webrtcPeer && webrtcPeer.isControlDataChannelOpen()) {
+    if (webrtcPeer.sendControlInput(event)) {
+      return;
+    }
+  }
+  // Fallback to signaling socket
+  if (socket && socket.connected && currentRoomId) {
+    socket.emit('control:input', {
+      roomId: currentRoomId,
+      event
+    });
+  }
+}
+
+function setupRemoteControlHandlers() {
+  if (btnHudControl) {
+    btnHudControl.addEventListener('click', () => {
+      if (isControlActive) {
+        releaseControl();
+      } else {
+        openControlModal();
+      }
+    });
+  }
+
+  if (btnReleaseControl) {
+    btnReleaseControl.addEventListener('click', () => {
+      releaseControl();
+    });
+  }
+
+  if (btnCloseControlModal) {
+    btnCloseControlModal.addEventListener('click', closeControlModal);
+  }
+
+  if (btnCancelControlModal) {
+    btnCancelControlModal.addEventListener('click', closeControlModal);
+  }
+
+  if (btnSubmitControl) {
+    btnSubmitControl.addEventListener('click', submitControlRequest);
+  }
+
+  if (controlCredentialInput) {
+    controlCredentialInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        submitControlRequest();
+      }
+    });
+  }
+
+  if (remoteVideo) {
+    remoteVideo.addEventListener('mousemove', (e) => {
+      if (!isControlActive) {
+        return;
+      }
+      const rect = remoteVideo.getBoundingClientRect();
+      const vw = remoteVideo.videoWidth || rect.width;
+      const vh = remoteVideo.videoHeight || rect.height;
+      const coords = translateScreenCoordinates(e.clientX, e.clientY, rect, vw, vh, true);
+      if (coords) {
+        sendControlInput({
+          type: 'mouse_move',
+          x: coords.x,
+          y: coords.y
+        });
+      }
+    });
+
+    remoteVideo.addEventListener('mousedown', (e) => {
+      if (!isControlActive) {
+        return;
+      }
+      e.preventDefault();
+      const rect = remoteVideo.getBoundingClientRect();
+      const vw = remoteVideo.videoWidth || rect.width;
+      const vh = remoteVideo.videoHeight || rect.height;
+      const coords = translateScreenCoordinates(e.clientX, e.clientY, rect, vw, vh, true);
+      let button = 'left';
+      if (e.button === 1) {
+        button = 'middle';
+      } else if (e.button === 2) {
+        button = 'right';
+      }
+      if (coords) {
+        sendControlInput({
+          type: 'mouse_move',
+          x: coords.x,
+          y: coords.y
+        });
+      }
+      sendControlInput({
+        type: 'mouse_down',
+        button
+      });
+    });
+
+    remoteVideo.addEventListener('mouseup', (e) => {
+      if (!isControlActive) {
+        return;
+      }
+      e.preventDefault();
+      const rect = remoteVideo.getBoundingClientRect();
+      const vw = remoteVideo.videoWidth || rect.width;
+      const vh = remoteVideo.videoHeight || rect.height;
+      const coords = translateScreenCoordinates(e.clientX, e.clientY, rect, vw, vh, true);
+      let button = 'left';
+      if (e.button === 1) {
+        button = 'middle';
+      } else if (e.button === 2) {
+        button = 'right';
+      }
+      if (coords) {
+        sendControlInput({
+          type: 'mouse_move',
+          x: coords.x,
+          y: coords.y
+        });
+      }
+      sendControlInput({
+        type: 'mouse_up',
+        button
+      });
+    });
+
+    remoteVideo.addEventListener('contextmenu', (e) => {
+      if (isControlActive) {
+        e.preventDefault();
+      }
+    });
+
+    remoteVideo.addEventListener('wheel', (e) => {
+      if (!isControlActive) {
+        return;
+      }
+      e.preventDefault();
+      sendControlInput({
+        type: 'mouse_wheel',
+        deltaX: e.deltaX,
+        deltaY: e.deltaY
+      });
+    }, { passive: false });
+  }
+
+  window.addEventListener('keydown', (e) => {
+    if (!isControlActive) {
+      return;
+    }
+    const targetTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
+    if (targetTag === 'input' || targetTag === 'textarea' || targetTag === 'select' || (document.activeElement && document.activeElement.isContentEditable)) {
+      return;
+    }
+
+    if (e.code === 'Tab' || e.code === 'Space' || e.code.startsWith('Arrow') || e.code === 'PageUp' || e.code === 'PageDown' || e.code === 'Backspace' || e.code === 'Home' || e.code === 'End') {
+      e.preventDefault();
+    }
+
+    sendControlInput({
+      type: 'key_down',
+      code: e.code
+    });
+  });
+
+  window.addEventListener('keyup', (e) => {
+    if (!isControlActive) {
+      return;
+    }
+    const targetTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
+    if (targetTag === 'input' || targetTag === 'textarea' || targetTag === 'select' || (document.activeElement && document.activeElement.isContentEditable)) {
+      return;
+    }
+
+    sendControlInput({
+      type: 'key_up',
+      code: e.code
+    });
+  });
+
+  window.addEventListener('blur', () => {
+    if (isControlActive) {
+      sendControlInput({ type: 'release_all' });
+    }
+  });
+}
+
 async function showLocalViewerHint() {
   if (!localViewerHint || !localViewerHintLink || isLocalHostname(window.location.hostname)) {
     return;
@@ -1108,6 +1457,8 @@ async function showLocalViewerHint() {
 // Initialize default state
 setupDiagnosticsControls('btnCopyLogs', 'btnClearLogs', 'diagnosticsLog');
 setupCollapsibleDrawer('btnToggleDiagnostics', 'diagnosticsLog', '📋 Technical Diagnostics & WebRTC Vitals ▼', '📋 Technical Diagnostics & WebRTC Vitals ▲');
+setupRemoteControlHandlers();
+updateControlUIState();
 showLocalViewerHint();
 fetchIceServers().catch(() => {});
 

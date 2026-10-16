@@ -275,6 +275,18 @@ export class ControlBridge {
         return this._sendRaw({ type: 'set_display_bounds', left, top, width, height });
       }
 
+      case 'release_all': {
+        return this.releaseAll();
+      }
+
+      case 'emergency_stop': {
+        return this.emergencyStop();
+      }
+
+      case 'reset_emergency_stop': {
+        return this.resetEmergencyStop();
+      }
+
       default:
         return false;
     }

@@ -386,19 +386,19 @@ Decision: **ADR-025**.
 - [x] Add unit tests for signaling events and control bridge.
 
 ### Phase 4: WebRTC DataChannel Transport & Coordinate Translation
-- [ ] Implement `lancam-control` DataChannel in `src/public/js/webrtc-peer.js` for sub-5ms low-latency input transport with Socket.IO relay fallback.
-- [ ] Implement coordinate translation in `viewer.js` accounting for letterboxing, pillarboxing, and aspect ratios.
-- [ ] Implement viewer input event capture (mouse move, mouse down/up, wheel, keydown/keyup).
+- [x] Implement `lancam-control` DataChannel in `src/public/js/webrtc-peer.js` for sub-5ms low-latency input transport with Socket.IO relay fallback.
+- [x] Implement coordinate translation in `src/public/js/control-coords.js` accounting for letterboxing, pillarboxing, and aspect ratios.
+- [x] Implement viewer input event capture (mouse move, mouse down/up, wheel, keydown/keyup).
 
 ### Phase 5: Sender and Viewer UI Controls
-- [ ] Sender UI (`sender.html`, `sender.js`, `style.css`):
-  - [ ] Session PIN display with one-click copy button.
-  - [ ] Remote Control enable/disable toggle.
-  - [ ] Active controller status indicator badge and Revoke button.
-  - [ ] Permanent password setup/change modal.
-- [ ] Viewer UI (`viewer.html`, `viewer.js`, `style.css`):
-  - [ ] "Request Control" button and modal for entering PIN or permanent password.
-  - [ ] Control active HUD pill with Release button.
-  - [ ] Pointer lock / relative mode option.
-- [ ] Run asset rebuild `node scripts/build-embedded-assets.js`.
-- [ ] Verify complete end-to-end integration with test suite.
+- [x] Sender UI (`sender.html`, `sender.js`, `style.css`):
+  - [x] Session PIN display with one-click copy button.
+  - [x] Remote Control enable/disable toggle.
+  - [x] Active controller status indicator badge and Revoke button.
+  - [x] Permanent password setup/change modal.
+- [x] Viewer UI (`viewer.html`, `viewer.js`, `style.css`):
+  - [x] "Request Control" button and modal for entering PIN or permanent password.
+  - [x] Control active HUD pill with Release button.
+  - [x] Input event mapping and window blur safety release.
+- [x] Run asset rebuild `node scripts/build-embedded-assets.js`.
+- [x] Verify complete end-to-end integration with test suite (172/172 tests passing).

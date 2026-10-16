@@ -807,15 +807,21 @@ export function setupSignaling(httpServer, config, logger) {
           return;
         }
         const { roomId, event } = payload;
-        if (!remoteControlManager.isController(roomId, socket.id)) {
+        const membership = roomManager.getMembership(socket.id);
+        const isDirectController = remoteControlManager.isController(roomId, socket.id);
+        const activeControllerId = remoteControlManager.getActiveController(roomId);
+        const isHostForwarding = Boolean(membership && membership.role === 'sender' && activeControllerId);
+
+        if (!isDirectController && !isHostForwarding) {
           return;
         }
 
-        remoteControlManager.touchController(roomId, socket.id);
+        const effectiveControllerId = isDirectController ? socket.id : activeControllerId;
+        remoteControlManager.touchController(roomId, effectiveControllerId);
         controlBridge.sendInput(event);
 
         const room = roomManager.getRoom(roomId);
-        if (room && room.senderSocketId) {
+        if (room && room.senderSocketId && isDirectController) {
           io.to(room.senderSocketId).emit('control:input', event);
         }
       } catch (err) {
