@@ -151,3 +151,26 @@ test('virtual camera driver installer is downloadable when it has been built', a
     await new Promise((resolve) => httpServer.close(resolve));
   }
 });
+
+test('createServer sends comprehensive Content-Security-Policy allowing inline styles, unsplash, and media', async () => {
+  const config = loadConfig({ PORT: '3006' });
+  const logger = new Logger('error');
+  const { httpServer } = createServer(config, logger);
+  await new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+  const address = httpServer.address();
+
+  try {
+    const res = await fetch(`http://127.0.0.1:${address.port}/health`);
+    const csp = res.headers.get('content-security-policy');
+    assert.ok(csp, 'Content-Security-Policy header must be present');
+    assert.ok(csp.includes("style-src 'self' 'unsafe-inline'"), 'CSP must allow unsafe-inline styles');
+    assert.ok(csp.includes('api.unsplash.com'), 'CSP connect-src must allow api.unsplash.com');
+    assert.ok(csp.includes('images.unsplash.com'), 'CSP img-src must allow images.unsplash.com');
+    assert.ok(csp.includes('data:'), 'CSP img-src must allow data: URIs');
+    assert.ok(csp.includes('blob:'), 'CSP img-src and media-src must allow blob: URIs');
+    assert.ok(csp.includes('mediastream:'), 'CSP media-src must allow mediastream:');
+  } finally {
+    await new Promise((resolve) => httpServer.close(resolve));
+  }
+});
+

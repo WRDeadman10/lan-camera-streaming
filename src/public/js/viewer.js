@@ -4,7 +4,7 @@
  * WebRTC answer creation, remote track rendering, and connection statistics.
  */
 
-import { showError, clearError, showInfo, clearInfo, updateStatus, logDiagnostic, parseCandidateSummary, setupDiagnosticsControls, setPathIndicator, describePath, isLocalHostname, fetchLocalServerOrigin, updateVitals, captureFrameSnapshot, copyTextToClipboard, setupCollapsibleDrawer, setupPasswordToggle } from './ui-utils.js';
+import { showError, clearError, showInfo, clearInfo, updateStatus, logDiagnostic, parseCandidateSummary, setupDiagnosticsControls, setPathIndicator, describePath, isLocalHostname, fetchLocalServerOrigin, updateVitals, captureFrameSnapshot, copyTextToClipboard, setupCollapsibleDrawer, setupPasswordToggle, StreamRecorder, StreamTransformController, parseUrlStreamParams, buildShareUrl } from './ui-utils.js';
 import { WebRtcPeer } from './webrtc-peer.js';
 
 let webrtcPeer = null;
@@ -15,6 +15,8 @@ let statsInterval = null;
 let cachedIceServers = null;
 let pendingRemoteCandidates = [];
 let lastLoggedPathKind = null;
+let isViewerSessionActive = false;
+let activeViewerPin = null;
 
 // Tunnel rendering state
 let tunnelIsRendering = false;
@@ -28,6 +30,8 @@ let tunnelBytesReceived = 0;
 const accessPinInput = document.getElementById('accessPin');
 const roomIdInput = document.getElementById('roomId');
 const mediaModeSelect = document.getElementById('mediaMode');
+const qualityPrioritySelect = document.getElementById('qualityPriority');
+const QualityPriorityStorageKey = 'lancam_quality_priority';
 const btnJoin = document.getElementById('btnJoin');
 const btnLeave = document.getElementById('btnLeave');
 const btnFullscreen = document.getElementById('btnFullscreen');
@@ -48,9 +52,100 @@ const btnHudPip = document.getElementById('btnHudPip');
 const btnHudSnapshot = document.getElementById('btnHudSnapshot');
 const btnHudFullscreen = document.getElementById('btnHudFullscreen');
 const btnOverlayReconnect = document.getElementById('btnOverlayReconnect');
+const overlayTitle = document.getElementById('overlayTitle');
+const overlaySubtitle = document.getElementById('overlaySubtitle');
 const roomHintBadge = document.getElementById('roomHintBadge');
 const btnSetWebcam = document.getElementById('btnSetWebcam');
 const btnDownloadDriver = document.getElementById('btnDownloadDriver');
+const studioSwitcherBar = document.getElementById('studioSwitcherBar');
+const studioCamerasList = document.getElementById('studioCamerasList');
+let activeStudioCameraId = null;
+
+let rememberedRoomId = '';
+let rememberedPin = '';
+
+function getSessionLastRoom() {
+  try {
+    return sessionStorage.getItem('lancam_last_room') || '';
+  } catch (err) {
+    return '';
+  }
+}
+
+function getSessionLastPin() {
+  try {
+    return sessionStorage.getItem('lancam_last_pin') || '';
+  } catch (err) {
+    return '';
+  }
+}
+
+function setSessionLastRoom(roomId, pin) {
+  try {
+    if (roomId) {
+      sessionStorage.setItem('lancam_last_room', roomId);
+    }
+    if (pin) {
+      sessionStorage.setItem('lancam_last_pin', pin);
+    }
+  } catch (err) {}
+}
+
+function sendQualityPriority() {
+  if (!socket || !socket.connected || !qualityPrioritySelect) {
+    return;
+  }
+  socket.emit('viewer:quality-priority', { mode: qualityPrioritySelect.value });
+  logDiagnostic(`[QUALITY] Requested constant ${qualityPrioritySelect.value === 'both' ? 'FPS and resolution' : qualityPrioritySelect.value === 'fps' ? 'FPS' : 'resolution'} from the sender.`, 'INFO');
+}
+
+if (qualityPrioritySelect) {
+  try {
+    const savedPriority = localStorage.getItem(QualityPriorityStorageKey);
+    if (savedPriority === 'fps' || savedPriority === 'resolution' || savedPriority === 'both') {
+      qualityPrioritySelect.value = savedPriority;
+    }
+  } catch (err) {
+    // Storage unavailable (private mode); keep the default.
+  }
+  qualityPrioritySelect.addEventListener('change', () => {
+    try {
+      localStorage.setItem(QualityPriorityStorageKey, qualityPrioritySelect.value);
+    } catch (err) {
+      // Non-fatal: the choice still applies to this session.
+    }
+    sendQualityPriority();
+  });
+}
+
+function showOverlay(title, subtitle, showReconnect = false) {
+  if (!videoOverlay) {
+    return;
+  }
+  if (overlayTitle) {
+    overlayTitle.textContent = title;
+  }
+  if (overlaySubtitle) {
+    overlaySubtitle.textContent = subtitle;
+  }
+  if (btnOverlayReconnect) {
+    btnOverlayReconnect.style.display = showReconnect ? 'inline-flex' : 'none';
+  }
+  videoOverlay.style.display = 'flex';
+}
+
+function isWebRtcConnected() {
+  return Boolean(webrtcPeer && webrtcPeer.peerConnection && webrtcPeer.peerConnection.connectionState === 'connected');
+}
+
+function hideOverlay() {
+  if (videoOverlay) {
+    videoOverlay.style.display = 'none';
+  }
+  if (btnOverlayReconnect) {
+    btnOverlayReconnect.style.display = 'none';
+  }
+}
 
 const canvasContext = remoteCanvas ? remoteCanvas.getContext('2d') : null;
 
@@ -186,8 +281,38 @@ async function joinRoom() {
   clearError();
   clearInfo();
 
-  const pin = accessPinInput.value.trim();
-  const roomId = roomIdInput.value.trim();
+  let pin = accessPinInput ? accessPinInput.value.trim() : '';
+  let roomId = roomIdInput ? roomIdInput.value.trim() : '';
+
+  if (!roomId && rememberedRoomId) {
+    roomId = rememberedRoomId;
+    if (roomIdInput) {
+      roomIdInput.value = rememberedRoomId;
+    }
+  } else if (!roomId) {
+    const sessionRoom = getSessionLastRoom();
+    if (sessionRoom) {
+      roomId = sessionRoom;
+      rememberedRoomId = sessionRoom;
+      if (roomIdInput) {
+        roomIdInput.value = sessionRoom;
+      }
+    }
+  }
+
+  if (!pin && rememberedPin) {
+    pin = rememberedPin;
+    if (accessPinInput) {
+      accessPinInput.value = rememberedPin;
+    }
+  } else if (!pin) {
+    const sessionPin = getSessionLastPin() || '123456';
+    pin = sessionPin;
+    rememberedPin = sessionPin;
+    if (accessPinInput) {
+      accessPinInput.value = sessionPin;
+    }
+  }
 
   if (!pin) {
     showError('Please enter an Access PIN.');
@@ -219,8 +344,14 @@ async function joinRoom() {
     }
 
     currentRoomId = roomId;
+    rememberedRoomId = roomId;
+    rememberedPin = pin;
+    setSessionLastRoom(roomId, pin);
+    isViewerSessionActive = true;
+    activeViewerPin = pin;
     btnLeave.disabled = false;
     logDiagnostic(`Joined room "${roomId}" successfully [mode: ${response.mediaMode}].`);
+    sendQualityPriority();
 
     if (appWorkspace) {
       appWorkspace.classList.add('streaming-active');
@@ -235,9 +366,7 @@ async function joinRoom() {
       activeViewerRoomVal.textContent = `Room: ${roomId}`;
     }
 
-    if (btnOverlayReconnect) {
-      btnOverlayReconnect.style.display = 'none';
-    }
+    hideOverlay();
     updateVitals({ path: currentMediaMode === 'tunnel-relay' ? 'tunnel-relay' : '--' });
 
     // Switch visible video/canvas element according to mode
@@ -289,6 +418,44 @@ function setupSocketListeners() {
     }
   });
 
+  socket.on('studio:cameras', ({ cameras }) => {
+    if (!studioSwitcherBar || !studioCamerasList) return;
+    if (!cameras || cameras.length === 0) {
+      studioSwitcherBar.style.display = 'none';
+      return;
+    }
+    studioSwitcherBar.style.display = 'flex';
+    studioCamerasList.innerHTML = '';
+    cameras.forEach((cam, idx) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.dataset.camId = cam.id;
+      const isAct = cam.id === activeStudioCameraId || (!activeStudioCameraId && idx === 0);
+      btn.className = 'studio-cam-btn' + (isAct ? ' active' : '');
+      btn.textContent = cam.label || `Cam ${idx + 1}`;
+      btn.addEventListener('click', () => {
+        activeStudioCameraId = cam.id;
+        socket.emit('studio:switch', { cameraId: cam.id });
+        const allBtns = studioCamerasList.querySelectorAll('.studio-cam-btn');
+        allBtns.forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        logDiagnostic(`[Studio] Switched active camera to ${cam.label}`, 'INFO');
+      });
+      studioCamerasList.appendChild(btn);
+    });
+  });
+
+  socket.on('studio:switched', ({ activeCameraId }) => {
+    activeStudioCameraId = activeCameraId;
+    if (studioCamerasList) {
+      const allBtns = studioCamerasList.querySelectorAll('.studio-cam-btn');
+      allBtns.forEach((b) => {
+        b.classList.toggle('active', b.dataset.camId === activeCameraId);
+      });
+    }
+    logDiagnostic(`[Studio] Active studio camera changed to ${activeCameraId}`, 'INFO');
+  });
+
   // Experimental zrok-tunneled binary video frame reception
   socket.on('tunnel:frame', (buffer) => {
     if (currentMediaMode !== 'tunnel-relay') {
@@ -298,7 +465,7 @@ function setupSocketListeners() {
     if (tunnelStartTime === 0) {
       tunnelStartTime = Date.now();
       updateStatus('live', 'Live (zrok Tunnel Relay)');
-      if (videoOverlay) videoOverlay.style.display = 'none';
+      hideOverlay();
     }
 
     tunnelFramesReceived += 1;
@@ -348,12 +515,14 @@ function createViewerPeer(iceServers) {
     onTrack: (remoteStream) => {
       logDiagnostic(`[MEDIA] Remote video track received (${remoteStream.getTracks().length} track(s)). Attaching to player...`, 'INFO');
       remoteVideo.srcObject = remoteStream;
-      videoOverlay.style.display = 'none';
-      if (btnOverlayReconnect) {
-        btnOverlayReconnect.style.display = 'none';
+      // The track arrives with the SDP, before any media flows; only report live once ICE has connected.
+      if (isWebRtcConnected()) {
+        hideOverlay();
       }
       remoteVideo.play().then(() => {
-        updateStatus('live', 'Live Feed');
+        if (isWebRtcConnected()) {
+          updateStatus('live', 'Live Feed');
+        }
         logDiagnostic('[MEDIA] Playback started successfully.', 'INFO');
       }).catch((err) => {
         logDiagnostic(`[MEDIA] Auto-play blocked: ${err.message}. Click to play.`, 'WARN');
@@ -363,13 +532,18 @@ function createViewerPeer(iceServers) {
     onConnectionStateChange: (state) => {
       logDiagnostic(`[P2P] Peer connection state: ${state}`, 'INFO');
       if (state === 'connected') {
+        hideOverlay();
         updateStatus('live', 'Live Feed');
         startStatsPolling();
+        if (remoteVideo) {
+          remoteVideo.play().catch(() => {});
+        }
       } else if (state === 'disconnected') {
         updateStatus('disconnected', 'Sender Disconnected');
         stopStatsPolling();
       } else if (state === 'failed') {
         updateStatus('error', 'Connection Failed');
+        showOverlay('Connection Failed', 'Could not reach the sender directly. The sender and this device are probably on different networks (no TURN relay configured), or the network blocks the path.', true);
         stopStatsPolling();
       }
     },
@@ -383,6 +557,7 @@ function createViewerPeer(iceServers) {
         logDiagnostic('1. Router "AP / client isolation" (or a guest network) blocks phone-to-PC traffic.', 'WARN');
         logDiagnostic('2. Windows Firewall blocks inbound UDP for this browser (Wi-Fi profile set to Public).', 'WARN');
         logDiagnostic('3. A VPN or virtual adapter on this PC hides the real LAN route.', 'WARN');
+        logDiagnostic('4. Sender and viewer are on different networks and no TURN relay is configured (set TURN_SERVERS in .env). Screen sharing also hides the sender LAN IP behind an mDNS name that other devices may not resolve.', 'WARN');
         logDiagnostic('LAST RESORT: switch Media Transport Mode to "Fallback - Video through zrok" (Mode B) on both sender and viewer. It works anywhere but consumes zrok quota.', 'INFO');
       }
     }
@@ -440,19 +615,47 @@ function createViewerPeer(iceServers) {
     logDiagnostic(`[ROOM] Stream state update: ${data.state}`, 'INFO');
     if (data.state === 'stopped') {
       updateStatus('stopped', 'Stream Stopped by Sender');
-      videoOverlay.textContent = 'Sender stopped the stream.';
-      videoOverlay.style.display = 'block';
-      if (btnOverlayReconnect) {
-        btnOverlayReconnect.style.display = 'inline-flex';
-      }
+      showOverlay('Stream Stopped', 'Sender stopped the stream.', true);
     } else if (data.state === 'source-changed' || data.state === 'live') {
-      updateStatus('live', 'Live Feed');
-      videoOverlay.style.display = 'none';
-      if (btnOverlayReconnect) {
-        btnOverlayReconnect.style.display = 'none';
+      // Signaling-only event: in WebRTC mode it must not claim "live" before the media connection is up.
+      if (currentMediaMode === 'tunnel-relay' || isWebRtcConnected()) {
+        updateStatus('live', 'Live Feed');
+        hideOverlay();
+        if (remoteVideo) {
+          remoteVideo.play().catch(() => {});
+        }
       }
-      if (remoteVideo) {
-        remoteVideo.play().catch(() => {});
+    }
+  });
+
+  socket.on('sender:battery', (data) => {
+    if (!data || typeof data.level !== 'number') return;
+    const vitalBatteryItem = document.getElementById('vitalBatteryItem');
+    const vitalBattery = document.getElementById('vitalBattery');
+    const hudBatteryPill = document.getElementById('hudBatteryPill');
+    const hudBatteryIcon = document.getElementById('hudBatteryIcon');
+    const hudBatteryText = document.getElementById('hudBatteryText');
+
+    const chargingIcon = data.charging ? ' ⚡' : '';
+    let color = '#22c55e'; // green
+    if (data.level <= 20) {
+      color = '#ef4444'; // red
+    } else if (data.level <= 50) {
+      color = '#eab308'; // yellow
+    }
+
+    if (vitalBatteryItem && vitalBattery) {
+      vitalBatteryItem.style.display = 'flex';
+      vitalBattery.textContent = `${data.level}%${chargingIcon}`;
+      vitalBattery.style.color = color;
+    }
+
+    if (hudBatteryPill && hudBatteryText) {
+      hudBatteryPill.style.display = 'inline-flex';
+      hudBatteryText.textContent = `${data.level}%${chargingIcon}`;
+      hudBatteryText.style.color = color;
+      if (hudBatteryIcon) {
+        hudBatteryIcon.textContent = data.charging ? '⚡' : (data.level <= 20 ? '🪫' : '🔋');
       }
     }
   });
@@ -466,11 +669,11 @@ function createViewerPeer(iceServers) {
     if (remoteVideo.srcObject) {
       remoteVideo.srcObject = null;
     }
-    videoOverlay.textContent = 'Sender left the room. Waiting for reconnection...';
-    videoOverlay.style.display = 'block';
-    if (btnOverlayReconnect) {
-      btnOverlayReconnect.style.display = 'inline-flex';
-    }
+    const vitalBatteryItem = document.getElementById('vitalBatteryItem');
+    const hudBatteryPill = document.getElementById('hudBatteryPill');
+    if (vitalBatteryItem) vitalBatteryItem.style.display = 'none';
+    if (hudBatteryPill) hudBatteryPill.style.display = 'none';
+    showOverlay('Sender Disconnected', 'Sender left the room. Waiting for reconnection...', true);
     stopStatsPolling();
     if (webrtcPeer) {
       webrtcPeer.close();
@@ -485,12 +688,31 @@ function createViewerPeer(iceServers) {
 
   socket.on('connect', () => {
     logDiagnostic(`[SOCKET] Connected to signaling server (ID: ${socket.id})`, 'INFO');
+    if (isViewerSessionActive && currentRoomId && activeViewerPin) {
+      logDiagnostic(`[AutoReconnect] Viewer socket reconnected. Rejoining room "${currentRoomId}"...`, 'INFO');
+      updateStatus('connecting', 'Rejoining room...');
+      socket.emit('room:join', { roomId: currentRoomId, role: 'viewer', pin: activeViewerPin, mediaMode: currentMediaMode }, (response) => {
+        if (response && response.success) {
+          logDiagnostic(`[AutoReconnect] Viewer rejoined room "${currentRoomId}" successfully.`, 'INFO');
+          sendQualityPriority();
+          if (response.hasPeer) {
+            updateStatus('connecting', 'Sender present. Awaiting offer...');
+          } else {
+            updateStatus('waiting', 'Waiting for Sender...');
+          }
+        }
+      });
+    }
   });
 
   socket.on('disconnect', (reason) => {
     logDiagnostic(`[SOCKET] Disconnected from signaling server (${reason})`, 'WARN');
-    updateStatus('disconnected', 'Server Disconnected');
     stopStatsPolling();
+    if (isViewerSessionActive) {
+      updateStatus('connecting', 'Connection Lost - Reconnecting...');
+    } else {
+      updateStatus('disconnected', 'Server Disconnected');
+    }
   });
 
   socket.on('connect_error', (err) => {
@@ -598,6 +820,8 @@ function stopStatsPolling() {
 
 function leaveRoom() {
   logDiagnostic('Leaving room...');
+  isViewerSessionActive = false;
+  activeViewerPin = null;
   stopStatsPolling();
 
   if (socket) {
@@ -612,6 +836,10 @@ function leaveRoom() {
   if (remoteVideo.srcObject) {
     remoteVideo.srcObject = null;
   }
+  const vitalBatteryItem = document.getElementById('vitalBatteryItem');
+  const hudBatteryPill = document.getElementById('hudBatteryPill');
+  if (vitalBatteryItem) vitalBatteryItem.style.display = 'none';
+  if (hudBatteryPill) hudBatteryPill.style.display = 'none';
   if (remoteCanvas && canvasContext) {
     canvasContext.clearRect(0, 0, remoteCanvas.width, remoteCanvas.height);
   }
@@ -628,12 +856,21 @@ function leaveRoom() {
     vcamPumpingInterval = null;
   }
 
-  videoOverlay.textContent = 'Enter Room ID and click "Join Room" to view stream';
-  videoOverlay.style.display = 'block';
-
-  if (btnOverlayReconnect) {
-    btnOverlayReconnect.style.display = 'none';
+  const lastRoom = rememberedRoomId || currentRoomId || getSessionLastRoom();
+  if (lastRoom) {
+    rememberedRoomId = lastRoom;
+    showOverlay('Stream Inactive', `Left room "${lastRoom}". Click Reconnect to join again.`, true);
+    if (roomIdInput && !roomIdInput.value) {
+      roomIdInput.value = lastRoom;
+    }
+    if (accessPinInput && !accessPinInput.value && rememberedPin) {
+      accessPinInput.value = rememberedPin;
+    }
+  } else {
+    showOverlay('Stream Inactive', 'Enter the Room ID and click Join Stream to watch live', false);
   }
+
+  currentRoomId = null;
 
   updateVitals({
     fps: null,
@@ -678,6 +915,123 @@ btnFullscreen.addEventListener('click', () => {
   }
 });
 
+function handleFullscreenChange() {
+  const isFs = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+  document.body.classList.toggle('is-fullscreen', isFs);
+  if (videoWrapper) {
+    videoWrapper.classList.toggle('is-fullscreen', isFs);
+  }
+}
+
+document.addEventListener('fullscreenchange', handleFullscreenChange);
+document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+
+if (videoWrapper) {
+  videoWrapper.addEventListener('dblclick', (e) => {
+    if (e.target && e.target.closest('button, a, input, select')) {
+      return;
+    }
+    btnFullscreen.click();
+  });
+}
+
+const gridOverlay = document.getElementById('gridOverlay');
+const transformController = new StreamTransformController(remoteVideo, gridOverlay);
+const btnHudFlipH = document.getElementById('btnHudFlipH');
+const btnHudRotate = document.getElementById('btnHudRotate');
+const btnHudGrid = document.getElementById('btnHudGrid');
+const btnHudAudio = document.getElementById('btnHudAudio');
+const btnPushToTalk = document.getElementById('btnPushToTalk');
+const btnHudRecord = document.getElementById('btnHudRecord');
+const recIndicator = document.getElementById('recIndicator');
+const recTimerText = document.getElementById('recTimerText');
+const btnShareViewerLink = document.getElementById('btnShareViewerLink');
+
+if (btnHudAudio && remoteVideo) {
+  btnHudAudio.addEventListener('click', () => {
+    remoteVideo.muted = !remoteVideo.muted;
+    btnHudAudio.style.color = remoteVideo.muted ? 'inherit' : '#10b981';
+    logDiagnostic(`[Audio] Remote audio playback ${remoteVideo.muted ? 'muted' : 'unmuted'}.`, 'INFO');
+  });
+}
+
+if (btnPushToTalk) {
+  btnPushToTalk.addEventListener('click', () => {
+    if (socket && currentRoomId) {
+      socket.emit('intercom:message', { type: 'chime', message: 'Viewer paged sender' });
+      btnPushToTalk.style.color = 'var(--accent-cyan)';
+      logDiagnostic('[Intercom] Talkback chime sent to sender.', 'INFO');
+      setTimeout(() => {
+        btnPushToTalk.style.color = 'inherit';
+      }, 1000);
+    } else {
+      showError('Join a live room before sending intercom chime.');
+    }
+  });
+}
+
+if (btnHudFlipH) {
+  btnHudFlipH.addEventListener('click', () => {
+    const isMirrored = transformController.toggleMirror();
+    btnHudFlipH.style.color = isMirrored ? 'var(--accent-cyan)' : 'inherit';
+  });
+}
+
+if (btnHudRotate) {
+  btnHudRotate.addEventListener('click', () => {
+    transformController.rotate();
+  });
+}
+
+if (btnHudGrid) {
+  btnHudGrid.addEventListener('click', () => {
+    const isActive = transformController.toggleGrid();
+    btnHudGrid.style.color = isActive ? 'var(--accent-cyan)' : 'inherit';
+  });
+}
+
+let streamRecorder = null;
+if (btnHudRecord && remoteVideo) {
+  streamRecorder = new StreamRecorder(remoteVideo, {
+    onStart: () => {
+      if (recIndicator) { recIndicator.classList.add('active'); }
+      btnHudRecord.style.color = '#ef4444';
+      logDiagnostic('[Record] Video recording started on viewer.', 'INFO');
+    },
+    onStop: () => {
+      if (recIndicator) { recIndicator.classList.remove('active'); }
+      btnHudRecord.style.color = 'inherit';
+      logDiagnostic('[Record] Video recording completed and file downloaded.', 'INFO');
+    },
+    onTimeUpdate: (timeStr) => {
+      if (recTimerText) { recTimerText.textContent = `REC ${timeStr}`; }
+    }
+  });
+
+  btnHudRecord.addEventListener('click', () => {
+    if (streamRecorder.isRecording) {
+      streamRecorder.stop();
+    } else {
+      if (currentRoomId) {
+        streamRecorder.start();
+      } else {
+        showError('Join a live room before starting recording.');
+      }
+    }
+  });
+}
+
+if (btnShareViewerLink) {
+  btnShareViewerLink.addEventListener('click', () => {
+    const url = buildShareUrl('/viewer', {
+      roomId: currentRoomId || roomIdInput?.value || '',
+      pin: accessPinInput?.value || '',
+      autostart: true
+    });
+    copyTextToClipboard(url, btnShareViewerLink, '✓ Link Copied!');
+  });
+}
+
 if (btnHudFullscreen) {
   btnHudFullscreen.addEventListener('click', () => {
     btnFullscreen.click();
@@ -714,12 +1068,24 @@ if (btnHudPip) {
 
 if (btnOverlayReconnect) {
   btnOverlayReconnect.addEventListener('click', () => {
+    const rid = rememberedRoomId || (roomIdInput && roomIdInput.value.trim()) || getSessionLastRoom();
+    const rpin = rememberedPin || (accessPinInput && accessPinInput.value.trim()) || getSessionLastPin() || '123456';
+    if (rid && roomIdInput) {
+      roomIdInput.value = rid;
+    }
+    if (rpin && accessPinInput) {
+      accessPinInput.value = rpin;
+    }
+    logDiagnostic(`[Reconnect] Reconnecting to room "${rid || 'unknown'}"...`, 'INFO');
     joinRoom();
   });
 }
 
 // Window unload cleanup
 window.addEventListener('beforeunload', () => {
+  if (streamRecorder && streamRecorder.isRecording) {
+    streamRecorder.stop();
+  }
   leaveRoom();
 });
 
@@ -731,7 +1097,7 @@ async function showLocalViewerHint() {
   if (!localOrigin) {
     return;
   }
-  const roomQuery = roomParam ? `?room=${encodeURIComponent(roomParam)}` : '';
+  const roomQuery = currentRoomId ? `?room=${encodeURIComponent(currentRoomId)}` : (roomIdInput?.value ? `?room=${encodeURIComponent(roomIdInput.value)}` : '');
   const localViewerUrl = `${localOrigin}/viewer${roomQuery}`;
   localViewerHintLink.href = localViewerUrl;
   localViewerHintLink.textContent = localViewerUrl;
@@ -744,4 +1110,36 @@ setupDiagnosticsControls('btnCopyLogs', 'btnClearLogs', 'diagnosticsLog');
 setupCollapsibleDrawer('btnToggleDiagnostics', 'diagnosticsLog', '📋 Technical Diagnostics & WebRTC Vitals ▼', '📋 Technical Diagnostics & WebRTC Vitals ▲');
 showLocalViewerHint();
 fetchIceServers().catch(() => {});
+
+// URL query parameters parsing for auto-connect & prefilling
+const streamParams = parseUrlStreamParams();
+const initRoom = streamParams.roomId || urlParams.get('room') || getSessionLastRoom();
+const initPin = streamParams.pin || urlParams.get('pin') || getSessionLastPin();
+
+if (initRoom) {
+  rememberedRoomId = initRoom;
+  if (roomIdInput) {
+    roomIdInput.value = initRoom;
+  }
+  if (roomHintBadge) {
+    roomHintBadge.textContent = `Room: ${initRoom}`;
+    roomHintBadge.style.display = 'inline-flex';
+  }
+}
+if (initPin) {
+  rememberedPin = initPin;
+  if (accessPinInput) {
+    accessPinInput.value = initPin;
+  }
+}
+if (streamParams.mode && mediaModeSelect) {
+  mediaModeSelect.value = streamParams.mode;
+}
+if (streamParams.autostart && initRoom) {
+  logDiagnostic(`[AutoStart] Autostart query parameter detected. Automatically joining room "${initRoom}"...`, 'INFO');
+  setTimeout(() => {
+    joinRoom();
+  }, 400);
+}
+
 logDiagnostic('Viewer client ready.');

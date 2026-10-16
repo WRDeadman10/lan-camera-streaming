@@ -4,9 +4,14 @@
  * and WebRTC peer connection to viewer.
  */
 
-import { showError, clearError, showInfo, clearInfo, updateStatus, logDiagnostic, parseCandidateSummary, setupDiagnosticsControls, setPathIndicator, describePath, isLocalHostname, fetchLocalServerOrigin, updateVitals, captureFrameSnapshot, copyTextToClipboard, setupCollapsibleDrawer, setupPasswordToggle } from './ui-utils.js';
+import { showError, clearError, showInfo, clearInfo, updateStatus, logDiagnostic, parseCandidateSummary, setupDiagnosticsControls, setPathIndicator, describePath, isLocalHostname, fetchLocalServerOrigin, updateVitals, captureFrameSnapshot, copyTextToClipboard, setupCollapsibleDrawer, setupPasswordToggle, StreamRecorder, WakeLockController, StreamTransformController, parseUrlStreamParams, buildShareUrl } from './ui-utils.js';
 import { CameraManager } from './camera-manager.js';
 import { WebRtcPeer } from './webrtc-peer.js';
+import { BatteryMonitor } from './battery-monitor.js';
+import { AbrLevel, createAbrState, getAbrLimits, stepAbr } from './abr-policy.js';
+import { getRecommendedBitrateHints, isQualityMode, readVideoBitrateParams } from './sdp-bitrate.js';
+import { classifyEncoder } from './encoder-info.js';
+import { formatSenderStats } from './sender-stats.js';
 
 const cameraManager = new CameraManager();
 let socket = null;
@@ -24,6 +29,238 @@ let cachedIceServers = null;
 let mjpegIsEncoding = false;
 let lastLoggedPathKind = null;
 let torchActive = false;
+
+// Auto-reconnect state management (distinguish human stop vs network/device drop)
+let isStreamingRequested = false;
+let hasJoinedRoom = false;
+let isRejoining = false;
+let autoRejoinTimer = null;
+let watchdogInterval = null;
+let activeRoomId = null;
+let activePin = null;
+let isStudioSender = false;
+
+// Per-viewer choice of what stays constant: 'fps' (default), 'resolution' or 'both'. Bitrate ceilings live in sdp-bitrate.js.
+const DefaultQualityMode = 'fps';
+const viewerQualityPriority = new Map();
+const viewerAbrState = new Map();
+
+// Declared here (not with the other DOM lookups) because the encoder logic below runs at module load.
+const encoderPreferenceSelect = document.getElementById('encoderPreference');
+const screenContentHintSelect = document.getElementById('screenContentHint');
+
+// Hardware H.264: offered first only when Chrome reports a GPU encoder (MediaCapabilities powerEfficient). If a software H.264
+// encoder is detected later we fall back to VP8 and remember it. Viewers that cannot decode H.264 still get VP8 in the same offer.
+const HardwareH264StorageKey = 'lancam_hw_h264_unsupported';
+const HardwareH264LatchTtlMs = 24 * 60 * 60 * 1000;
+const encoderEvaluatedViewers = new Set();
+let hardwareH264Unsupported = false;
+let hardwareH264Available = false;
+try {
+  // The flag stores the time it was set and expires, so a driver update or a misjudgement cannot disable the GPU path forever.
+  const latchedAt = Number(localStorage.getItem(HardwareH264StorageKey));
+  hardwareH264Unsupported = Number.isFinite(latchedAt) && latchedAt > 1 && (Date.now() - latchedAt) < HardwareH264LatchTtlMs;
+  if (!hardwareH264Unsupported) {
+    localStorage.removeItem(HardwareH264StorageKey);
+  }
+} catch (err) {
+  console.warn('Hardware encoder flag storage is unavailable; the check repeats each session:', err);
+}
+
+function setHardwareH264Unsupported(value) {
+  hardwareH264Unsupported = value;
+  try {
+    if (value) {
+      localStorage.setItem(HardwareH264StorageKey, String(Date.now()));
+    } else {
+      localStorage.removeItem(HardwareH264StorageKey);
+    }
+  } catch (err) {
+    console.warn('Could not store the hardware encoder flag; it applies to this session only:', err);
+  }
+}
+
+// Chrome reports hardware encode per H.264 profile: on an RTX 3060 the constrained-baseline id (42e01f) says false while
+// baseline (42001f), main (4d001f) and high (640028) say true, and the GPU encoder is then really used. So ask for several.
+const HardwareH264ProbeProfiles = ['42001f', '4d001f', '640028'];
+
+async function detectHardwareH264() {
+  try {
+    if (!navigator.mediaCapabilities || typeof navigator.mediaCapabilities.encodingInfo !== 'function') {
+      hardwareH264Available = false;
+    } else {
+      const results = await Promise.all(HardwareH264ProbeProfiles.map(async (profileLevelId) => {
+        try {
+          const info = await navigator.mediaCapabilities.encodingInfo({
+            type: 'webrtc',
+            video: {
+              contentType: `video/H264;level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=${profileLevelId}`,
+              width: 1920,
+              height: 1080,
+              bitrate: getRecommendedBitrateHints(DefaultQualityMode).encodingMaxBitrateBps,
+              framerate: 30
+            }
+          });
+          return Boolean(info.supported && info.powerEfficient);
+        } catch (err) {
+          return false;
+        }
+      }));
+      hardwareH264Available = results.some(Boolean);
+    }
+  } catch (err) {
+    hardwareH264Available = false;
+  }
+  logDiagnostic(hardwareH264Available
+    ? '[ENCODER] GPU H.264 encoder detected. Auto mode will use it (VP8 stays as fallback for viewers that cannot decode H.264).'
+    : '[ENCODER] No GPU H.264 encoder detected by this browser. Auto mode keeps VP8 (software).', 'INFO');
+  return hardwareH264Available;
+}
+
+const hardwareH264Detection = detectHardwareH264();
+
+function getEncoderChoice() {
+  return encoderPreferenceSelect ? encoderPreferenceSelect.value : 'auto';
+}
+
+function getPreferredVideoMime() {
+  const choice = getEncoderChoice();
+  if (choice === 'h264') {
+    return 'video/H264';
+  }
+  if (choice === 'vp8' || hardwareH264Unsupported || !hardwareH264Available) {
+    return null;
+  }
+  return 'video/H264';
+}
+
+// Runs once per viewer connection, after the first frames were encoded and Chrome reports which encoder it picked.
+function evaluateVideoEncoder(viewerId, stats) {
+  if (encoderEvaluatedViewers.has(viewerId) || !stats.encoderImplementation || !stats.framesEncoded) {
+    return;
+  }
+  // Chrome only exposes the encoder name to capturing pages; when it does, use it to double-check the GPU claim.
+  const forced = getEncoderChoice() === 'h264';
+  encoderEvaluatedViewers.add(viewerId);
+
+  if (stats.codec !== 'H264') {
+    logDiagnostic(`[ENCODER:${viewerId}] Using ${stats.codec || 'unknown codec'} (${stats.encoderImplementation}); this viewer or browser did not take H.264.`, 'INFO');
+    return;
+  }
+  const encoderClass = classifyEncoder(stats);
+  if (encoderClass === 'hardware') {
+    logDiagnostic(`[ENCODER:${viewerId}] Hardware H.264 active (${stats.encoderImplementation}). GPU is doing the encoding.`, 'INFO');
+    return;
+  }
+  if (encoderClass === 'unknown') {
+    logDiagnostic(`[ENCODER:${viewerId}] H.264 encoder "${stats.encoderImplementation}" is not recognised; keeping H.264 and not switching to VP8.`, 'WARN');
+    return;
+  }
+
+  if (forced) {
+    logDiagnostic(`[ENCODER:${viewerId}] H.264 is running on a software encoder (${stats.encoderImplementation}); kept because H.264 is forced.`, 'WARN');
+    return;
+  }
+  logDiagnostic(`[ENCODER:${viewerId}] H.264 fell back to a software encoder (${stats.encoderImplementation}). Switching to VP8 and remembering this for this machine.`, 'WARN');
+  setHardwareH264Unsupported(true);
+  setTimeout(() => {
+    if (viewerPeers.has(viewerId)) {
+      initiateWebRtcConnectionForViewer(viewerId);
+    }
+  }, 0);
+}
+
+if (encoderPreferenceSelect) {
+  encoderPreferenceSelect.addEventListener('change', () => {
+    if (encoderPreferenceSelect.value === 'auto') {
+      setHardwareH264Unsupported(false);
+    }
+    logDiagnostic(`[ENCODER] Video encoder preference set to "${encoderPreferenceSelect.value}". Applies to the next viewer connection.`, 'INFO');
+  });
+}
+
+// Chrome treats a screen track marked 'motion' like camera video, which allows automatic resolution scaling; 'detail'
+// keeps screen-share handling. The hint belongs to the track (shared by all viewers), so it follows the source, not a viewer.
+function getContentHintForCurrentSource() {
+  const wantsDetail = screenContentHintSelect && screenContentHintSelect.value === 'detail';
+  return sourceSelect && sourceSelect.value === 'screen' && wantsDetail ? 'detail' : 'motion';
+}
+
+function describeQualityMode(mode) {
+  if (mode === 'both') {
+    return 'FPS and resolution';
+  }
+  return mode === 'resolution' ? 'resolution' : 'FPS';
+}
+
+async function applyViewerQualityPriority(viewerId, peer, { armGrace = false } = {}) {
+  try {
+    const mode = viewerQualityPriority.get(viewerId) || DefaultQualityMode;
+    const applied = await peer.applyQualityPriority(mode, { armGrace });
+    const ceilingMbps = getRecommendedBitrateHints(mode).encodingMaxBitrateBps / 1000000;
+    if (applied) {
+      const hold = peer.isInGracePeriod() ? ', holding resolution while the bandwidth estimate ramps up' : '';
+      logDiagnostic(`[MEDIA:${viewerId}] Quality priority "${mode}" applied (${applied}, up to ${ceilingMbps} Mbps${hold}).`, 'INFO');
+    } else {
+      logDiagnostic(`[MEDIA:${viewerId}] Could not apply quality priority "${mode}" yet; will retry once connected.`, 'WARN');
+    }
+  } catch (err) {
+    logDiagnostic(`[MEDIA:${viewerId}] Applying the quality priority failed: ${err.message}`, 'WARN');
+  }
+}
+
+// Viewers that chose a mode before this sender joined are listed in the join acknowledgement.
+function seedViewerQuality(response) {
+  const modes = response && response.viewerQuality;
+  if (!modes || typeof modes !== 'object') {
+    return;
+  }
+  for (const [viewerId, mode] of Object.entries(modes)) {
+    if (isQualityMode(mode)) {
+      viewerQualityPriority.set(viewerId, mode);
+    }
+  }
+}
+
+function getAbrState(viewerId) {
+  if (!viewerAbrState.has(viewerId)) {
+    viewerAbrState.set(viewerId, createAbrState());
+  }
+  return viewerAbrState.get(viewerId);
+}
+
+function logSenderStats(tag, viewerId, peer, stats) {
+  const pairInfo = `${stats.localCandidateType || '?'} (${stats.localAddress || '?'}) <-> ${stats.remoteCandidateType || '?'} (${stats.remoteAddress || '?'})`;
+  const line = formatSenderStats({
+    stats,
+    diagnostics: peer.getSenderDiagnostics(),
+    mode: viewerQualityPriority.get(viewerId) || DefaultQualityMode,
+    abrLevel: getAbrState(viewerId).level,
+    pairInfo
+  });
+  logDiagnostic(`[${tag}:${viewerId}] ${line}`, 'INFO');
+}
+
+// Snapshots shortly after connecting show whether the resolution drop happens during the bandwidth ramp-up.
+function scheduleDiagnosticSnapshots(viewerId, peer) {
+  for (const delayMs of [3000, 8000, 15000]) {
+    setTimeout(async () => {
+      if (viewerPeers.get(viewerId) !== peer) {
+        return;
+      }
+      const stats = await peer.getStatsReport();
+      if (!stats) {
+        return;
+      }
+      logSenderStats(`DIAG +${delayMs / 1000}s`, viewerId, peer, stats);
+      if (delayMs === 3000 && peer.peerConnection && peer.peerConnection.remoteDescription) {
+        const hints = readVideoBitrateParams(peer.peerConnection.remoteDescription.sdp)
+          .map((entry) => `${entry.codec}#${entry.payload} ${JSON.stringify(entry.params)}`);
+        logDiagnostic(`[SDP:${viewerId}] Bitrate hints in the viewer answer: ${hints.length > 0 ? hints.join('; ') : 'none'}`, 'INFO');
+      }
+    }, delayMs);
+  }
+}
 
 const MjpegMaxWidth = 1280;
 const MjpegMaxFrameBytes = 900000;
@@ -65,20 +302,54 @@ const fileInput = document.getElementById('fileInput');
 const urlInput = document.getElementById('urlInput');
 const fileInputGroup = document.getElementById('fileInputGroup');
 const urlInputGroup = document.getElementById('urlInputGroup');
+const cameraSelectGroup = document.getElementById('cameraSelectGroup');
+const focusModeGroup = document.getElementById('focusModeGroup');
+const focusDistanceGroup = document.getElementById('focusDistanceGroup');
+const resolutionGroup = document.getElementById('resolutionGroup');
+const resolutionLabel = document.querySelector('label[for="cameraResolution"]');
+
 // Show/hide appropriate input based on selected source and apply dynamic switch
+function updateSourceInputsVisibility() {
+  const value = sourceSelect ? sourceSelect.value : 'webcam';
+  if (value === 'file') {
+    if (fileInputGroup) { fileInputGroup.style.display = 'block'; }
+    if (urlInputGroup) { urlInputGroup.style.display = 'none'; }
+    if (cameraSelectGroup) { cameraSelectGroup.style.display = 'none'; }
+    if (focusModeGroup) { focusModeGroup.style.display = 'none'; }
+    if (focusDistanceGroup) { focusDistanceGroup.style.display = 'none'; }
+    if (resolutionLabel) { resolutionLabel.textContent = 'Resolution'; }
+  } else if (value === 'url') {
+    if (fileInputGroup) { fileInputGroup.style.display = 'none'; }
+    if (urlInputGroup) { urlInputGroup.style.display = 'block'; }
+    if (cameraSelectGroup) { cameraSelectGroup.style.display = 'none'; }
+    if (focusModeGroup) { focusModeGroup.style.display = 'none'; }
+    if (focusDistanceGroup) { focusDistanceGroup.style.display = 'none'; }
+    if (resolutionLabel) { resolutionLabel.textContent = 'Resolution'; }
+  } else if (value === 'screen') {
+    if (fileInputGroup) { fileInputGroup.style.display = 'none'; }
+    if (urlInputGroup) { urlInputGroup.style.display = 'none'; }
+    if (cameraSelectGroup) { cameraSelectGroup.style.display = 'none'; }
+    if (focusModeGroup) { focusModeGroup.style.display = 'none'; }
+    if (focusDistanceGroup) { focusDistanceGroup.style.display = 'none'; }
+    if (resolutionGroup) { resolutionGroup.style.display = 'block'; }
+    if (resolutionLabel) { resolutionLabel.textContent = 'Quality / Resolution'; }
+  } else {
+    // webcam
+    if (fileInputGroup) { fileInputGroup.style.display = 'none'; }
+    if (urlInputGroup) { urlInputGroup.style.display = 'none'; }
+    if (cameraSelectGroup) { cameraSelectGroup.style.display = 'block'; }
+    if (focusModeGroup) { focusModeGroup.style.display = 'block'; }
+    if (resolutionGroup) { resolutionGroup.style.display = 'block'; }
+    if (resolutionLabel) { resolutionLabel.textContent = 'Quality / Resolution'; }
+  }
+}
+
+// Initialize input visibility immediately on page load
+updateSourceInputsVisibility();
+
 if (sourceSelect) {
   sourceSelect.addEventListener('change', async () => {
-    const value = sourceSelect.value;
-    if (value === 'file') {
-      if (fileInputGroup) { fileInputGroup.style.display = 'block'; }
-      if (urlInputGroup) { urlInputGroup.style.display = 'none'; }
-    } else if (value === 'url') {
-      if (fileInputGroup) { fileInputGroup.style.display = 'none'; }
-      if (urlInputGroup) { urlInputGroup.style.display = 'block'; }
-    } else {
-      if (fileInputGroup) { fileInputGroup.style.display = 'none'; }
-      if (urlInputGroup) { urlInputGroup.style.display = 'none'; }
-    }
+    updateSourceInputsVisibility();
     if (isStreamingActive()) {
       await applyDynamicSourceChange();
     }
@@ -119,8 +390,12 @@ if (cameraSelect) {
 
 if (cameraResolutionSelect) {
   cameraResolutionSelect.addEventListener('change', async () => {
-    if (isStreamingActive() && (!sourceSelect || sourceSelect.value === 'webcam')) {
-      await applyDynamicSourceChange();
+    if (isStreamingActive()) {
+      if (!sourceSelect || sourceSelect.value === 'webcam') {
+        await applyDynamicSourceChange();
+      } else if (sourceSelect.value === 'screen') {
+        await applyScreenResolutionChange();
+      }
     }
   });
 }
@@ -195,9 +470,226 @@ if (btnToggleSetup && setupFormBody) {
   });
 }
 
+const wakeLockController = new WakeLockController();
+const gridOverlay = document.getElementById('gridOverlay');
+const transformController = new StreamTransformController(localVideo, gridOverlay);
+const btnHudFlipH = document.getElementById('btnHudFlipH');
+const btnHudRotate = document.getElementById('btnHudRotate');
+const btnHudGrid = document.getElementById('btnHudGrid');
+const btnHudBatterySaver = document.getElementById('btnHudBatterySaver');
+const oledSaverOverlay = document.getElementById('oledSaverOverlay');
+const btnHudRecord = document.getElementById('btnHudRecord');
+const recIndicator = document.getElementById('recIndicator');
+const recTimerText = document.getElementById('recTimerText');
+const zoomControlBar = document.getElementById('zoomControlBar');
+const zoomSlider = document.getElementById('zoomSlider');
+const zoomValText = document.getElementById('zoomValText');
+const btnSharePreLink = document.getElementById('btnSharePreLink');
+
+// Focus controls
+const focusModeSelect = document.getElementById('focusModeSelect');
+const focusDistanceSlider = document.getElementById('focusDistanceSlider');
+const focusDistanceValText = document.getElementById('focusDistanceValText');
+const focusControlBar = document.getElementById('focusControlBar');
+const focusSlider = document.getElementById('focusSlider');
+const focusValText = document.getElementById('focusValText');
+const btnHudFocus = document.getElementById('btnHudFocus');
+
+// Battery monitoring
+const vitalSenderBatteryItem = document.getElementById('vitalSenderBatteryItem');
+const vitalSenderBattery = document.getElementById('vitalSenderBattery');
+
+let latestBatteryData = null;
+const batteryMonitor = new BatteryMonitor((batteryData) => {
+  latestBatteryData = batteryData;
+  if (vitalSenderBatteryItem && vitalSenderBattery && batteryData && batteryData.level !== null) {
+    vitalSenderBatteryItem.style.display = 'flex';
+    const chargingIcon = batteryData.charging ? ' ⚡' : '';
+    vitalSenderBattery.textContent = `${batteryData.level}%${chargingIcon}`;
+    if (batteryData.level <= 20) {
+      vitalSenderBattery.style.color = '#ef4444';
+    } else if (batteryData.level <= 50) {
+      vitalSenderBattery.style.color = '#eab308';
+    } else {
+      vitalSenderBattery.style.color = '#22c55e';
+    }
+  }
+  broadcastBatteryToViewers();
+});
+
+function broadcastBatteryToViewers() {
+  if (socket && socket.connected && currentRoomId && latestBatteryData) {
+    socket.emit('sender:battery', latestBatteryData);
+  }
+}
+
+function updateFocusUI() {
+  const currentMode = focusModeSelect ? focusModeSelect.value : 'continuous';
+  const isLocked = currentMode === 'manual' || currentMode === 'single-shot';
+  if (btnHudFocus) {
+    btnHudFocus.style.color = isLocked ? 'var(--accent-cyan)' : 'inherit';
+    btnHudFocus.title = isLocked
+      ? 'Focus is Constant / Locked (Click for Auto-Focus)'
+      : 'Focus is Auto (Click to Lock Constant Focus)';
+  }
+  const caps = cameraManager.getCapabilities();
+  const hasDistance = Boolean(caps && caps.focusDistance);
+  if (focusDistanceGroup) {
+    focusDistanceGroup.style.display = (currentMode === 'manual' && hasDistance) ? 'block' : 'none';
+  }
+  if (focusControlBar) {
+    if (currentMode === 'manual' && hasDistance) {
+      focusControlBar.classList.add('active');
+    } else {
+      focusControlBar.classList.remove('active');
+    }
+  }
+}
+
+async function applyCurrentFocusSettings() {
+  if (!cameraManager || !cameraManager.currentStream) return;
+  const mode = focusModeSelect ? focusModeSelect.value : 'continuous';
+  const ok = await cameraManager.applyFocusMode(mode);
+  if (ok) {
+    logDiagnostic(`[Camera] Focus mode applied: ${mode}`, 'INFO');
+  }
+  if (mode === 'manual' && focusDistanceSlider) {
+    const dist = parseFloat(focusDistanceSlider.value);
+    if (!isNaN(dist)) {
+      await cameraManager.applyFocusDistance(dist);
+    }
+  }
+}
+
+if (focusModeSelect) {
+  focusModeSelect.addEventListener('change', async () => {
+    updateFocusUI();
+    await applyCurrentFocusSettings();
+  });
+}
+
+if (focusDistanceSlider) {
+  focusDistanceSlider.addEventListener('input', async () => {
+    const val = parseFloat(focusDistanceSlider.value);
+    if (focusDistanceValText) {
+      focusDistanceValText.textContent = `${val.toFixed(2)}m`;
+    }
+    if (focusSlider) {
+      focusSlider.value = val;
+    }
+    if (focusValText) {
+      focusValText.textContent = `${val.toFixed(2)}m`;
+    }
+    await cameraManager.applyFocusDistance(val);
+  });
+}
+
+if (focusSlider) {
+  focusSlider.addEventListener('input', async () => {
+    const val = parseFloat(focusSlider.value);
+    if (focusValText) {
+      focusValText.textContent = `${val.toFixed(2)}m`;
+    }
+    if (focusDistanceSlider) {
+      focusDistanceSlider.value = val;
+    }
+    if (focusDistanceValText) {
+      focusDistanceValText.textContent = `${val.toFixed(2)}m`;
+    }
+    await cameraManager.applyFocusDistance(val);
+  });
+}
+
+if (btnHudFocus) {
+  btnHudFocus.addEventListener('click', async () => {
+    const currentMode = focusModeSelect ? focusModeSelect.value : 'continuous';
+    const newMode = (currentMode === 'continuous') ? 'manual' : 'continuous';
+    if (focusModeSelect) {
+      focusModeSelect.value = newMode;
+    }
+    updateFocusUI();
+    const ok = await cameraManager.applyFocusMode(newMode);
+    if (ok) {
+      logDiagnostic(`[HUD] Focus mode toggled to ${newMode === 'manual' ? 'Constant / Locked' : 'Continuous Auto-Focus'}.`, 'INFO');
+    }
+  });
+}
+
+if (localVideo) {
+  localVideo.addEventListener('click', async () => {
+    if (!isStreamingActive()) return;
+    const ok = await cameraManager.applyFocusMode('single-shot');
+    if (ok) {
+      if (focusModeSelect) focusModeSelect.value = 'single-shot';
+      updateFocusUI();
+      logDiagnostic('[Camera] Focus locked via tap on preview.', 'INFO');
+    }
+  });
+}
+
 if (btnHudFacing) {
   btnHudFacing.addEventListener('click', () => {
     btnToggleFacing.click();
+  });
+}
+
+if (btnHudFlipH) {
+  btnHudFlipH.addEventListener('click', () => {
+    const isMirrored = transformController.toggleMirror();
+    btnHudFlipH.style.color = isMirrored ? 'var(--accent-cyan)' : 'inherit';
+  });
+}
+
+if (btnHudRotate) {
+  btnHudRotate.addEventListener('click', () => {
+    transformController.rotate();
+  });
+}
+
+if (btnHudGrid) {
+  btnHudGrid.addEventListener('click', () => {
+    const isActive = transformController.toggleGrid();
+    btnHudGrid.style.color = isActive ? 'var(--accent-cyan)' : 'inherit';
+  });
+}
+
+if (btnHudBatterySaver && oledSaverOverlay) {
+  btnHudBatterySaver.addEventListener('click', () => {
+    oledSaverOverlay.classList.add('active');
+  });
+  oledSaverOverlay.addEventListener('click', () => {
+    oledSaverOverlay.classList.remove('active');
+  });
+}
+
+let streamRecorder = null;
+if (btnHudRecord && localVideo) {
+  streamRecorder = new StreamRecorder(localVideo, {
+    onStart: () => {
+      if (recIndicator) { recIndicator.classList.add('active'); }
+      btnHudRecord.style.color = '#ef4444';
+      logDiagnostic('[Record] Video recording started on sender.', 'INFO');
+    },
+    onStop: () => {
+      if (recIndicator) { recIndicator.classList.remove('active'); }
+      btnHudRecord.style.color = 'inherit';
+      logDiagnostic('[Record] Video recording completed and file downloaded.', 'INFO');
+    },
+    onTimeUpdate: (timeStr) => {
+      if (recTimerText) { recTimerText.textContent = `REC ${timeStr}`; }
+    }
+  });
+
+  btnHudRecord.addEventListener('click', () => {
+    if (streamRecorder.isRecording) {
+      streamRecorder.stop();
+    } else {
+      if (isStreamingActive()) {
+        streamRecorder.start();
+      } else {
+        showError('Start streaming before recording video.');
+      }
+    }
   });
 }
 
@@ -220,21 +712,113 @@ if (btnHudFullscreen && videoContainer) {
   });
 }
 
+function handleSenderFullscreenChange() {
+  const isFs = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+  document.body.classList.toggle('is-fullscreen', isFs);
+  if (videoContainer) {
+    videoContainer.classList.toggle('is-fullscreen', isFs);
+  }
+}
+
+document.addEventListener('fullscreenchange', handleSenderFullscreenChange);
+document.addEventListener('webkitfullscreenchange', handleSenderFullscreenChange);
+
+if (videoContainer) {
+  videoContainer.addEventListener('dblclick', (e) => {
+    if (e.target && e.target.closest('button, a, input, select')) {
+      return;
+    }
+    if (btnHudFullscreen) {
+      btnHudFullscreen.click();
+    }
+  });
+}
+
 if (btnHudTorch) {
   btnHudTorch.addEventListener('click', async () => {
-    if (cameraManager.currentStream) {
-      const track = cameraManager.currentStream.getVideoTracks()[0];
-      if (track && track.applyConstraints) {
-        try {
-          torchActive = !torchActive;
-          await track.applyConstraints({ advanced: [{ torch: torchActive }] });
-          btnHudTorch.style.color = torchActive ? '#facc15' : 'inherit';
-          logDiagnostic(`[HUD] Torch flashlight ${torchActive ? 'enabled' : 'disabled'}.`, 'INFO');
-        } catch (e) {
-          torchActive = false;
-        }
-      }
+    torchActive = !torchActive;
+    const ok = await cameraManager.applyTorch(torchActive);
+    if (ok) {
+      btnHudTorch.style.color = torchActive ? '#facc15' : 'inherit';
+      logDiagnostic(`[HUD] Torch flashlight ${torchActive ? 'enabled' : 'disabled'}.`, 'INFO');
+    } else {
+      torchActive = false;
     }
+  });
+}
+
+if (zoomSlider) {
+  zoomSlider.addEventListener('input', async () => {
+    const val = parseFloat(zoomSlider.value);
+    if (zoomValText) {
+      zoomValText.textContent = `${val.toFixed(1)}x`;
+    }
+    await cameraManager.applyZoom(val);
+  });
+}
+
+function updateHardwareCapabilitiesUI() {
+  const sourceChoice = sourceSelect ? sourceSelect.value : 'webcam';
+  if (sourceChoice !== 'webcam') {
+    if (btnHudTorch) btnHudTorch.style.display = 'none';
+    if (btnHudFacing) btnHudFacing.style.display = 'none';
+    if (btnHudFocus) btnHudFocus.style.display = 'none';
+    if (zoomControlBar) zoomControlBar.classList.remove('active');
+    if (focusControlBar) focusControlBar.classList.remove('active');
+    if (focusDistanceGroup) focusDistanceGroup.style.display = 'none';
+    return;
+  }
+  if (btnHudFacing) btnHudFacing.style.display = 'inline-flex';
+  if (btnHudFocus) btnHudFocus.style.display = 'inline-flex';
+
+  const caps = cameraManager.getCapabilities();
+  if (!caps) {
+    if (btnHudTorch) btnHudTorch.style.display = 'none';
+    if (zoomControlBar) zoomControlBar.classList.remove('active');
+    if (focusControlBar) focusControlBar.classList.remove('active');
+    if (focusDistanceGroup) focusDistanceGroup.style.display = 'none';
+    return;
+  }
+  if (btnHudTorch) {
+    btnHudTorch.style.display = caps.torch ? 'inline-flex' : 'none';
+  }
+  if (caps.zoom && zoomControlBar && zoomSlider) {
+    zoomControlBar.classList.add('active');
+    zoomSlider.min = caps.zoom.min || 1;
+    zoomSlider.max = caps.zoom.max || 5;
+    zoomSlider.step = caps.zoom.step || 0.1;
+    zoomSlider.value = 1;
+    if (zoomValText) zoomValText.textContent = '1.0x';
+  } else if (zoomControlBar) {
+    zoomControlBar.classList.remove('active');
+  }
+
+  if (caps.focusDistance) {
+    const min = caps.focusDistance.min !== undefined ? caps.focusDistance.min : 0;
+    const max = caps.focusDistance.max !== undefined ? caps.focusDistance.max : 1;
+    const step = caps.focusDistance.step !== undefined ? caps.focusDistance.step : 0.05;
+    if (focusDistanceSlider) {
+      focusDistanceSlider.min = min;
+      focusDistanceSlider.max = max;
+      focusDistanceSlider.step = step;
+    }
+    if (focusSlider) {
+      focusSlider.min = min;
+      focusSlider.max = max;
+      focusSlider.step = step;
+    }
+  }
+  updateFocusUI();
+}
+
+if (btnSharePreLink) {
+  btnSharePreLink.addEventListener('click', () => {
+    const url = buildShareUrl('/viewer', {
+      roomId: roomIdInput?.value || '',
+      pin: accessPinInput?.value || '',
+      autostart: true
+    });
+    copyTextToClipboard(url, btnSharePreLink, '✓ Link Copied!');
   });
 }
 
@@ -365,6 +949,33 @@ async function getRemoteUrlStream(url) {
   });
 }
 
+let lastSuccessfulSource = 'webcam';
+
+async function applyScreenResolutionChange() {
+  const resChoice = cameraResolutionSelect ? cameraResolutionSelect.value : 'max';
+  logDiagnostic(`[SCREEN] Adjusting screen share resolution to "${resChoice}" (aspect preserved)...`, 'INFO');
+  const ok = await cameraManager.applyScreenResolution(resChoice);
+  if (ok) {
+    const track = cameraManager.currentStream && cameraManager.currentStream.getVideoTracks()[0];
+    const settings = track && track.getSettings ? track.getSettings() : {};
+    const actualWidth = settings.width || localVideo.videoWidth || 0;
+    const actualHeight = settings.height || localVideo.videoHeight || 0;
+    const actualFps = Math.round(settings.frameRate || 30);
+    logDiagnostic(`[SCREEN] Dynamic resolution applied: ${actualWidth}x${actualHeight} @ ${actualFps} FPS (${resChoice}).`, 'INFO');
+    updateVitals({
+      fps: actualFps,
+      resolution: (actualWidth && actualHeight) ? `${actualWidth} × ${actualHeight}` : null
+    });
+    if (socket) {
+      socket.emit('stream:state', { state: 'source-changed' });
+    }
+    showInfo(`Screen resolution adjusted to ${resChoice} (aspect preserved).`);
+    setTimeout(clearInfo, 2500);
+  } else {
+    await applyDynamicSourceChange();
+  }
+}
+
 async function obtainStreamForCurrentSource() {
   const sourceChoice = sourceSelect ? sourceSelect.value : 'webcam';
   if (sourceChoice === 'webcam') {
@@ -382,13 +993,38 @@ async function obtainStreamForCurrentSource() {
       targetWidth = 854;
       targetHeight = 480;
     }
-    logDiagnostic(`Requesting camera capture (mode: ${resChoice})...`, 'INFO');
+    const audioToggle = document.getElementById('audioToggle');
+    const withAudio = Boolean(audioToggle && audioToggle.checked);
+    logDiagnostic(`Requesting camera capture (mode: ${resChoice}, audio: ${withAudio})...`, 'INFO');
     return await cameraManager.startCapture({
       deviceId: selectedDeviceId,
       width: targetWidth,
       height: targetHeight,
-      frameRate: 30
+      frameRate: 30,
+      withAudio
     });
+  } else if (sourceChoice === 'screen') {
+    const resChoice = cameraResolutionSelect ? cameraResolutionSelect.value : 'max';
+    const audioToggle = document.getElementById('audioToggle');
+    const withAudio = Boolean(audioToggle && audioToggle.checked);
+    logDiagnostic(`Requesting screen capture (quality: ${resChoice}, audio: ${withAudio})...`, 'INFO');
+    const stream = await cameraManager.startScreenCapture({
+      resolution: resChoice,
+      frameRate: 30,
+      withAudio
+    });
+    const videoTrack = stream.getVideoTracks()[0];
+    if (videoTrack) {
+      videoTrack.addEventListener('ended', () => {
+        logDiagnostic('[SCREEN] Screen sharing stopped via browser UI.', 'WARN');
+        if (isStreamingActive()) {
+          stopSession();
+          showInfo('Screen sharing was ended.');
+          setTimeout(clearInfo, 3000);
+        }
+      });
+    }
+    return stream;
   } else if (sourceChoice === 'file') {
     const file = fileInput && fileInput.files && fileInput.files[0];
     if (!file) {
@@ -429,6 +1065,7 @@ async function applyDynamicSourceChange() {
     if (sourceChoice === 'webcam') {
       cleanupSourceVideoElement();
     }
+    lastSuccessfulSource = sourceChoice;
 
     localVideo.srcObject = newStream;
     videoOverlay.style.display = 'none';
@@ -438,6 +1075,9 @@ async function applyDynamicSourceChange() {
 
     const newVideoTrack = newStream.getVideoTracks()[0];
     const newAudioTrack = newStream.getAudioTracks()[0];
+    if (newVideoTrack) {
+      newVideoTrack.contentHint = getContentHintForCurrentSource();
+    }
 
     // Replace tracks on all active viewer peer connections
     if (viewerPeers.size > 0 && newVideoTrack) {
@@ -450,6 +1090,7 @@ async function applyDynamicSourceChange() {
             try {
               await videoSender.replaceTrack(newVideoTrack);
               logDiagnostic(`[MEDIA:${viewerId}] Successfully replaced video track with new source.`, 'INFO');
+              await applyViewerQualityPriority(viewerId, peer, { armGrace: true });
             } catch (err) {
               logDiagnostic(`[MEDIA:${viewerId}] Failed to replace video track: ${err.message}`, 'WARN');
             }
@@ -496,6 +1137,9 @@ async function applyDynamicSourceChange() {
       }
     }
 
+    await applyCurrentFocusSettings();
+    updateHardwareCapabilitiesUI();
+
     updateVitals({
       fps: actualFps,
       resolution: (actualWidth && actualHeight) ? `${actualWidth} × ${actualHeight}` : null
@@ -507,6 +1151,10 @@ async function applyDynamicSourceChange() {
 
     showInfo(`Stream source changed to ${sourceChoice}.`);
   } catch (err) {
+    if (sourceSelect) {
+      sourceSelect.value = lastSuccessfulSource;
+      updateSourceInputsVisibility();
+    }
     showError(`Failed to switch source: ${err.message}`);
     logDiagnostic(`Source switch failed: ${err.message}`, 'ERROR');
   } finally {
@@ -531,6 +1179,11 @@ async function startSession() {
     return;
   }
 
+  isStreamingRequested = true;
+  activeRoomId = roomId;
+  activePin = pin;
+  isStudioSender = Boolean(streamParams.role === 'studio-sender' || streamParams.studio === '1');
+
   btnStart.disabled = true;
   updateStatus('connecting', 'Starting capture...');
   logDiagnostic('Requesting camera permissions...');
@@ -538,41 +1191,12 @@ async function startSession() {
   let stream = null;
   try {
     const sourceChoice = sourceSelect ? sourceSelect.value : 'webcam';
+    stream = await obtainStreamForCurrentSource();
+
     if (sourceChoice === 'webcam') {
-      const selectedDeviceId = cameraSelect.value || null;
-      const resChoice = cameraResolutionSelect ? cameraResolutionSelect.value : 'max';
-      let targetWidth = 'max';
-      let targetHeight = 'max';
-      if (resChoice === '1080p') {
-        targetWidth = 1920;
-        targetHeight = 1080;
-      } else if (resChoice === '720p') {
-        targetWidth = 1280;
-        targetHeight = 720;
-      } else if (resChoice === '480p') {
-        targetWidth = 854;
-        targetHeight = 480;
-      }
-      logDiagnostic(`Requesting camera capture (mode: ${resChoice})...`, 'INFO');
-      stream = await cameraManager.startCapture({
-        deviceId: selectedDeviceId,
-        width: targetWidth,
-        height: targetHeight,
-        frameRate: 30
-      });
-    } else if (sourceChoice === 'file') {
-      const file = fileInput && fileInput.files[0];
-      if (!file) {
-        throw new Error('No video file selected');
-      }
-      stream = await getLocalFileStream(file);
-    } else if (sourceChoice === 'url') {
-      const url = urlInput ? urlInput.value.trim() : '';
-      if (!url) {
-        throw new Error('No video URL provided');
-      }
-      stream = await getRemoteUrlStream(url);
+      cleanupSourceVideoElement();
     }
+    lastSuccessfulSource = sourceChoice;
 
     localVideo.srcObject = stream;
     videoOverlay.style.display = 'none';
@@ -592,7 +1216,10 @@ if (viewerPeers.size > 0) {
       if (videoTrack) {
         const videoSender = senders.find(s => s.track && s.track.kind === 'video');
         if (videoSender) {
-          videoSender.replaceTrack(videoTrack).catch(err => {
+          videoTrack.contentHint = getContentHintForCurrentSource();
+          videoSender.replaceTrack(videoTrack).then(() => {
+            return applyViewerQualityPriority(viewerId, peer, { armGrace: true });
+          }).catch(err => {
             logDiagnostic(`[MEDIA:${viewerId}] Failed to replace video track: ${err.message}`, 'WARN');
           });
         } else {
@@ -624,14 +1251,13 @@ if (viewerPeers.size > 0) {
       actualHeight = settings.height || localVideo.videoHeight || 0;
       actualFps = Math.round(settings.frameRate || 30);
       logDiagnostic(`Camera capture active: ${actualWidth}x${actualHeight} @ ${actualFps} FPS (${videoTrack.label || 'Default Camera'}).`, 'INFO');
-
-      const capabilities = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
-      if (capabilities.torch && btnHudTorch) {
-        btnHudTorch.style.display = 'inline-flex';
-      }
     } else {
       logDiagnostic('Camera capture started.', 'INFO');
     }
+
+    await applyCurrentFocusSettings();
+    updateHardwareCapabilitiesUI();
+    wakeLockController.request().catch(() => {});
 
     updateVitals({
       fps: actualFps,
@@ -676,19 +1302,26 @@ if (viewerPeers.size > 0) {
     setupSocketListeners();
   }
 
-  logDiagnostic(`Joining room "${roomId}" as sender [mode: ${currentMediaMode}]...`);
+  startWatchdog();
+
+  const role = isStudioSender ? 'studio-sender' : 'sender';
+  logDiagnostic(`Joining room "${roomId}" as ${role} [mode: ${currentMediaMode}]...`);
   updateStatus('connecting', 'Joining Room...');
 
-  socket.emit('room:join', { roomId, role: 'sender', pin, mediaMode: currentMediaMode }, async (response) => {
+  socket.emit('room:join', { roomId, role, pin, mediaMode: currentMediaMode, reconnect: true }, async (response) => {
     if (!response || !response.success) {
       const errMsg = response ? response.error : 'Connection to room failed';
       showError(errMsg);
-      logDiagnostic(`Join failed: ${errMsg}`);
-      stopSession();
+      logDiagnostic(`Join failed: ${errMsg}. Will automatically retry in 3 seconds...`, 'WARN');
+      updateStatus('connecting', `Join failed (${errMsg}) - Retrying...`);
+      scheduleAutoRejoin(3000);
       return;
     }
 
-    logDiagnostic(`Joined room "${roomId}" as sender [mode: ${response.mediaMode}].`);
+    hasJoinedRoom = true;
+    seedViewerQuality(response);
+    logDiagnostic(`Joined room "${roomId}" as ${role} [mode: ${response.mediaMode}].`);
+    broadcastBatteryToViewers();
 
     // Display Share QR Code for Viewer
     const viewerUrl = `${window.location.origin}/viewer?room=${encodeURIComponent(roomId)}`;
@@ -747,6 +1380,172 @@ if (viewerPeers.size > 0) {
   });
 }
 
+async function rejoinRoomAsSender() {
+  if (!isStreamingRequested || !activeRoomId || !activePin) {
+    return;
+  }
+  if (isRejoining) {
+    return;
+  }
+
+  if (autoRejoinTimer) {
+    clearTimeout(autoRejoinTimer);
+    autoRejoinTimer = null;
+  }
+
+  isRejoining = true;
+
+  // 1. Ensure socket exists and is connected
+  if (!socket) {
+    socket = io();
+    setupSocketListeners();
+  }
+
+  if (!socket.connected) {
+    logDiagnostic('[AutoReconnect] Socket not connected yet. Waiting for socket connect event...', 'INFO');
+    socket.connect();
+    isRejoining = false;
+    return;
+  }
+
+  // 2. Ensure camera stream is still active
+  const hasLiveVideoTrack = cameraManager.currentStream &&
+    cameraManager.currentStream.getVideoTracks().some((t) => t.readyState === 'live');
+  if (!hasLiveVideoTrack && (!sourceSelect || sourceSelect.value === 'webcam')) {
+    logDiagnostic('[AutoReconnect] Camera capture ended or interrupted while backgrounded; re-acquiring capture...', 'WARN');
+    try {
+      await applyDynamicSourceChange();
+    } catch (err) {
+      logDiagnostic(`[AutoReconnect] Failed to re-acquire camera: ${err.message}`, 'WARN');
+    }
+  }
+
+  // 3. Clear stale viewer peer connections
+  for (const peer of viewerPeers.values()) {
+    try {
+      peer.close();
+    } catch {
+      // Ignore
+    }
+  }
+  viewerPeers.clear();
+  pendingCandidatesByViewer.clear();
+
+  updateStatus('connecting', 'Rejoining room...');
+  logDiagnostic(`[AutoReconnect] Automatically re-joining room "${activeRoomId}"...`, 'INFO');
+
+  const role = isStudioSender ? 'studio-sender' : 'sender';
+  const joinPayload = {
+    roomId: activeRoomId,
+    role,
+    pin: activePin,
+    mediaMode: currentMediaMode,
+    reconnect: true
+  };
+
+  socket.emit('room:join', joinPayload, async (response) => {
+    isRejoining = false;
+
+    if (!isStreamingRequested) {
+      return;
+    }
+
+    if (!response || !response.success) {
+      const errMsg = response ? response.error : 'Connection to room failed';
+      logDiagnostic(`[AutoReconnect] Rejoin room failed: ${errMsg}. Retrying in 3 seconds...`, 'WARN');
+      updateStatus('connecting', `Reconnecting (${errMsg})...`);
+      scheduleAutoRejoin(3000);
+      return;
+    }
+
+    hasJoinedRoom = true;
+    seedViewerQuality(response);
+    logDiagnostic(`[AutoReconnect] Successfully rejoined room "${activeRoomId}" as ${role} [mode: ${response.mediaMode}].`, 'INFO');
+    showInfo('✓ Stream reconnected to room');
+    setTimeout(clearInfo, 2500);
+
+    socket.emit('stream:state', { state: 'live' });
+
+    if (currentMediaMode === 'tunnel-relay') {
+      if (response.hasPeer) {
+        updateStatus('live', 'Live (zrok Tunnel Relay)');
+        startTunnelFrameLoop();
+      } else {
+        updateStatus('waiting', 'Waiting for Viewer (Tunnel Mode)...');
+        logDiagnostic('Waiting for viewer to connect in tunnel mode.');
+      }
+    } else {
+      if (response.hasPeer) {
+        updateStatus('connecting', 'Viewers present. Connecting WebRTC...');
+        const peerList = response.peerSocketIds || (response.peerSocketId ? [response.peerSocketId] : []);
+        for (const pId of peerList) {
+          await initiateWebRtcConnectionForViewer(pId);
+        }
+      } else {
+        updateStatus('waiting', 'Waiting for Viewer / Python...');
+        logDiagnostic('Waiting for viewer or Python consumer to connect.');
+      }
+    }
+  });
+}
+
+function scheduleAutoRejoin(delayMs = 3000) {
+  if (!isStreamingRequested) {
+    return;
+  }
+  if (autoRejoinTimer) {
+    clearTimeout(autoRejoinTimer);
+  }
+  autoRejoinTimer = setTimeout(() => {
+    rejoinRoomAsSender();
+  }, delayMs);
+}
+
+function startWatchdog() {
+  stopWatchdog();
+  watchdogInterval = setInterval(async () => {
+    if (!isStreamingRequested) {
+      stopWatchdog();
+      return;
+    }
+
+    // Check socket connection
+    if (!socket || !socket.connected) {
+      logDiagnostic('[Watchdog] Socket disconnected while streaming active. Reconnecting...', 'INFO');
+      if (socket) {
+        socket.connect();
+      } else {
+        rejoinRoomAsSender();
+      }
+      return;
+    }
+
+    // Refresh Screen WakeLock
+    wakeLockController.request().catch(() => {});
+
+    // Check camera track health
+    const stream = cameraManager.currentStream;
+    if (stream && (!sourceSelect || sourceSelect.value === 'webcam')) {
+      const liveTracks = stream.getVideoTracks().filter((t) => t.readyState === 'live');
+      if (liveTracks.length === 0 && !isSwitchingSource) {
+        logDiagnostic('[Watchdog] Video track ended. Re-acquiring camera...', 'WARN');
+        try {
+          await applyDynamicSourceChange();
+        } catch (err) {
+          logDiagnostic(`[Watchdog] Camera recovery failed: ${err.message}`, 'WARN');
+        }
+      }
+    }
+  }, 5000);
+}
+
+function stopWatchdog() {
+  if (watchdogInterval) {
+    clearInterval(watchdogInterval);
+    watchdogInterval = null;
+  }
+}
+
 
 
 
@@ -799,6 +1598,9 @@ function updateStreamingStatus() {
   updateVitals({ viewers: count });
 }
 
+// Viewers whose peer connection gathered a Chrome mDNS-obfuscated host candidate on this sender (used to explain ICE failures).
+const viewerPeerHidesLanAddress = new Set();
+
 function createSenderPeerForViewer(viewerId, iceServers) {
   if (viewerPeers.has(viewerId)) {
     const existing = viewerPeers.get(viewerId);
@@ -812,6 +1614,9 @@ function createSenderPeerForViewer(viewerId, iceServers) {
     iceServers,
     onIceCandidate: (candidate) => {
       if (candidate) {
+        if (candidate.type === 'host' && /\.local/.test(candidate.candidate)) {
+          viewerPeerHidesLanAddress.add(viewerId);
+        }
         logDiagnostic(`[ICE:${viewerId}] Local candidate gathered: ${parseCandidateSummary(candidate)}`, 'INFO');
         socket.emit('webrtc:ice-candidate', {
           candidate: candidate.candidate,
@@ -836,9 +1641,14 @@ function createSenderPeerForViewer(viewerId, iceServers) {
       logDiagnostic(`[P2P:${viewerId}] Peer connection state: ${state}`, 'INFO');
       updateStreamingStatus();
       if (state === 'connected') {
+        applyViewerQualityPriority(viewerId, peer, { armGrace: true });
+        scheduleDiagnosticSnapshots(viewerId, peer);
         startStatsPolling();
       } else if (state === 'failed') {
         logDiagnostic(`[P2P:${viewerId}] Connection failed.`, 'ERROR');
+        if (viewerPeerHidesLanAddress.has(viewerId)) {
+          logDiagnostic(`[DIAGNOSIS:${viewerId}] THIS browser hides its LAN IP behind an mDNS name (xxxx.local) because the page has no camera/mic permission, so viewers on other devices often cannot reach it. Fix: allow Camera or Microphone for this site (site settings), or set chrome://flags/#enable-webrtc-hide-local-ips-with-mdns to Disabled and restart Chrome.`, 'WARN');
+        }
       }
     },
     onIceConnectionStateChange: (state) => {
@@ -865,19 +1675,16 @@ function createSenderPeerForViewer(viewerId, iceServers) {
       cameraManager.currentStream.getTracks().forEach((track) => {
         logDiagnostic(`[MEDIA:${viewerId}] Added local ${track.kind} track to peer (${track.label || 'camera'}).`, 'INFO');
         const sender = peer.addTrack(track, cameraManager.currentStream);
-        if (track.kind === 'video' && sender && sender.getParameters) {
-          try {
-            const params = sender.getParameters();
-            if (!params.encodings) { params.encodings = [{}]; }
-            params.encodings[0].scaleResolutionDownBy = 1.0; // keep original resolution
-            params.encodings[0].maxBitrate = 5000000; // optional higher bitrate
-            // Prefer maintaining resolution over framerate when bandwidth is limited
-            params.degradationPreference = 'maintain-resolution';
-            sender.setParameters(params);
-            logDiagnostic(`[MEDIA:${viewerId}] Enforced full‑resolution on video sender.`, 'INFO');
-          } catch (e) {
-            logDiagnostic(`[MEDIA:${viewerId}] Failed to set full‑resolution parameters: ${e.message}`, 'WARN');
+        if (track.kind === 'video') {
+          track.contentHint = getContentHintForCurrentSource();
+        }
+        if (track.kind === 'video' && sender) {
+          encoderEvaluatedViewers.delete(viewerId);
+          const preferredMime = getPreferredVideoMime();
+          if (preferredMime && peer.preferVideoCodec(preferredMime)) {
+            logDiagnostic(`[ENCODER:${viewerId}] Offering ${preferredMime.replace('video/', '')} first (GPU encode when available), other codecs kept as fallback.`, 'INFO');
           }
+          applyViewerQualityPriority(viewerId, peer);
         }
       });
     }
@@ -899,6 +1706,7 @@ function createSenderPeerForViewer(viewerId, iceServers) {
 async function initiateWebRtcConnectionForViewer(viewerId) {
   logDiagnostic(`[SDP] Creating WebRTC offer for viewer ${viewerId}...`, 'INFO');
   const iceServers = await fetchIceServers();
+  await hardwareH264Detection;
   const peer = createSenderPeerForViewer(viewerId, iceServers);
 
   try {
@@ -918,16 +1726,48 @@ async function initiateWebRtcConnectionForViewer(viewerId) {
 function setupSocketListeners() {
   socket.on('connect', () => {
     logDiagnostic(`[SOCKET] Connected to signaling server (ID: ${socket.id})`, 'INFO');
+    // The very first connect is already covered by startSession()'s room:join; rejoining here would send every viewer two offers.
+    if (isStreamingRequested && activeRoomId && hasJoinedRoom) {
+      logDiagnostic(`[AutoReconnect] Socket connected while streaming active. Automatically rejoining room "${activeRoomId}"...`, 'INFO');
+      rejoinRoomAsSender();
+    }
   });
 
   socket.on('disconnect', (reason) => {
     logDiagnostic(`[SOCKET] Disconnected from signaling server (${reason})`, 'WARN');
-    updateStatus('disconnected', 'Server Disconnected');
     stopStatsPolling();
+    if (isStreamingRequested) {
+      logDiagnostic(`[AutoReconnect] Unexpected disconnection (${reason}). Auto-reconnecting in background...`, 'WARN');
+      updateStatus('connecting', 'Connection Lost - Reconnecting...');
+      for (const peer of viewerPeers.values()) {
+        try { peer.close(); } catch {}
+      }
+      viewerPeers.clear();
+      pendingCandidatesByViewer.clear();
+      scheduleAutoRejoin(2000);
+    } else {
+      updateStatus('disconnected', 'Server Disconnected');
+    }
+  });
+
+  socket.on('sender:evicted', () => {
+    logDiagnostic('[ROOM] Another sender took over this room. Stopping this sender to avoid a reconnect loop.', 'WARN');
+    const evictedSocket = socket;
+    stopSession();
+    if (evictedSocket) {
+      evictedSocket.off();
+      evictedSocket.disconnect();
+    }
+    socket = null;
+    showError('Another sender joined this room and replaced this one. Close the other sender page, or use a different Room ID, then press Start again.');
   });
 
   socket.on('connect_error', (err) => {
     logDiagnostic(`[SOCKET] Connection error: ${err.message}`, 'ERROR');
+    if (isStreamingRequested) {
+      updateStatus('connecting', 'Reconnecting to Server...');
+      scheduleAutoRejoin(3000);
+    }
   });
 
   socket.on('mjpeg:demand', (data) => {
@@ -942,6 +1782,7 @@ function setupSocketListeners() {
 
   socket.on('peer:joined', async (data) => {
     const joinedId = data.peerId;
+    broadcastBatteryToViewers();
     logDiagnostic(`[ROOM] Viewer joined (${joinedId}) [mode: ${data.mediaMode || currentMediaMode}].`, 'INFO');
     if (currentMediaMode === 'tunnel-relay') {
       updateStatus('live', 'Live (zrok Tunnel Relay)');
@@ -1013,22 +1854,44 @@ function setupSocketListeners() {
     }
   });
 
+  socket.on('viewer:quality-priority', async (data) => {
+    if (!data || !data.viewerId || !isQualityMode(data.mode)) {
+      return;
+    }
+    if (viewerQualityPriority.get(data.viewerId) === data.mode) {
+      return;
+    }
+    viewerQualityPriority.set(data.viewerId, data.mode);
+    logDiagnostic(`[ROOM] Viewer ${data.viewerId} requested constant ${describeQualityMode(data.mode)}.`, 'INFO');
+    const peer = viewerPeers.get(data.viewerId);
+    if (peer) {
+      await applyViewerQualityPriority(data.viewerId, peer, { armGrace: true });
+    }
+  });
+
   socket.on('peer:left', (data) => {
     const leftId = data ? data.peerId : null;
     logDiagnostic(`[ROOM] Viewer ${leftId || ''} left the room.`, 'INFO');
 
-    if (leftId && viewerPeers.has(leftId)) {
-      const peer = viewerPeers.get(leftId);
-      peer.close();
-      viewerPeers.delete(leftId);
+    if (leftId) {
+      if (viewerPeers.has(leftId)) {
+        viewerPeers.get(leftId).close();
+        viewerPeers.delete(leftId);
+      }
       pendingCandidatesByViewer.delete(leftId);
-    } else if (!leftId) {
+      viewerQualityPriority.delete(leftId);
+      viewerAbrState.delete(leftId);
+      encoderEvaluatedViewers.delete(leftId);
+    } else {
       // Clear all
       for (const peer of viewerPeers.values()) {
         peer.close();
       }
       viewerPeers.clear();
       pendingCandidatesByViewer.clear();
+      viewerQualityPriority.clear();
+      viewerAbrState.clear();
+      encoderEvaluatedViewers.clear();
     }
 
     updateStreamingStatus();
@@ -1041,6 +1904,34 @@ function setupSocketListeners() {
     showError(data.message);
     logDiagnostic(`[ROOM] Signaling error: ${data.message}`, 'ERROR');
   });
+
+  socket.on('intercom:message', (data) => {
+    logDiagnostic(`[INTERCOM] Received message from viewer: ${data.message}`, 'INFO');
+    playIntercomChime();
+    showInfo(`🔔 Intercom chime from viewer!`);
+    setTimeout(clearInfo, 3500);
+  });
+}
+
+function playIntercomChime() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime + 0.15);
+    gain.gain.setValueAtTime(0.25, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.45);
+  } catch {
+    // Non-fatal
+  }
 }
 
 function startStatsPolling() {
@@ -1062,9 +1953,22 @@ function startStatsPolling() {
           if (stats.rtt && !primaryRtt) {
             primaryRtt = stats.rtt;
           }
+          evaluateVideoEncoder(vId, stats);
           if (stats.rtt) {
-            const pairInfo = `${stats.localCandidateType || '?'} (${stats.localAddress || '?'}) <-> ${stats.remoteCandidateType || '?'} (${stats.remoteAddress || '?'})`;
-            logDiagnostic(`[STATS:${vId}] Pair: ${pairInfo} | RTT: ${stats.rtt} | FPS: ${stats.framesPerSecond || 'active'}`, 'INFO');
+            logSenderStats('STATS', vId, peer, stats);
+          }
+
+          // Adaptive bitrate: a level change needs two consecutive RTT samples; only 'fps' viewers get a smaller picture
+          const abrStep = stepAbr(getAbrState(vId), stats.rawRttMs);
+          if (abrStep.changed) {
+            const viewerMode = viewerQualityPriority.get(vId) || DefaultQualityMode;
+            const ceilingBps = peer.qualityCeilingBps || getRecommendedBitrateHints(viewerMode).encodingMaxBitrateBps;
+            const limits = getAbrLimits(abrStep.level, viewerMode, ceilingBps);
+            await peer.applyBitrateLimit(limits.maxBitrateBps, limits.scaleResolutionDownBy);
+            logDiagnostic(`[ABR:${vId}] RTT ${stats.rawRttMs} ms: ${abrStep.previousLevel} -> ${abrStep.level} (max ${(limits.maxBitrateBps / 1000000).toFixed(1)} Mbps, scale ${limits.scaleResolutionDownBy}).`, abrStep.level === AbrLevel.Ok ? 'INFO' : 'WARN');
+            if (abrStep.level === AbrLevel.Ok) {
+              await applyViewerQualityPriority(vId, peer, { armGrace: true });
+            }
           }
         }
       }
@@ -1162,8 +2066,13 @@ function startTunnelFrameLoop() {
     targetHeight = localVideo.videoHeight || 720;
   } else {
     const parts = resVal.split('x').map((n) => parseInt(n, 10));
-    targetWidth = parts[0] || 640;
-    targetHeight = parts[1] || 360;
+    const boundW = parts[0] || 640;
+    const boundH = parts[1] || 360;
+    const srcW = localVideo.videoWidth || boundW;
+    const srcH = localVideo.videoHeight || boundH;
+    const scale = Math.min(boundW / srcW, boundH / srcH, 1);
+    targetWidth = Math.round(srcW * scale) || boundW;
+    targetHeight = Math.round(srcH * scale) || boundH;
   }
   const targetFps = parseInt(tunnelFpsSelect ? tunnelFpsSelect.value : '10', 10);
   const targetQuality = parseFloat(tunnelQualitySelect ? tunnelQualitySelect.value : '0.6');
@@ -1241,6 +2150,14 @@ function stopTunnelFrameLoop() {
 
 function stopSession() {
   logDiagnostic('Stopping stream and releasing camera...');
+  stopWatchdog();
+  if (autoRejoinTimer) {
+    clearTimeout(autoRejoinTimer);
+    autoRejoinTimer = null;
+  }
+  isRejoining = false;
+  isStreamingRequested = false;
+  hasJoinedRoom = false;
   stopStatsPolling();
   stopMjpegFrameLoop();
   stopTunnelFrameLoop();
@@ -1292,6 +2209,9 @@ function stopSession() {
   }
   viewerPeers.clear();
   pendingCandidatesByViewer.clear();
+  viewerQualityPriority.clear();
+  viewerAbrState.clear();
+  encoderEvaluatedViewers.clear();
 
   cleanupSourceVideoElement();
   cameraManager.stopCapture();
@@ -1301,6 +2221,12 @@ function stopSession() {
   if (videoOverlay) {
     videoOverlay.style.display = 'block';
   }
+
+  wakeLockController.release().catch(() => {});
+  if (streamRecorder && streamRecorder.isRecording) {
+    streamRecorder.stop();
+  }
+  updateHardwareCapabilitiesUI();
 
   if (btnStart) {
     btnStart.disabled = false;
@@ -1318,8 +2244,85 @@ if (btnStart) {
   btnStart.addEventListener('click', startSession);
 }
 if (btnStop) {
-  btnStop.addEventListener('click', stopSession);
+  btnStop.addEventListener('click', () => {
+    logDiagnostic('User clicked "Stop Streaming" (manual stop).', 'INFO');
+    isStreamingRequested = false;
+    if (autoRejoinTimer) {
+      clearTimeout(autoRejoinTimer);
+      autoRejoinTimer = null;
+    }
+    stopSession();
+  });
 }
+
+// Sharing a screen means switching to another window, which hides this tab. A full rejoin would tear down healthy
+// viewer connections (and renegotiate every viewer), so only re-offer to viewers whose connection actually died.
+const repairsInFlight = new Set();
+const DisconnectedRepairDelayMs = 5000;
+
+async function repairViewerPeer(viewerId, state) {
+  if (repairsInFlight.has(viewerId)) {
+    return;
+  }
+  repairsInFlight.add(viewerId);
+  try {
+    logDiagnostic(`[Lifecycle] Viewer ${viewerId} connection is ${state}; re-offering to this viewer only.`, 'INFO');
+    await initiateWebRtcConnectionForViewer(viewerId);
+  } finally {
+    repairsInFlight.delete(viewerId);
+  }
+}
+
+// 'disconnected' often heals by itself within seconds after a tab switch, so it is only repaired if it persists.
+async function repairUnhealthyViewerPeers() {
+  for (const [viewerId, peer] of Array.from(viewerPeers.entries())) {
+    const state = peer.peerConnection ? peer.peerConnection.connectionState : 'closed';
+    if (state === 'failed' || state === 'closed') {
+      await repairViewerPeer(viewerId, state);
+    } else if (state === 'disconnected') {
+      setTimeout(() => {
+        const current = viewerPeers.get(viewerId);
+        if (current === peer && current.peerConnection && current.peerConnection.connectionState !== 'connected') {
+          repairViewerPeer(viewerId, 'disconnected');
+        }
+      }, DisconnectedRepairDelayMs);
+    }
+  }
+}
+
+function canRepairViewersInPlace() {
+  if (!sourceSelect || sourceSelect.value !== 'screen' || viewerPeers.size === 0) {
+    return false;
+  }
+  return Boolean(cameraManager.currentStream &&
+    cameraManager.currentStream.getVideoTracks().some((t) => t.readyState === 'live'));
+}
+
+// Mobile screen wake / app return / network online listeners
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && isStreamingRequested) {
+    logDiagnostic('[Lifecycle] Screen/tab became visible. Verifying stream health...', 'INFO');
+    wakeLockController.request().catch(() => {});
+    if (localVideo && localVideo.paused) {
+      localVideo.play().catch(() => {});
+    }
+    if (!socket || !socket.connected) {
+      if (socket) socket.connect();
+    } else if (canRepairViewersInPlace()) {
+      repairUnhealthyViewerPeers();
+    } else {
+      rejoinRoomAsSender();
+    }
+  }
+});
+
+window.addEventListener('online', () => {
+  if (isStreamingRequested) {
+    logDiagnostic('[Lifecycle] Network connection restored (online). Re-establishing stream...', 'INFO');
+    if (socket) socket.connect();
+    rejoinRoomAsSender();
+  }
+});
 
 if (btnToggleFacing) {
   btnToggleFacing.addEventListener('click', async () => {
@@ -1344,4 +2347,23 @@ if (roomIdInput) {
 }
 populateCameraDevices();
 fetchIceServers().catch(() => {});
+
+// URL query parameters parsing for auto-connect & prefilling
+const streamParams = parseUrlStreamParams();
+if (streamParams.roomId && roomIdInput) {
+  roomIdInput.value = streamParams.roomId;
+}
+if (streamParams.pin && accessPinInput) {
+  accessPinInput.value = streamParams.pin;
+}
+if (streamParams.mode && mediaModeSelect) {
+  mediaModeSelect.value = streamParams.mode;
+}
+if (streamParams.autostart) {
+  logDiagnostic(`[AutoStart] Autostart query parameter detected. Launching capture for room "${streamParams.roomId}"...`, 'INFO');
+  setTimeout(() => {
+    startSession();
+  }, 400);
+}
+
 logDiagnostic('Sender client ready. Click "Start Streaming" to begin.');

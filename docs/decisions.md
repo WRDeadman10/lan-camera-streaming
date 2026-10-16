@@ -391,16 +391,122 @@ Tearing down and recreating rooms or peer connections causes user-visible stutte
 **Consequences:**
 Source switching takes effect immediately on all connected receivers. Senders rejoining occupied rooms instantly reconnect to all waiting viewers without requiring viewers to refresh or leave the room.
 
+## ADR-026 — The 14-Feature LAN Camera Ecosystem Architecture
+
+**Status:** Accepted
+
+**Decision:**
+Implement a comprehensive 14-feature expansion across mobile client controls, network adaptability, multi-camera studio switching, virtual webcam resilience, native game engine reception, IP camera bridging, and Windows OS integration:
+1. **Bidirectional Audio Pipeline & Intercom (Talkback):** Senders capture optional microphone audio alongside video; viewers control audio playback/mute/volume and emit push-to-talk chimes via dual-tone Web Audio synthesis.
+2. **High-Performance Shared-Memory Bridge (ADR-022 Wired):** Activated `src/server/vcam-shm-bridge.js` connecting Node.js to `lancam-setup.exe --bridge` on TCP 7779, writing directly into `Local\LanCamSharedMemory_Video` for zero-latency DirectShow frame delivery without HTTP polling overhead.
+3. **Native Unity Receiver Package (`com.vcam.lancamera`):** Created production-ready UPM package adhering strictly to `AGENTS.md` (no `var`, explicit types, no `new()`, K&R braces). Decodes streams directly into reusable `Texture2D` instances via `ImageConversion.LoadImage` for UI (`RawImage`) and 3D materials without GC spikes.
+4. **Multi-Camera Studio Switcher Mode:** `RoomManager` supports `studio-sender` role with multiple concurrent camera feeds; `signaling.js` broadcasts active cameras and targeted offer/answer routing; viewer displays interactive Studio Switcher bar.
+5. **Embedded RTSP 1.0 / IP-Camera Bridge:** Implemented zero-dependency `src/server/rtsp-server.js` (RFC 2326 & RFC 2435 JPEG over RTP) broadcasting on `rtsp://<host>:8554/live/<roomId>` for VLC, OBS, ffmpeg, and NVRs.
+6. **Hardware Camera Controls:** Added torch/flashlight toggle and hardware zoom slider to camera manager HUD with constraint fallbacks.
+7. **Adaptive Bitrate (ABR) & Dynamic Quality Scaling:** WebRTC sender dynamically inspects RTCPeerConnection stats (RTT and packet loss) and adjusts encoding parameters (`RTCRtpSender.setParameters`) between 600 kbps, 1.5 Mbps, and 4.0 Mbps.
+8. **Local Recording & Snapshot Hub:** Canvas snapshot PNG capture and client-side `MediaRecorder` with live recording timer HUD.
+9. **mDNS / Zero-Conf LAN Auto-Discovery:** Implemented zero-dependency multicast DNS beacon (`src/server/mdns-beacon.js`) advertising `lancam.local` on 224.0.0.251:5353 and added `/api/discover`.
+10. **Standby Slate & Virtual Camera Fallback State:** Added valid JFIF fallback generator (`src/server/standby-slate.js`) served on MJPEG stream when no sender is active, and SMPTE color bars rendered in DirectShow `lancam_filter.cpp`.
+11. **Mobile Battery & Thermal Saver Mode:** Integrated Screen WakeLock API (`navigator.wakeLock`) and OLED Blackout Saver mode to preserve battery and prevent thermal throttling.
+12. **Quick-Join URL & QR Code Auto-Connect:** Deep link query parameter handling (`?room=...&pin=...&autostart=1`) and one-click share link generation.
+13. **Stream Transformation & Framing HUD:** Interactive horizontal flip (mirroring), 90°/180°/270° rotation locks, and 3x3 rule-of-thirds grid.
+14. **Windows System Tray Companion & Auto-Start Configuration:** PowerShell tray companion (`scripts/lan-camera-tray.ps1`) docking into Windows notification area and Windows Registry auto-start manager (`scripts/register-autostart.ps1`).
+
+**Reasoning:**
+Transforms the project from an isolated browser tool into a complete, professional, cross-platform LAN camera broadcasting and ingestion ecosystem compatible with browsers, Windows apps, game engines, and surveillance systems.
+
+**Consequences:**
+Complete interoperability across WebRTC, RTSP, MJPEG, DirectShow, Unity, and Windows system tray, validated by 50 automated tests with zero external runtime dependencies.
+
+## ADR-027 — Non-Human Sender Disconnection Resilience & Auto-Reconnection Lifecycle
+
+**Status:** Accepted
+
+**Context:**
+On mobile devices and fluctuating local networks, senders can experience transient disconnections caused by Wi-Fi roaming, lock screen sleep, app backgrounding, or temporary TCP socket timeouts. Previously, when the sender socket disconnected, Socket.IO client reconnected under the hood with a new socket ID, but never re-joined the room. Furthermore, if a reconnect occurred before the server expired an orphaned socket, `RoomManager` rejected the join with `"Room already has an active sender."`, which caused `sender.js` to invoke `stopSession()` and permanently kill the camera and session. When viewers joined or reconnected, the server reported no sender, leaving viewers stuck on `"Waiting for Sender..."`.
+
+**Decision:**
+1. **Human Stop vs Non-Human Disconnect Distinction:**
+   - The only action that terminates streaming and releases the camera is an explicit user click on the "Stop Streaming" button (`btnStop`).
+   - For all non-human interruptions (socket `disconnect`, `connect_error`, Wi-Fi loss, background sleep), the sender maintains `isStreamingRequested = true` and keeps the local camera stream alive.
+2. **Server-Side Stale Sender Socket Eviction:**
+   - `RoomManager.createOrJoinRoom` supports `options.reconnect: true`.
+   - When a sender with the valid PIN reconnects to a room with an existing `senderSocketId`:
+     - If the existing socket is disconnected/dead or `reconnect: true` is set, the server evicts the stale socket (`result.evictedSenderId`), assigns the new socket ID, and broadcasts `peer:left` for the old socket followed by `peer:joined` for the new socket.
+3. **Automated Client Rejoin & WebRTC Peer Restoration:**
+   - On socket `connect`, mobile `visibilitychange` (screen turn-on), or network `online`, `sender.js` automatically emits `room:join` with `{ reconnect: true }`.
+   - Upon successful rejoin, the sender immediately receives all waiting viewers in `response.peerSocketIds` and initiates fresh WebRTC offers to resume video playback instantly.
+   - If join fails transiently (e.g., server still processing), an auto-rejoin retry timer exponential backoff continues attempting reconnection every 3 seconds until restored or explicitly stopped by the user.
+4. **Periodic Health Watchdog:**
+   - A 5-second watchdog interval checks socket connectivity, refreshes the Screen WakeLock, and re-acquires camera tracks if killed by mobile OS background policies.
+5. **Viewer Auto-Reconnection:**
+   - `viewer.js` automatically re-joins its room if the viewer's socket reconnects, avoiding stranded state.
+
+**Consequences:**
+Transient network drops, mobile lock screen wakeups, and server restarts heal automatically within 1-2 seconds without requiring manual button clicks or room re-entry.
+
+## ADR-028 — Screen Sharing Input Source with Aspect-Preserving Quality Scaling
+
+**Status:** Accepted
+
+**Context:**
+Users frequently need to broadcast desktop screens, application windows, or browser tabs across the local network to viewers, Unity applications, or virtual webcam clients, matching the quality and resolution controls available for physical camera sensors. However, screens have varied aspect ratios (16:9, 16:10, 4:3, 21:9 Ultrawide, or 9:16 portrait on mobile/vertical monitors). Hardcoding fixed dimensions (such as 1280x720) causes distortion, black letterboxing, or text blurriness when downscaling.
+
+**Decision:**
+1. **Screen Capture as First-Class Input Source:**
+   - Add `screen` ("Screen share (display)") to `<select id="sourceSelect">` in `sender.html`.
+   - Leverage `navigator.mediaDevices.getDisplayMedia()` with fallback for optional system/tab audio capture.
+   - When `screen` is selected, automatically hide camera-only UI controls (camera device dropdown, torch, zoom, focus controls, flip button) while keeping the Quality/Resolution selector active.
+2. **Aspect-Preserving Proportional Scaling:**
+   - Define bounding-box constraints rather than rigid width/height forcing:
+     - `max`: Unconstrained full native display resolution (`width: { max: 7680 }, height: { max: 4320 }, frameRate: { ideal: 30, max: 60 }`), transmitting 1:1 screen pixels for 4K, 1440p, and high-DPI displays.
+     - `1080p`: Bounding box `1920x1080` (or `1080x1920` for portrait).
+     - `720p`: Bounding box `1280x720` (or `720x1280` for portrait).
+     - `480p`: Bounding box `854x480` (or `480x854` for portrait).
+   - In accordance with the W3C Screen Capture specification, bounding boxes scale the captured frame proportionally, strictly preserving the native aspect ratio without geometric distortion, stretching, or cropping.
+3. **Seamless Dynamic Quality Switching without Re-Prompting:**
+   - When a user changes resolution while screen sharing is live, `CameraManager.applyScreenResolution()` directly calls `track.applyConstraints()`, adjusting capture resolution in-place without triggering the browser's screen-selection modal again.
+   - Automatic orientation detection dynamically swaps width and height constraint maximums for portrait displays.
+4. **Lifecycle & Native Toolbar Termination:**
+   - Listen for `track.onended` (fired when the user clicks "Stop sharing" on the browser's floating toolbar) to cleanly terminate or reset the stream without leaving frozen frames.
+   - Preserve previous source state if screen sharing is cancelled by the user.
+
+**Consequences:**
+Desktop and mobile senders can share any screen, window, or tab at 1:1 full fidelity or bandwidth-friendly 1080p/720p/480p resolutions with exact aspect ratio preservation. All downstream pipelines (WebRTC P2P, Mode B Tunnel Relay, HTTP MJPEG, and RTSP) seamlessly distribute the screen feed.
+
+## ADR-029: Per-viewer constant FPS / constant resolution priority
+
+**Status:** Accepted (2026-10-14)
+
+**Context:** Measured on a live screen share: 6-15 FPS at 1920x1080 (VP8, ~4 Mbps, no packet loss). The sender forced `degradationPreference = 'maintain-resolution'` and the ABR controller reset `maxBitrate` to 4 Mbps every 4 s, so the encoder dropped frames to protect resolution. Switching to frame-rate priority gave 30 FPS but a lower resolution.
+
+**Decision:**
+1. Each viewer chooses in Advanced Settings: `fps` (default, constant 30 FPS, resolution may drop), `resolution` (constant Full HD, FPS may drop) or `both` (best effort). The choice is stored in the viewer's localStorage and sent as `viewer:quality-priority`; the server validates it (viewers only, three allowed values) and relays it to the room's sender with the viewer id.
+2. The sender stores the mode per viewer and applies it to that viewer's peer connection only (`WebRtcPeer.applyQualityPriority`): `maintain-framerate`, `maintain-resolution`, or for `both` try `disabled` then fall back to `maintain-resolution`. It is re-applied once the peer is `connected` because `setParameters` can be rejected before negotiation, and ABR updates preserve it.
+3. Bitrate ceiling is 8 Mbps (`LanMaxBitrateBps`), 12 Mbps for `both`.
+4. Chrome 155 rejects `degradationPreference: 'disabled'` (TypeError), so no setting can force 1080p AND 30 FPS; `both` only succeeds when the sender CPU and the network have headroom. The sender STATS line reports `Limited by: none|cpu|bandwidth` and the encoder in use.
+
+**Consequences:** Two viewers can ask for different trade-offs at once. If `both` still misses 30 FPS and the sender reports `cpu`, the follow-up is hardware H.264 (below) or a smaller capture size.
+
+**Addendum - GPU H.264 with VP8 fallback (2026-10-14):**
+- Sender Advanced Settings has a Video Encoder select: Auto (default) / H.264 force / VP8.
+- Auto asks `navigator.mediaCapabilities.encodingInfo({type: 'webrtc', ...H264 1080p30})` once at load; only when `supported && powerEfficient` (Chrome's hardware-encode signal) does `WebRtcPeer.preferVideoCodec('video/H264')` put H.264 first in each viewer's offer. Every other codec stays in the offer, so a viewer that cannot decode H.264 negotiates VP8 (verified in Chrome 155 with a VP8-only receiver, 30 FPS).
+- Chrome hides `encoderImplementation` / `powerEfficientEncoder` from pages that are not capturing, so they are only a secondary check: if they are exposed and show a software H.264 encoder, the sender re-offers that viewer with VP8 and stores `lancam_hw_h264_unsupported` in localStorage (re-selecting Auto clears it). Forced H.264 skips this fallback.
+- Detection correction (RTX 3060, Chrome 155): `encodingInfo` with the constrained-baseline id `42e01f` reports `powerEfficient: false` even though Chrome really encodes H.264 on the GPU (`MediaFoundationVideoEncodeAccelerator (NVIDIA H.264 Encoder MFT)`, `powerEfficientEncoder: true`). Baseline `42001f` and high `640028` report `true`. The sender therefore asks for `42001f`, `4d001f` and `640028` and treats any `powerEfficient` as a GPU encoder. Verified: the sender page in real Chrome on the RTX 3060 PC logs `[ENCODER] GPU H.264 encoder detected`; headless / the Claude in-app browser (no GPU) correctly log "No GPU H.264 encoder detected" and stay on VP8.
+- The sender log line `[ENCODER] GPU H.264 encoder detected ...` or `No GPU H.264 encoder detected ...` shows what a given sender found.
+
+**Addendum 2 - measured package for Full HD at 30 FPS (2026-10-15):**
+- Findings (real Chrome 155, GPU H.264, loopback, demanding synthetic 1080p30 sources; investigation workflow `bwe-fps-investigation`):
+  - In Constant FPS mode (`maintain-framerate`) Chrome's quality scaler downscaled 1080p to 720p about 2.25 s after connect in 36 of 36 baseline runs, while the bandwidth estimate was 5-14 Mbps. `Limited by: bandwidth` is only the label libwebrtc uses for a quality-driven downscale, not proof of a low estimate. maxBitrate 12/20 Mbps, maxFramerate, scaleResolutionDownBy=1 and priority did not prevent it.
+  - Holding `maintain-resolution` for the first 6 s and then switching to `maintain-framerate` kept 1080p in 8 of 8 runs (4 s: 3/8, 8 s: 7/8); switching the preference clears Chrome's adaptation restrictions.
+  - Chrome reads `x-google-*-bitrate` for the sender's own stream only from the sender's REMOTE description, so the hints go into the viewer's answer before `setRemoteDescription`. Munging the sender's own offer has no effect. `x-google-min-bitrate` had no effect and `min > max` makes Chrome reject the answer, so only start and max are used.
+  - `'disabled'` is not a valid `degradationPreference`; Chrome 155 accepts `maintain-framerate-and-resolution`, which is the real "both".
+- Decision: ceilings 12 Mbps (fps, resolution) and 16 Mbps (both); answer hints start 10000/max 12000 kbps (fps, resolution) and start 12000/max 16000 kbps (both); 6 s resolution hold in Constant FPS mode, re-armed after every successful `replaceTrack`, viewer mode change and ABR restore; mode-aware ABR (two consecutive samples to change level, restore below 120 ms, only Constant FPS viewers scale resolution); the server stores one mode per viewer socket, rate-limits the event (5 per 5 s per socket), de-duplicates repeats and includes `viewerQuality` in the sender's join acknowledgement.
+- Validation of the production code (`WebRtcPeer`) on the RTX 3060 hardware encoder: 12 of 12 new-code runs (3 modes x 2 sources x 2 repeats, 20 s) held 1920x1080 at 29.9-30.1 FPS with no downscale; 4 of 4 runs reproducing the previous behaviour dropped to 1280x720 at 2.5 s.
+- Not proven: the user's real session (D3D12 encoder on this driver is disabled in the test profile, real `getDisplayMedia` capture on Windows 10 was not tested). Screen capture on Windows 10 can itself cap near 21 FPS (DXGI/GDI path); the sender STATS line now prints source fps next to sent fps to tell the two apart.
+
 ## Open decisions to revisit after the first working stream
 
-
-- Whether TypeScript should replace plain JavaScript for stricter types.
-- Whether the app needs multiple simultaneous camera sources.
-- Whether TURN should be operated locally, on a server, or not at all for the intended networks.
-- Whether audio is required.
-- Whether the final deployment should use a trusted local CA/local DNS or continue using a tunnel.
-- What latency and quality targets the real deployment must meet, based on measurements from the target devices and Wi-Fi.
-- Whether the shared-memory bridge for the virtual camera (ADR-022) is wired up or removed.
-- Whether the viewer mesh needs per-peer bitrate or resolution caps (ADR-018), based on a real-phone test with 2+ viewers.
 - Whether to code-sign the installer and executables (ADR-024).
 - Whether the Windows camera should support Windows 10 (it needs an API that exists only on Windows 11).
+- Whether to add hardware H.264/HEVC transcoding for RTSP in addition to RFC 2435 JPEG.

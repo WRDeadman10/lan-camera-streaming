@@ -4,14 +4,23 @@ Production-ready self-hosted WebRTC camera streaming application for Windows and
 
 ## Features
 
-- **Peer-to-Peer WebRTC Media**: Low-latency video transmission directly between sender and viewer on LAN without media passing through the server.
-- **Node.js & Express Signaling**: In-memory room management: one sender and any number of viewers per room (a separate WebRTC connection per viewer).
-- **Access Control & Rate Limiting**: Required shared PIN authentication, payload sanitization, and brute-force mitigation.
-- **Real-Time Diagnostics**: Live connection state, candidate pair type (host vs. relay), RTT latency, FPS, and resolution stats.
-- **Clean Hardware Release**: Camera tracks are explicitly stopped and cleared on stop or window close.
-- **Mobile Friendly**: Front/back camera toggle, responsive layout, full-screen viewer support, and `playsinline` video elements.
-- **Windows Virtual Webcam**: The phone appears as "LAN Phone Camera" in the Windows Camera app, Teams, Zoom, Chrome, OBS and Unity, installed with one setup file.
-- **Standalone Windows exe**: One `lan-camera-streaming.exe` with the web pages embedded; no Node.js needed on the target PC.
+- **Peer-to-Peer WebRTC Media**: Sub-100ms ultra-low latency video streaming directly between phone and viewer on LAN without media passing through the server.
+- **Native Unity Package (`com.vcam.lancamera`)**: High-performance Unity package in `unity-package/` for direct in-engine MJPEG texture streaming without external sidecars or GC allocations.
+- **Embedded RTSP 1.0 IP-Camera Server**: Broadcasts standard RFC 2326 & RFC 2435 JPEG over RTP on `rtsp://<host>:8554/live/<roomId>` for OBS Media Source, VLC, ffmpeg, Milestone, and NVRs.
+- **Multi-Camera Studio Switcher Mode**: Connect multiple phone cameras (`studio-sender`) simultaneously to a single room with real-time viewer switching via the interactive Studio Switcher bar.
+- **High-Performance Shared-Memory Bridge (ADR-022)**: Direct zero-copy video frame pumping into Win32 shared memory (`Local\LanCamSharedMemory_Video`) for DirectShow virtual webcam capture with zero HTTP overhead.
+- **Windows Virtual Webcam ("LAN Phone Camera")**: Appears natively in Windows Camera app, Teams, Zoom, Chrome, OBS, and Unity via Media Foundation (Windows 11) and DirectShow (Windows 10/11) one-file installer.
+- **Bidirectional Audio & Intercom (Talkback)**: Optional microphone streaming from camera phone, viewer audio controls (mute/volume), and push-to-talk dual-tone Web Audio chime synthesizer.
+- **Hardware Camera Controls**: Flashlight/Torch toggle and smooth hardware zoom slider with automatic sensor constraint detection.
+- **Adaptive Bitrate (ABR) & Dynamic Quality Scaling**: Automatic WebRTC bitrate adjustment (600 kbps, 1.5 Mbps, 4.0 Mbps) driven by real-time RTT & packet loss polling.
+- **Local Recording, Snapshots & Replay Hub**: In-browser video recording (`MediaRecorder`), live recording timer HUD, and high-resolution PNG snapshot download.
+- **mDNS / Zero-Conf LAN Auto-Discovery**: Automatic service discovery via multicast DNS (`lancam.local` on 224.0.0.251:5353) and `GET /api/discover`.
+- **Standby Slate & Virtual Camera Fallback**: Displays SMPTE color bars in DirectShow and serves clean JFIF test pattern on MJPEG streams when camera is offline.
+- **Mobile Battery & Thermal Saver Mode**: Screen WakeLock API integration and full OLED Blackout Saver mode to preserve battery and prevent thermal throttling during long broadcasts.
+- **Quick-Join URL & QR Code Auto-Connect**: Deep link query parameter support (`?room=...&pin=...&autostart=1`) and one-click share link generator.
+- **Stream Transformation & Framing HUD**: 90°/180°/270° orientation lock, horizontal mirror flip, and 3x3 rule-of-thirds grid.
+- **Windows System Tray Companion & Auto-Start**: PowerShell system tray runner (`scripts/lan-camera-tray.ps1`) and Windows Registry auto-start manager (`scripts/register-autostart.ps1`).
+- **Standalone Windows exe**: Single portable executable `lan-camera-streaming.exe` with all frontend assets and driver installer embedded; runs without Node.js installed.
 
 ---
 
@@ -19,10 +28,11 @@ Production-ready self-hosted WebRTC camera streaming application for Windows and
 
 | Read | For |
 |---|---|
+| [`unity-package/README.md`](unity-package/README.md) | **Native Unity UPM Package** (`com.vcam.lancamera`): installation, inspector setup, C# API, zero-GC texture streaming |
 | [`docs/receiver-guide.md`](docs/receiver-guide.md) | **Connecting anything to this server** (any language or engine): transports, sequence, errors, checklist, the Unity + Python reference integration |
-| [`docs/architecture.md`](docs/architecture.md) | Components, routes, the formal receiver signaling contract (§4), multi-viewer (§11), the virtual webcam (§12), build and distribution (§13) |
+| [`docs/architecture.md`](docs/architecture.md) | Components, routes, receiver signaling contract (§4), multi-viewer (§11), virtual webcam (§12), RTSP server (§14), Unity package (§15) |
 | [`vcam/docs/`](vcam/docs/architecture.md) | The Windows virtual camera driver and installer (separate repository, git submodule) |
-| [`docs/project-overview.md`](docs/project-overview.md), [`docs/roadmap.md`](docs/roadmap.md), [`docs/tasks.md`](docs/tasks.md), [`docs/decisions.md`](docs/decisions.md) | Scope, plan, backlog, decisions |
+| [`docs/project-overview.md`](docs/project-overview.md), [`docs/roadmap.md`](docs/roadmap.md), [`docs/tasks.md`](docs/tasks.md), [`docs/decisions.md`](docs/decisions.md) | Scope, plan, backlog, ADR-001 to ADR-026 |
 | [`docs/ai_handoff.md`](docs/ai_handoff.md) | Current status for the next person or agent |
 
 ## Prerequisites
@@ -217,7 +227,9 @@ contract, the message sequence, the error table and the mistakes that cost the m
 | Transport | How a receiver gets frames | Joins the room? | Uses tunnel quota? |
 |---|---|---|---|
 | **WebRTC** (lowest latency) | Socket.IO signaling + a WebRTC video track, peer to peer | Yes, as `webrtc-receiver` | Signaling only |
-| **MJPEG** (simplest) | `GET /stream/<roomId>?pin=<accessPin>`, read by OpenCV, ffmpeg or any HTTP client | No | Yes, every frame |
+| **Unity Package** (engine native) | `LanCameraReceiver` in `unity-package/` (`com.vcam.lancamera`) decodes MJPEG to `Texture2D` | No | Yes, every frame |
+| **RTSP 1.0** (NVR / OBS / VLC) | `rtsp://<host>:8554/live/<roomId>` RFC 2326 & RFC 2435 JPEG over RTP | No | No (LAN port 8554) |
+| **MJPEG** (universal HTTP) | `GET /stream/<roomId>?pin=<accessPin>`, read by OpenCV, ffmpeg or HTTP clients | No | Yes, every frame |
 | **Tunnel relay** (last resort) | `tunnel:frame` Socket.IO events carrying JPEG buffers | Yes, with `mediaMode: "tunnel-relay"` | Yes, every frame |
 
 What every receiver needs to know:
@@ -268,6 +280,18 @@ while cap.isOpened():
 ```
 This route does not join the room, so it works while a browser viewer is open. The PIN is in the URL: do not log it.
 
+### Method 3: Native Unity Receiver Package (com.vcam.lancamera)
+
+For Unity projects, use the native package located in [`unity-package/`](unity-package/README.md):
+```json
+{
+  "dependencies": {
+    "com.vcam.lancamera": "file:../../unity-package"
+  }
+}
+```
+Attach [`LanCameraReceiver`](unity-package/Runtime/LanCameraReceiver.cs) to any GameObject, specify your server address, room, and PIN, and target a `RawImage` or `MeshRenderer` material. It streams JPEG frames directly into a cached GPU `Texture2D` with zero garbage collection allocations.
+
 ### Reference integration: the Viitorx Unity app with its Python sidecar
 
 The first real receiver treats the phone as a webcam for a Unity pose-tracking app. To use it:
@@ -281,6 +305,203 @@ The first real receiver treats the phone as a webcam for a Unity pose-tracking a
 The receiver is a Python module in that repository (`python-sidecar~/tools/video/lan_camera.py`) written to the receiver guide, and its
 test suite drives **this** server with a fake phone (set `CAMERA_SERVER_DIR` to this folder). Details, what was verified and what was
 not: [`docs/receiver-guide.md` section 9](docs/receiver-guide.md#9-reference-integration-the-viitorx-unity--python-sidecar).
+
+---
+
+## Native Unity Integration (UPM Package: com.vcam.lancamera)
+
+The repository includes a production-ready, zero-allocation native Unity package located at [`unity-package/`](unity-package/README.md) (`com.vcam.lancamera`). It decodes live stream frames into a reusable GPU `Texture2D` without external sidecars, DLLs, or GC spikes.
+
+### Installation
+
+#### Method A: Unity Package Manager (Disk)
+1. In the Unity Editor, open **Window > Package Manager**.
+2. Click the `+` button in the top-left corner and select **Add package from disk...**.
+3. Select [`unity-package/package.json`](unity-package/package.json) in this repository.
+
+#### Method B: `Packages/manifest.json`
+Add the relative file path to your Unity project's `Packages/manifest.json`:
+```json
+{
+  "dependencies": {
+    "com.vcam.lancamera": "file:../../lan-camera-streaming/unity-package"
+  }
+}
+```
+
+### Quick Setup in Unity Inspector
+1. Add the `LanCameraReceiver` component to any GameObject: **Add Component > LanCamera > LAN Camera Receiver**.
+2. Configure the Inspector fields:
+   - **Host**: Server IP address (e.g., `127.0.0.1` or your LAN IP `192.168.1.X`).
+   - **Port**: HTTP port (default `3000`).
+   - **Room Id**: Target streaming room ID (e.g. `studio-cam-1`).
+   - **Access Pin**: Room security PIN (default `123456`).
+   - **Target Raw Image**: (Optional) Assign a UI `RawImage` for canvas display.
+   - **Target Renderer**: (Optional) Assign a 3D `MeshRenderer` to paint onto in-world objects (monitors, billboards).
+   - **Target Texture Property**: Shader texture property (defaults to `_MainTex`).
+   - **Auto Connect On Start**: Automatically connects when the scene starts.
+3. Enter Play Mode. The receiver connects to `/stream/<roomId>?pin=<accessPin>` and renders the incoming feed in real time.
+
+### C# Scripting Example
+
+Follows strict production C# patterns (explicit typing, K&R braces, zero GC allocations):
+
+```csharp
+using System;
+using UnityEngine;
+using UnityEngine.UI;
+using LanCamera;
+
+namespace MyProject {
+    public class CameraDisplayController : MonoBehaviour {
+        [SerializeField] private LanCameraReceiver receiver;
+        [SerializeField] private RawImage previewImage;
+
+        private void Awake() {
+            if (receiver != null) {
+                receiver.OnStateChanged += HandleStateChanged;
+                receiver.OnFrameReceived += HandleFrameReceived;
+                receiver.OnError += HandleError;
+            }
+        }
+
+        private void OnDestroy() {
+            if (receiver != null) {
+                receiver.OnStateChanged -= HandleStateChanged;
+                receiver.OnFrameReceived -= HandleFrameReceived;
+                receiver.OnError -= HandleError;
+            }
+        }
+
+        public void ConnectToRoom(string host, int port, string roomId, string pin) {
+            LanCameraConfig config = new LanCameraConfig();
+            config.Host = host;
+            config.Port = port;
+            config.RoomId = roomId;
+            config.AccessPin = pin;
+
+            receiver.Config = config;
+            receiver.StartStream();
+        }
+
+        private void HandleStateChanged(LanCameraState newState) {
+            Debug.Log(string.Format("LAN Camera state changed: {0}", newState));
+        }
+
+        private void HandleFrameReceived(Texture2D frameTexture) {
+            if (previewImage != null && previewImage.texture != frameTexture) {
+                previewImage.texture = frameTexture;
+            }
+        }
+
+        private void HandleError(string errorMessage) {
+            Debug.LogError(string.Format("LAN Camera error: {0}", errorMessage));
+        }
+    }
+}
+```
+
+---
+
+## Embedded RTSP 1.0 IP-Camera Server
+
+The application includes an embedded RFC 2326 and RFC 2435 RTSP 1.0 server listening on port `8554`. It converts live camera frames into standard JPEG over RTP video streams for NVRs, OBS Studio, and media players.
+
+### Stream URL Format
+```text
+rtsp://<server-ip>:8554/live/<roomId>
+```
+
+### OBS Studio Setup
+1. In OBS, click **+** under **Sources** and select **Media Source**.
+2. Uncheck **Local File**.
+3. In **Input**, enter: `rtsp://127.0.0.1:8554/live/<roomId>` (replace `<roomId>` with your active room ID).
+4. In **Input Format**, leave empty.
+5. In **Network Buffering**, set to `1 MB` for minimal latency.
+6. Check **Use hardware decoding when available**.
+7. In advanced options or URL parameters, ensure transport is set to TCP if packet drops occur on Wi-Fi.
+8. Click **OK**. The stream renders immediately inside your OBS canvas.
+
+### VLC Media Player Setup
+1. Open VLC Media Player.
+2. Select **Media > Open Network Stream...** (Ctrl+N).
+3. Enter `rtsp://<server-ip>:8554/live/<roomId>`.
+4. Click **Play**.
+
+### FFmpeg / FFplay Verification
+```bash
+ffplay -rtsp_transport tcp rtsp://127.0.0.1:8554/live/<roomId>
+```
+
+---
+
+## Multi-Camera Studio Switcher Mode
+
+Transform multiple phones into a professional multi-camera production switcher without complicated networking:
+
+1. **Connecting Cameras**:
+   - Open `/sender` on phone 1: enter room `studio` and PIN `123456`, click **Start Streaming**.
+   - Open `/sender?studio=1` on phone 2: enter room `studio` and PIN `123456`, click **Start Streaming**.
+   - Any number of cameras can join the same studio room concurrently with the `studio-sender` role.
+2. **Director / Viewer Switching**:
+   - Open `/viewer?room=studio` on the PC.
+   - The interactive **Studio Switcher Bar** appears automatically across the top of the viewer.
+   - Click any camera thumbnail/button in the switcher bar to instantly cut to that camera angle.
+   - Real-time badges display resolution, current FPS, and latency metrics for each camera.
+
+---
+
+## Mobile Camera Controls, Audio Intercom & Framing HUD
+
+The sender interface on mobile devices provides production broadcast tools:
+
+- **Hardware Torch / Flashlight**: Toggle mobile camera LED flash with one tap directly from the UI for low-light or macro capture.
+- **Hardware Zoom Slider**: Smooth optical/digital zoom slider with automatic sensor constraints detection.
+- **Bidirectional Audio & Intercom (Talkback)**:
+  - Stream microphone audio from phone to viewer.
+  - Interactive viewer audio controls (mute toggle and linear volume slider).
+  - Push-to-Talk intercom with dual-tone Web Audio synthesized chimes for operator direction.
+- **Framing HUD & Transformations**:
+  - 90°, 180°, and 270° orientation lock for vertical or inverted tripod rigs.
+  - Horizontal mirror flip for front-facing vlogging.
+  - 3x3 Rule-of-Thirds framing grid overlay.
+- **Mobile Battery & Thermal Saver**:
+  - Automatically activates the Screen WakeLock API to keep the phone screen awake during streaming.
+  - One-tap **OLED Blackout Saver** turns the display pitch black while streaming continues in the background, minimizing heat generation and preventing thermal throttling on OLED devices.
+- **Local Recording & Snapshots**:
+  - In-browser `MediaRecorder` captures high-quality WebM video clips with elapsed time HUD.
+  - Instant high-resolution PNG snapshot download button.
+
+---
+
+## Windows System Tray Companion & Auto-Start Configuration
+
+For headless, 24/7, or background operation on Windows PCs:
+
+### System Tray Companion (`lan-camera-tray.ps1`)
+Runs the server hidden in the background with an icon in the Windows taskbar notification area (System Tray):
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\lan-camera-tray.ps1
+```
+- **Left-Click**: Opens the viewer in your default browser.
+- **Right-Click Context Menu**:
+  - **Open Viewer**: Launches `http://localhost:3000/viewer`.
+  - **Open Sender**: Launches `http://localhost:3000/sender`.
+  - **Restart Server**: Restarts the background streaming daemon.
+  - **Exit**: Gracefully stops the server and removes the tray icon.
+
+### Auto-Start on Windows Login (`register-autostart.ps1`)
+Registers the application in the Windows Registry (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`) to launch automatically upon login:
+```powershell
+# Register single executable auto-start
+powershell -ExecutionPolicy Bypass -File scripts\register-autostart.ps1
+
+# Register system tray runner auto-start
+powershell -ExecutionPolicy Bypass -File scripts\register-autostart.ps1 -Tray
+
+# Remove auto-start registration
+powershell -ExecutionPolicy Bypass -File scripts\register-autostart.ps1 -Uninstall
+```
 
 ---
 

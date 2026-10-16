@@ -393,7 +393,7 @@ flowchart LR
 ```
 
 - **Frame path (as built).** The viewer page that is already receiving the WebRTC stream draws the video to a canvas at about 30 FPS and POSTs each JPEG to `POST /api/vcam/bridge-frame?room=<id>`. The server hands the JPEG to the MJPEG streamer, which serves it at `/stream/<roomId>?pin=<pin>`. Both driver components read that MJPEG stream over loopback HTTP. While the viewer is pumping frames (a POST within the last 3 seconds), the server does **not** ask the phone to upload its own MJPEG frames (`mjpeg:demand` is suppressed), so the phone sends WebRTC only. If no viewer pumps, the driver's connection to `/stream/...` triggers `mjpeg:demand` and the phone uploads MJPEG instead.
-- **The shared-memory design in ADR-022 is not wired.** `shm_bridge.h`, the `--bridge` daemon (127.0.0.1:7779) and the shared-memory reader in the DirectShow filter exist, but nothing starts the daemon or sends frames to it; the filter falls back to HTTP every time.
+- **The shared-memory design in ADR-022 is wired.** `vcam-shm-bridge.js` maintains a persistent TCP bridge client to `lancam-setup.exe --bridge` on 127.0.0.1:7779, writing directly to `Local\LanCamSharedMemory_Video`. The DirectShow filter prioritizes shared memory before falling back to loopback HTTP.
 - **Two cameras, two stacks.** The DirectShow filter is seen by DirectShow clients (OBS, ffmpeg, Chrome/Electron apps). The Windows Camera app, Teams and other Media Foundation / WinRT consumers only see Media Foundation or kernel-streaming cameras, so `LanCamMfSource.dll` registers a Media Foundation virtual camera (Windows 11, `MFCreateVirtualCamera`, system lifetime). Both read the same MJPEG stream.
 - **Session.** `Set as Webcam` runs `lancam://stream?room=..&pin=..&host=..&port=..`; `lancam-setup.exe` (as the normal user, no UAC) stores it in `%LOCALAPPDATA%/LanCamera/session.ini` for the DirectShow filter and `%ProgramData%/LanCamera/session.ini` for the Frame Server (which runs as LocalService and cannot read the user's profile).
 - **Output.** Both cameras deliver 1280x720 at 30 FPS; incoming frames of any size or orientation are letterboxed (DirectShow: RGB24 bottom-up; Media Foundation: NV12).
@@ -407,4 +407,23 @@ flowchart LR
 - `npm run build:exe`: embeds `src/public`, the Socket.IO browser client (`/vendor/socket.io.js`) and the newest driver installer into `src/server/embedded-assets.js`, bundles with esbuild, and produces the Node SEA executable `dist/lan-camera-streaming.exe` with icon and version resources.
 - `postinstall` regenerates the git-ignored `embedded-assets.js`, so a fresh clone can start.
 - Outputs in `dist/` (git-ignored): `lan-camera-streaming.exe`, `lan-camera-setupv<version>.exe`, `.env`.
+ 
+## 14. Embedded RTSP 1.0 IP-Camera Server (`src/server/rtsp-server.js`)
+
+Implements zero-dependency native RTSP 1.0 (RFC 2326) and RTP JPEG (RFC 2435) streaming over TCP:
+- Listens on `rtsp://<host>:8554/live/<roomId>`.
+- Supports standard `OPTIONS`, `DESCRIBE`, `SETUP`, `PLAY`, `TEARDOWN` handshakes.
+- Streams interleaved TCP RTP packets (`$`, channel 0) to standard surveillance software (VLC, OBS Media Source, ffmpeg, Milestone, Synology).
+
+## 15. Native Unity Integration (`unity-package/`)
+
+A dedicated Unity Package Manager (UPM) package (`com.vcam.lancamera`):
+- `LanCameraReceiver`: High-performance MonoBehaviour streaming multipart JPEGs directly into reusable `Texture2D` instances via `ImageConversion.LoadImage` without GC allocations.
+- Supports binding to UI `RawImage` or 3D material `Renderer`.
+- Strictly compliant with `AGENTS.md`: explicit typing, no `var`, no `new()`, K&R braces, full property bodies.
+
+## 16. Windows System Tray Companion & Auto-Start
+
+- `scripts/lan-camera-tray.ps1`: Docks LAN Camera into the Windows Notification Area with quick links to local viewer, phone sender, and RTSP stream info.
+- `scripts/register-autostart.ps1`: Configures `HKCU:\Software\Microsoft\Windows\CurrentVersion\Run` for auto-boot with `-Enable` and `-Disable` flags.
 

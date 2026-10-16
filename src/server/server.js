@@ -8,12 +8,16 @@ import fs from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import QRCode from 'qrcode';
 
 import { embeddedAssets } from './embedded-assets.js';
+import { MdnsBeacon } from './mdns-beacon.js';
+import { VcamShmBridge } from './vcam-shm-bridge.js';
+import { RtspServer } from './rtsp-server.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -62,12 +66,22 @@ export function createServer(config, logger) {
     app.set('trust proxy', 1);
   }
 
-  // Security headers (including CSP)
+  // Security headers (including comprehensive Content Security Policy)
   app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline';");
+    res.setHeader(
+      'Content-Security-Policy',
+      "default-src 'self'; " +
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+      "style-src 'self' 'unsafe-inline' https:; " +
+      "img-src 'self' data: blob: https://images.unsplash.com https://*.unsplash.com https:; " +
+      "connect-src 'self' ws: wss: https://api.unsplash.com https://*.unsplash.com https:; " +
+      "media-src 'self' blob: mediastream: data:; " +
+      "font-src 'self' data: https:; " +
+      "worker-src 'self' blob:;"
+    );
     next();
   });
 
@@ -110,6 +124,22 @@ export function createServer(config, logger) {
       port: config.port
     });
   });
+
+  // Zero-conf / LAN auto-discovery endpoint
+  app.get('/api/discover', (req, res) => {
+    res.status(200).json({
+      service: 'lan-camera-streaming',
+      hostname: os.hostname(),
+      port: config.port,
+      protocol: config.useHttps ? 'https' : 'http',
+      version: '1.0.23'
+    });
+  });
+
+  const mdnsBeacon = new MdnsBeacon(config.port, logger);
+  if (config.enableMdns) {
+    mdnsBeacon.start();
+  }
 
   // QR Code generation endpoint
   app.get('/api/qr', async (req, res) => {
@@ -158,9 +188,38 @@ export function createServer(config, logger) {
     return Boolean(lastSeen && (Date.now() - lastSeen < 3000));
   };
 
+  const vcamShmBridge = new VcamShmBridge(7779, '127.0.0.1', logger);
+  if (config.enableVcamShmBridge) {
+    vcamShmBridge.start();
+  }
+  config.vcamShmBridge = vcamShmBridge;
+
+  const rtspServer = new RtspServer(config.rtspPort || 8554, '0.0.0.0', logger);
+  if (config.enableRtsp) {
+    rtspServer.start().catch((err) => {
+      logger.warn(`Failed to start RTSP server: ${err.message}`);
+    });
+  }
+  config.rtspServer = rtspServer;
+
+  httpServer.on('close', () => {
+    try {
+      mdnsBeacon?.close();
+    } catch {}
+    try {
+      vcamShmBridge?.close();
+    } catch {}
+    try {
+      rtspServer?.close();
+    } catch {}
+  });
+
   app.post('/api/vcam/bridge-frame', express.raw({ type: ['image/jpeg', 'application/octet-stream'], limit: '5mb' }), (req, res) => {
     const roomId = req.query.room;
     const body = req.body;
+    const format = req.query.format;
+    const width = parseInt(req.query.w, 10) || 1280;
+    const height = parseInt(req.query.h, 10) || 720;
 
     if (!body || !body.length) {
       res.status(400).send('Empty frame');
@@ -169,8 +228,14 @@ export function createServer(config, logger) {
 
     if (roomId) {
       activeVcamBridges.set(roomId, Date.now());
+      if (format === 'raw' && vcamShmBridge.isConnected()) {
+        vcamShmBridge.sendFrame(width, height, body);
+      }
       if (config.mjpegStreamer) {
         config.mjpegStreamer.broadcastFrame(roomId, body);
+      }
+      if (config.rtspServer) {
+        config.rtspServer.broadcastFrame(roomId, body);
       }
     }
 
@@ -327,5 +392,5 @@ export function createServer(config, logger) {
     res.status(404).send('Not Found');
   });
 
-  return { app, httpServer };
+  return { app, httpServer, mdnsBeacon };
 }

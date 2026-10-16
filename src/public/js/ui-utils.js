@@ -44,6 +44,8 @@ export function updateStatus(state, text) {
   }
 }
 
+const DiagnosticsLogMaxChars = 120000;
+
 export function logDiagnostic(message, level = 'INFO') {
   const logEl = document.getElementById('diagnosticsLog');
   const now = new Date();
@@ -51,7 +53,8 @@ export function logDiagnostic(message, level = 'INFO') {
   const prefix = `[${timestamp}] [${level}]`;
   const entry = `${prefix} ${message}\n`;
   if (logEl) {
-    logEl.textContent = entry + logEl.textContent;
+    // Newest first; trimming the oldest text keeps every call cheap (the whole log is rewritten on each call).
+    logEl.textContent = (entry + logEl.textContent).slice(0, DiagnosticsLogMaxChars);
   }
   if (level === 'ERROR') {
     console.error(`${prefix} ${message}`);
@@ -140,6 +143,73 @@ export async function fetchLocalServerOrigin() {
   }
 }
 
+/**
+ * Copies text to the clipboard across secure contexts (navigator.clipboard)
+ * and insecure LAN HTTP contexts (document.execCommand fallback).
+ * @param {string} text - The text string to copy.
+ * @returns {Promise<boolean>} True if the copy succeeded, false otherwise.
+ */
+export async function copyToClipboard(text) {
+  const content = typeof text === 'string' ? text : String(text ?? '');
+
+  // 1. Try modern Async Clipboard API if available in secure context (localhost / HTTPS)
+  if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    try {
+      await navigator.clipboard.writeText(content);
+      return true;
+    } catch {
+      // Fall through to execCommand fallback if writeText rejects
+    }
+  }
+
+  // 2. Fallback: document.execCommand('copy') via off-screen readonly textarea
+  if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+    let textarea = null;
+    const selection = typeof window !== 'undefined' && window.getSelection ? window.getSelection() : null;
+    const selectedRange = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+
+    try {
+      textarea = document.createElement('textarea');
+      textarea.value = content;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.top = '0';
+      textarea.style.left = '0';
+      textarea.style.width = '2em';
+      textarea.style.height = '2em';
+      textarea.style.padding = '0';
+      textarea.style.border = 'none';
+      textarea.style.outline = 'none';
+      textarea.style.boxShadow = 'none';
+      textarea.style.background = 'transparent';
+      textarea.style.opacity = '0';
+      textarea.style.pointerEvents = 'none';
+      textarea.style.zIndex = '-9999';
+
+      document.body.appendChild(textarea);
+
+      textarea.focus();
+      textarea.select();
+      textarea.setSelectionRange(0, textarea.value.length);
+
+      const successful = typeof document.execCommand === 'function' && document.execCommand('copy');
+      return Boolean(successful);
+    } catch {
+      return false;
+    } finally {
+      if (textarea && textarea.parentNode) {
+        textarea.parentNode.removeChild(textarea);
+      }
+      if (selection && selectedRange) {
+        selection.removeAllRanges();
+        selection.addRange(selectedRange);
+      }
+    }
+  }
+
+  return false;
+}
+
 export function setupDiagnosticsControls(copyBtnId, clearBtnId, logElementId = 'diagnosticsLog') {
   const copyBtn = document.getElementById(copyBtnId);
   const clearBtn = document.getElementById(clearBtnId);
@@ -148,12 +218,17 @@ export function setupDiagnosticsControls(copyBtnId, clearBtnId, logElementId = '
   if (copyBtn && logEl) {
     copyBtn.addEventListener('click', async () => {
       try {
-        await navigator.clipboard.writeText(logEl.textContent);
-        const originalText = copyBtn.textContent;
-        copyBtn.textContent = '✓ Copied!';
-        setTimeout(() => {
-          copyBtn.textContent = originalText;
-        }, 2000);
+        const textToCopy = logEl.textContent || '';
+        const success = await copyToClipboard(textToCopy);
+        if (success) {
+          const originalText = copyBtn.textContent;
+          copyBtn.textContent = '✓ Copied!';
+          setTimeout(() => {
+            copyBtn.textContent = originalText;
+          }, 2000);
+        } else {
+          logDiagnostic('Failed to copy diagnostics: Clipboard copy not supported or permitted', 'WARN');
+        }
       } catch (err) {
         logDiagnostic(`Failed to copy diagnostics: ${err.message}`, 'WARN');
       }
@@ -252,19 +327,27 @@ export function captureFrameSnapshot(mediaElement, baseFilename = 'stream-snapsh
   return true;
 }
 
-export function copyTextToClipboard(text, buttonElement, feedbackLabel = '✓ Copied!') {
+export async function copyTextToClipboard(text, buttonElement, feedbackLabel = '✓ Copied!') {
   if (!text || !buttonElement) {
-    return;
+    return false;
   }
-  navigator.clipboard.writeText(text).then(() => {
-    const original = buttonElement.innerHTML;
-    buttonElement.innerHTML = feedbackLabel;
-    setTimeout(() => {
-      buttonElement.innerHTML = original;
-    }, 2000);
-  }).catch((err) => {
+  try {
+    const success = await copyToClipboard(text);
+    if (success) {
+      const original = buttonElement.innerHTML;
+      buttonElement.innerHTML = feedbackLabel;
+      setTimeout(() => {
+        buttonElement.innerHTML = original;
+      }, 2000);
+      return true;
+    } else {
+      logDiagnostic('Copy failed: Clipboard copy not supported or permitted', 'WARN');
+      return false;
+    }
+  } catch (err) {
     logDiagnostic(`Copy failed: ${err.message}`, 'WARN');
-  });
+    return false;
+  }
 }
 
 export function setupCollapsibleDrawer(toggleBtnId, contentId, expandText = 'Expand', collapseText = 'Collapse') {
@@ -296,3 +379,256 @@ export function setupPasswordToggle(btnId, inputId) {
     }
   });
 }
+
+/**
+ * Screen WakeLock manager to prevent mobile devices from sleeping during live streams.
+ */
+export class WakeLockController {
+  constructor() {
+    this.sentinel = null;
+    this.isActive = false;
+
+    // Reacquire lock when tab regains visibility
+    document.addEventListener('visibilitychange', async () => {
+      if (document.visibilityState === 'visible' && this.isActive && !this.sentinel) {
+        await this.request();
+      }
+    });
+  }
+
+  async request() {
+    if (!('wakeLock' in navigator)) {
+      return false;
+    }
+    try {
+      this.sentinel = await navigator.wakeLock.request('screen');
+      this.isActive = true;
+      this.sentinel.addEventListener('release', () => {
+        this.sentinel = null;
+      });
+      return true;
+    } catch (err) {
+      console.warn('WakeLock request failed:', err);
+      return false;
+    }
+  }
+
+  async release() {
+    this.isActive = false;
+    if (this.sentinel) {
+      try {
+        await this.sentinel.release();
+      } catch (err) {
+        // ignore
+      }
+      this.sentinel = null;
+    }
+  }
+}
+
+/**
+ * Client-side media recording using MediaRecorder API.
+ */
+export class StreamRecorder {
+  constructor(mediaElement, { onStart, onStop, onTimeUpdate } = {}) {
+    this.mediaElement = mediaElement;
+    this.recorder = null;
+    this.recordedChunks = [];
+    this.startTime = 0;
+    this.timerInterval = null;
+    this.onStart = onStart;
+    this.onStop = onStop;
+    this.onTimeUpdate = onTimeUpdate;
+  }
+
+  get isRecording() {
+    return Boolean(this.recorder && this.recorder.state === 'recording');
+  }
+
+  start() {
+    if (this.isRecording) {
+      return false;
+    }
+
+    let stream = null;
+    if (this.mediaElement instanceof HTMLVideoElement && this.mediaElement.srcObject) {
+      stream = this.mediaElement.srcObject;
+    } else if (this.mediaElement instanceof HTMLVideoElement && this.mediaElement.captureStream) {
+      stream = this.mediaElement.captureStream();
+    } else if (this.mediaElement instanceof MediaStream) {
+      stream = this.mediaElement;
+    }
+
+    if (!stream || stream.getVideoTracks().length === 0) {
+      console.warn('Cannot record: no active stream found on media element.');
+      return false;
+    }
+
+    let mimeType = 'video/webm;codecs=vp9';
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+      mimeType = 'video/webm;codecs=vp8';
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = 'video/webm';
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+          mimeType = '';
+        }
+      }
+    }
+
+    try {
+      this.recordedChunks = [];
+      const options = mimeType ? { mimeType } : {};
+      this.recorder = new MediaRecorder(stream, options);
+
+      this.recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          this.recordedChunks.push(event.data);
+        }
+      };
+
+      this.recorder.onstop = () => {
+        this.finishRecording();
+      };
+
+      this.recorder.start(1000); // 1s timeslices
+      this.startTime = Date.now();
+
+      this.timerInterval = setInterval(() => {
+        const elapsedSec = Math.floor((Date.now() - this.startTime) / 1000);
+        const mm = String(Math.floor(elapsedSec / 60)).padStart(2, '0');
+        const ss = String(elapsedSec % 60).padStart(2, '0');
+        if (typeof this.onTimeUpdate === 'function') {
+          this.onTimeUpdate(`${mm}:${ss}`);
+        }
+      }, 500);
+
+      if (typeof this.onStart === 'function') {
+        this.onStart();
+      }
+      return true;
+    } catch (err) {
+      console.error('Failed to start MediaRecorder:', err);
+      return false;
+    }
+  }
+
+  stop() {
+    if (!this.isRecording) {
+      return;
+    }
+    clearInterval(this.timerInterval);
+    this.timerInterval = null;
+    this.recorder.stop();
+  }
+
+  finishRecording() {
+    clearInterval(this.timerInterval);
+    this.timerInterval = null;
+
+    if (this.recordedChunks.length > 0) {
+      const blob = new Blob(this.recordedChunks, { type: this.recorder.mimeType || 'video/webm' });
+      const now = new Date();
+      const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+      const filename = `lancam-recording-${timestamp}.webm`;
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => {
+        URL.revokeObjectURL(url);
+      }, 2000);
+    }
+
+    this.recordedChunks = [];
+    this.recorder = null;
+
+    if (typeof this.onStop === 'function') {
+      this.onStop();
+    }
+  }
+}
+
+/**
+ * Stream transformation manager (flip horizontal, rotate 0/90/180/270, rule-of-thirds grid).
+ */
+export class StreamTransformController {
+  constructor(videoElement, gridOverlayElement) {
+    this.videoElement = videoElement;
+    this.gridOverlayElement = gridOverlayElement;
+    this.isMirrored = false;
+    this.rotationDegrees = 0; // 0, 90, 180, 270
+    this.isGridVisible = false;
+  }
+
+  toggleMirror() {
+    this.isMirrored = !this.isMirrored;
+    this.applyTransform();
+    return this.isMirrored;
+  }
+
+  rotate() {
+    this.rotationDegrees = (this.rotationDegrees + 90) % 360;
+    this.applyTransform();
+    return this.rotationDegrees;
+  }
+
+  toggleGrid() {
+    this.isGridVisible = !this.isGridVisible;
+    if (this.gridOverlayElement) {
+      if (this.isGridVisible) {
+        this.gridOverlayElement.classList.add('active');
+      } else {
+        this.gridOverlayElement.classList.remove('active');
+      }
+    }
+    return this.isGridVisible;
+  }
+
+  applyTransform() {
+    if (!this.videoElement) {
+      return;
+    }
+    const parts = [];
+    if (this.rotationDegrees !== 0) {
+      parts.push(`rotate(${this.rotationDegrees}deg)`);
+    }
+    if (this.isMirrored) {
+      parts.push('scaleX(-1)');
+    }
+    this.videoElement.style.transform = parts.join(' ');
+  }
+}
+
+/**
+ * Parse URL query parameters for auto-join and configuration.
+ */
+export function parseUrlStreamParams() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const roomId = urlParams.get('room') || urlParams.get('roomId') || '';
+  const pin = urlParams.get('pin') || '';
+  const mode = urlParams.get('mode') || '';
+  const autostart = urlParams.get('autostart') === '1' || urlParams.get('autostart') === 'true';
+  return { roomId, pin, mode, autostart };
+}
+
+/**
+ * Construct deep link for sharing room access.
+ */
+export function buildShareUrl(targetPath, { roomId, pin, autostart = true }) {
+  const url = new URL(targetPath, window.location.origin);
+  if (roomId) {
+    url.searchParams.set('room', roomId);
+  }
+  if (pin) {
+    url.searchParams.set('pin', pin);
+  }
+  if (autostart) {
+    url.searchParams.set('autostart', '1');
+  }
+  return url.toString();
+}
+

@@ -26,7 +26,7 @@ export class RoomManager {
     return /^[a-zA-Z0-9_-]{3,32}$/.test(trimmed);
   }
 
-  createOrJoinRoom(roomId, role, socketId, pin, mediaMode = 'webrtc') {
+  createOrJoinRoom(roomId, role, socketId, pin, mediaMode = 'webrtc', options = {}) {
     if (!this.validatePin(pin)) {
       return { success: false, error: 'Invalid access PIN' };
     }
@@ -35,10 +35,14 @@ export class RoomManager {
       return { success: false, error: 'Invalid Room ID. Must be 3-32 alphanumeric characters.' };
     }
 
-    // Support canonical roles: 'camera-sender' / 'sender', 'webrtc-receiver' / 'viewer'
+    // Support canonical roles: 'camera-sender' / 'sender', 'webrtc-receiver' / 'viewer', 'studio-sender'
     let normalizedRole = role;
+    let isStudioSender = false;
     if (role === 'camera-sender') {
       normalizedRole = 'sender';
+    } else if (role === 'studio-sender') {
+      normalizedRole = 'sender';
+      isStudioSender = true;
     } else if (role === 'webrtc-receiver') {
       normalizedRole = 'viewer';
     }
@@ -59,7 +63,9 @@ export class RoomManager {
     if (!room) {
       room = {
         senderSocketId: null,
+        senderSocketIds: new Set(),
         viewerSocketIds: new Set(),
+        isStudio: isStudioSender || Boolean(options && options.studioMode),
         mediaMode: normalizedMode,
         createdAt: Date.now(),
         lastActiveAt: Date.now()
@@ -73,13 +79,34 @@ export class RoomManager {
           error: `Media mode mismatch. This room is configured for "${room.mediaMode}" mode.`
         };
       }
+      if (isStudioSender || (options && options.studioMode)) {
+        room.isStudio = true;
+      }
     }
 
+    let evictedSenderId = null;
     if (normalizedRole === 'sender') {
-      if (room.senderSocketId && room.senderSocketId !== socketId) {
-        return { success: false, error: 'Room already has an active sender.' };
+      if (room.isStudio) {
+        room.senderSocketIds.add(socketId);
+        if (!room.senderSocketId) {
+          room.senderSocketId = socketId;
+        }
+      } else {
+        if (room.senderSocketId && room.senderSocketId !== socketId) {
+          if (options && options.reconnect) {
+            evictedSenderId = room.senderSocketId;
+            room.senderSocketIds.delete(evictedSenderId);
+            this.socketToRoom.delete(evictedSenderId);
+            room.senderSocketId = socketId;
+            room.senderSocketIds.add(socketId);
+          } else {
+            return { success: false, error: 'Room already has an active sender.' };
+          }
+        } else {
+          room.senderSocketId = socketId;
+          room.senderSocketIds.add(socketId);
+        }
       }
-      room.senderSocketId = socketId;
     } else {
       // Multiple concurrent viewers are allowed
       room.viewerSocketIds.add(socketId);
@@ -96,14 +123,20 @@ export class RoomManager {
       ? (room.viewerSocketIds.size > 0 ? Array.from(room.viewerSocketIds)[0] : null)
       : room.senderSocketId;
 
+    const peerSocketIds = normalizedRole === 'sender'
+      ? Array.from(room.viewerSocketIds)
+      : Array.from(room.senderSocketIds);
+
     return {
       success: true,
       roomId,
       role: normalizedRole,
       mediaMode: room.mediaMode,
+      isStudio: Boolean(room.isStudio),
       hasPeer,
       peerSocketId,
-      peerSocketIds: normalizedRole === 'sender' ? Array.from(room.viewerSocketIds) : (room.senderSocketId ? [room.senderSocketId] : [])
+      peerSocketIds,
+      evictedSenderId
     };
   }
 
@@ -141,6 +174,14 @@ export class RoomManager {
     return Array.from(room.viewerSocketIds);
   }
 
+  getSenderSocketIds(roomId) {
+    const room = this.rooms.get(roomId);
+    if (!room) {
+      return [];
+    }
+    return room.senderSocketIds ? Array.from(room.senderSocketIds) : (room.senderSocketId ? [room.senderSocketId] : []);
+  }
+
   leave(socketId) {
     const membership = this.socketToRoom.get(socketId);
     if (!membership) {
@@ -158,25 +199,35 @@ export class RoomManager {
     let peerSocketId = null;
     let peerSocketIds = [];
     if (role === 'sender') {
-      room.senderSocketId = null;
+      if (room.senderSocketIds) {
+        room.senderSocketIds.delete(socketId);
+      }
+      if (room.senderSocketId === socketId) {
+        room.senderSocketId = room.senderSocketIds && room.senderSocketIds.size > 0
+          ? Array.from(room.senderSocketIds)[0]
+          : null;
+      }
       peerSocketIds = Array.from(room.viewerSocketIds);
       peerSocketId = peerSocketIds.length > 0 ? peerSocketIds[0] : null;
     } else {
       room.viewerSocketIds.delete(socketId);
       peerSocketId = room.senderSocketId;
       if (peerSocketId) {
-        peerSocketIds = [peerSocketId];
+        peerSocketIds = room.senderSocketIds && room.senderSocketIds.size > 0
+          ? Array.from(room.senderSocketIds)
+          : [peerSocketId];
       }
     }
 
-    // If both sender and all viewers left, delete room
-    if (!room.senderSocketId && room.viewerSocketIds.size === 0) {
+    // If both all senders and all viewers left, delete room
+    const sendersRemaining = room.senderSocketIds ? room.senderSocketIds.size : (room.senderSocketId ? 1 : 0);
+    if (sendersRemaining === 0 && room.viewerSocketIds.size === 0) {
       this.rooms.delete(roomId);
     } else {
       room.lastActiveAt = Date.now();
     }
 
-    return { roomId, role, peerSocketId, peerSocketIds, socketId };
+    return { roomId, role, peerSocketId, peerSocketIds, socketId, isStudio: Boolean(room.isStudio) };
   }
 
   cleanStaleRooms(maxAgeMs = 24 * 60 * 60 * 1000) {

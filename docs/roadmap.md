@@ -180,10 +180,26 @@ Delivered: Inno Setup installer `lan-camera-setupv<version>.exe` (install, upgra
 
 **Open:** clean-machine/VM run, visible wizard click-through, code signing (SmartScreen), full root `build.bat` run end to end.
 
-## Phase 12 — Proposed next work
+## Phase 13 — The 14 Advanced Ecosystem Features (delivered, ADR-026)
 
-1. Verify the virtual webcam with a real phone, the Windows Camera app, Teams/Zoom and Unity; run the installer on a clean Windows 11 VM.
-2. Real-phone test of 2+ viewers; consider per-peer bitrate/resolution caps (`RTCRtpSender.setParameters`) so the phone is not overloaded.
-3. Decide whether to wire or delete the unused shared-memory bridge (ADR-022).
-4. Code-sign the installer and executables if distribution widens.
-5. TURN for cross-network use if that becomes a requirement (Phase 5).
+**Delivered across 5 phases (50/50 automated tests passing):**
+1. **Bidirectional Audio & Intercom:** Mic audio stream acquisition, viewer audio volume/mute toggles, and push-to-talk dual-tone Web Audio chime synthesizer.
+2. **High-Performance Shared-Memory Bridge:** Node `VcamShmBridge` client connected to `lancam-setup.exe --bridge` on TCP 7779, writing directly into `Local\LanCamSharedMemory_Video`.
+3. **Native Unity Receiver Package:** UPM package `com.vcam.lancamera` in `unity-package/` (`LanCameraReceiver.cs`) strictly adhering to `AGENTS.md` (no `var`, explicit types, no `new()`, K&R braces).
+4. **Multi-Camera Studio Switcher:** `RoomManager` studio-sender multi-feed support, targeted signaling routing, and interactive Studio Switcher bar in `viewer.html`.
+5. **Embedded RTSP 1.0 Bridge:** Zero-dependency RFC 2326 & RFC 2435 JPEG over RTP streaming in `src/server/rtsp-server.js` on `rtsp://<host>:8554/live/<roomId>`.
+6. **Hardware Camera Controls:** Torch/flashlight toggle and hardware zoom slider with sensor constraints in `camera-manager.js`.
+7. **Adaptive Bitrate (ABR):** Dynamic RTCPeerConnection RTT polling and bitrate scaling (`RTCRtpSender.setParameters`).
+8. **Local Recording & Snapshot Hub:** Canvas PNG snapshot capture and client-side `MediaRecorder` with live recording timer.
+9. **mDNS / Zero-Conf LAN Auto-Discovery:** Multicast DNS beacon (`src/server/mdns-beacon.js`) announcing `lancam.local` on 224.0.0.251:5353 and `/api/discover`.
+10. **Standby Slate & Virtual Camera Fallback:** Valid JFIF fallback buffer in `standby-slate.js` and SMPTE color bars in `lancam_filter.cpp`.
+11. **Mobile Battery & Thermal Saver:** Screen WakeLock API and OLED Blackout Saver mode.
+12. **Quick-Join URL & QR Code Auto-Connect:** Query parameter parsing (`?room=...&pin=...&autostart=1`) and one-click share deep links.
+13. **Stream Transformation & Framing HUD:** Horizontal mirror flip, 90°/180°/270° rotation lock, and rule-of-thirds grid.
+14. **Windows System Tray & Auto-Start:** `scripts/lan-camera-tray.ps1` notification tray companion and `scripts/register-autostart.ps1` registry manager.
+
+## Phase 14 — Proposed next work
+
+1. Verify virtual camera and RTSP bridge on hardware with external surveillance clients (OBS Media Source, VLC, Milestone).
+2. Clean-machine VM verification of the Inno Setup installer.
+3. Code-sign installer and executables when releasing public distribution builds.

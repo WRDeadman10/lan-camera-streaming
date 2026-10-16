@@ -212,8 +212,7 @@ Decision: **ADR-022** (see its correction).
 - [x] Win32 shared-memory IPC header (`vcam/include/shm_bridge.h`) and a reader in the DirectShow filter that prefers shared-memory frames over HTTP.
 - [x] `lancam-setup.exe --bridge` daemon (WinSock2, `127.0.0.1:7779`) that writes frames into shared memory.
 - [x] Viewer frame pump (`src/public/js/viewer.js`) and `POST /api/vcam/bridge-frame` (`src/server/server.js`).
-- [x] Corrected behavior (verified by reading the code, 2026-10-13): the endpoint does **not** forward to TCP 7779. It hands each JPEG to the MJPEG streamer, and the camera reads `/stream/<room>` over HTTP. Nothing starts `--bridge` or sends frames to it, so the shared-memory path is dead code.
-- [ ] Decide: wire the shared-memory path (lower latency, no JPEG) or delete it (`shm_bridge.h`, `--bridge`, the reader).
+- [x] Wire the shared-memory path: `src/server/vcam-shm-bridge.js` connects Node to `lancam-setup.exe --bridge` on TCP 7779 and `/api/vcam/bridge-frame?format=raw` writes frames directly into shared memory.
 
 ## P10 — Controls Sidebar Panel Scrolling & Viewport Constraints (2026-10-12)
 
@@ -286,3 +285,65 @@ Decision: **ADR-025**.
 - [x] Fix boolean parsing in `src/server/config.js` (`parseBool`).
 - [x] Automated tests added for sender source selection UI and sender leaving/rejoining with waiting viewers (41/41 passing).
 
+## P16 — The 14 Advanced Feature Expansion (2026-10-13)
+
+### Phase A: Mobile Sender & Viewer Experience + Controls
+- [x] Feature 12: Quick-Join URL & QR Code Auto-Connect (`?room=...&pin=...&autostart=1` query parameters, one-click share deep links).
+- [x] Feature 11: Mobile Battery & Thermal Saver Mode (Screen WakeLock API, OLED Blackout mode).
+- [x] Feature 6: Full Hardware Camera Controls (Torch/Flashlight toggle, hardware zoom slider, focus/exposure constraints).
+- [x] Feature 13: Stream Transformation & Overlay HUD (Mirror front camera, 90/180/270 rotation lock, rule-of-thirds grid).
+- [x] Feature 8: Local Recording, Snapshot & Replay Hub (Canvas PNG snapshot download, client-side MediaRecorder).
+
+### Phase B: Audio, Network Quality & Auto-Discovery
+- [x] Feature 1: Bidirectional Audio Pipeline & Intercom (Talkback) (Audio stream capture, viewer playback/mute/volume, push-to-talk).
+- [x] Feature 7: Adaptive Bitrate (ABR) & Dynamic Quality Scaling (RTCPeerConnection stats polling, RTCRtpSender.setParameters).
+- [x] Feature 9: mDNS / Zero-Conf LAN Auto-Discovery (Server mDNS service advertisement, `.local` hostname resolution).
+
+### Phase C: Virtual Camera Standby Slate & Multi-Camera Switcher
+- [x] Feature 10: Standby Slate & Virtual Camera Fallback State (Valid JFIF standby generator in `standby-slate.js` and SMPTE color bars in `lancam_filter.cpp`).
+- [x] Feature 4: Multi-Camera Studio / Switcher Mode (Multi-sender room support in `room-manager.js`, targeted signaling in `signaling.js`, interactive Studio Switcher bar in `viewer.html`/`viewer.js`).
+- [x] Feature 2: High-Performance Shared-Memory Bridge (Wired ADR-022 shared memory bridge via `src/server/vcam-shm-bridge.js` to TCP 7779 and `Local\LanCamSharedMemory_Video`).
+
+### Phase D: Native Unity Integration
+- [x] Feature 3: Native Unity Receiver Package (`unity-package/` / `com.vcam.lancamera` with C# MonoBehaviours `LanCameraReceiver`, `LanCameraConfig`, `LanCameraState` adhering to strict `AGENTS.md` rules).
+
+### Phase E: RTSP / IP-Camera Broadcaster & Windows System Tray
+- [x] Feature 5: Embedded RTSP / IP-Camera Server Bridge (Zero-dependency RFC 2326 & RFC 2435 JPEG over RTP streaming in `src/server/rtsp-server.js` on `rtsp://<host>:8554/live/<roomId>`).
+- [x] Feature 14: Windows System Tray Companion & Auto-Start Configuration (System tray companion in `scripts/lan-camera-tray.ps1` and registry auto-start in `scripts/register-autostart.ps1`).
+- [x] Comprehensive root `README.md` documentation for Native Unity UPM package (`com.vcam.lancamera`), RTSP server, Studio Switcher, mobile HUD controls, and Windows system tray scripts; resolved JSDOM event loop exit in tests and unsigned RTP timestamp integer overflow.
+- [x] Feature: Sender Auto-Reconnection & Stale Socket Eviction (ADR-027): Distinguish human button press vs non-human disconnects; auto-rejoin on socket connect/visibilitychange/online; background watchdog; server-side stale sender eviction; version v1.0.23 badge in sender and viewer headers (51/51 tests pass).
+- [x] UI & Reconnect Stream Polish: Fixed viewer HTML layout where unclosed `.video-hud` and `#videoWrapper` forced Studio Camera switcher and vitals into floating top-right HUD pill; moved `studioSwitcherBar` and `streamVitalsBar` into viewport footer matching sender layout; enhanced element padding, overlay text spacing, and input margins; fixed Reconnect button so viewer remembers last-joined room ID and PIN across disconnects/leaving without error (54/54 tests pass).
+- [x] Dynamic Daily Space Wallpaper Background System: Created React `useWallpaper()` hook and `<WallpaperBackground>` component along with vanilla JS system in `src/public/js/wallpaper.js`; daily caching in `localStorage` (`YYYY-MM-DD`); Unsplash Random Photo API integration with `urls.raw` desktop optimization (`&w=2560&q=85&auto=format&fit=crop`); graceful network/rate-limit fallback; 4-layer visual background architecture with obsidian veil and subtle SVG noise texture with `pointer-events: none` and content on `z-index: 10` (60/60 tests pass).
+- [x] Content Security Policy (CSP) Fix: Resolved all 25 console errors on Viewer and 20 errors on Sender caused by restrictive `default-src 'self'`. Updated `server.js` CSP to include `style-src 'self' 'unsafe-inline' https:`, `img-src 'self' data: blob: https://images.unsplash.com https://*.unsplash.com https:`, `connect-src 'self' ws: wss: https://api.unsplash.com https://*.unsplash.com https:`, `media-src 'self' blob: mediastream: data:`, `font-src 'self' data: https:`, and `worker-src 'self' blob:`. Added automated CSP test in `server.test.js` (61/61 tests pass).
+- [x] Sender Source Selection Initial Visibility Fix: Added default `#fileInputGroup, #urlInputGroup { display: none; }` in `style.css` and invoked `updateSourceInputsVisibility()` upon `sender.js` initialization so file and URL input groups are properly hidden on initial page load when source defaults to webcam (62/62 tests pass).
+- [x] CameraManager withAudio ReferenceError Fix: Added `withAudio = false` parameter to `CameraManager.startCapture()` in `src/public/js/camera-manager.js` with graceful fallback to video-only capture if audio fails; added unit tests in `tests/camera-manager.test.js` (66/66 tests pass).
+- [x] Camera Focus Controls (Constant / Manual Focus vs Continuous Auto-Focus): Implemented `applyFocusMode()`, `applyFocusDistance()`, and `getFocusCapabilities()` in `CameraManager`. Added Focus Mode dropdown (Continuous Auto, Constant/Locked Focus, Single-Shot), manual focus distance slider, floating focus control bar, HUD focus lock button, and tap-to-focus on preview.
+- [x] Sender Battery Percentage in Viewer Screen: Added `BatteryMonitor` reading `navigator.getBattery()`, broadcasting `sender:battery` over Socket.IO signaling, and displaying battery percentage and charging status (`⚡`) in viewer vitals footer and HUD pill with adaptive color coding (71/71 tests pass).
+- [x] Screen Sharing Input Source with Aspect-Preserving Scaling (ADR-028):
+  - [x] Added `screen` ("Screen share (display)") to `<select id="sourceSelect">` in `src/public/sender.html`.
+  - [x] Implemented `startScreenCapture()`, `isScreenCaptureSupported()`, `getScreenConstraints()`, and `applyScreenResolution()` in `src/public/js/camera-manager.js`.
+  - [x] Full quality mode (`max`) unconstrained up to 7680x4320 for 1:1 pixel rendering on 4K/high-DPI screens.
+  - [x] Aspect-preserving proportional bounding boxes for lower quality tiers (`1080p`, `720p`, `480p`) with auto-orientation detection for portrait and landscape displays.
+  - [x] Dynamic in-place resolution adjustment via `track.applyConstraints()` without re-prompting the user.
+- [x] Resilient Clipboard Copying in Secure and Insecure LAN Contexts:
+  - Resolved `[WARN] Failed to copy diagnostics: Cannot read properties of undefined (reading 'writeText')` when accessing the application over LAN IP HTTP (`http://<IP>:<PORT>/viewer` or `/sender`) where `navigator.clipboard` is restricted by browsers to Secure Contexts.
+  - Implemented `copyToClipboard(text)` in `src/public/js/ui-utils.js` with modern Async Clipboard API check and fallback to `document.execCommand('copy')` via an off-screen readonly `<textarea>` with selection restoration.
+  - Refactored `setupDiagnosticsControls()` and `copyTextToClipboard()` in `src/public/js/ui-utils.js` to use `copyToClipboard()`.
+  - Updated inline clipboard copy in `src/public/index.html`.
+  - Added unit test suite in `tests/clipboard-fallback.test.js` covering secure context, insecure context fallback, writeText rejection fallback, and dual-failure handling (91/91 passing tests, 1 skipped).
+- [x] Fullscreen HUD Auto-Hiding:
+  - Resolved floating top-right viewport HUD control panel (`.video-hud`) obscuring video stream and application overlays when entering fullscreen.
+  - Added CSS rules (`:fullscreen .video-hud`, `:-webkit-full-screen .video-hud`, `.is-fullscreen .video-hud`) with `display: none !important;`.
+  - Added `fullscreenchange` and `webkitfullscreenchange` listeners in `viewer.js` and `sender.js` to synchronize `.is-fullscreen` class on container and body.
+  - Added double-click to toggle fullscreen on `videoWrapper` (viewer) and `videoContainer` (sender).
+  - Added automated test in `tests/viewer-layout-reconnect.test.js` (92/92 passing tests, 1 skipped).
+- [x] Constant Full HD / 30 FPS work (ADR-029 addendum 2):
+  - [x] Viewer Advanced Settings > Quality Priority (Constant FPS / Constant Resolution / Both), relayed per viewer; server stores the mode and hands it to a sender that joins later.
+  - [x] Sender seeds the bandwidth estimate through the viewer's answer SDP (`src/public/js/sdp-bitrate.js`), raises the per-viewer ceiling to 12 Mbps (16 Mbps for Both), holds resolution for 6 s after connect / source switch in Constant FPS mode, and uses `maintain-framerate-and-resolution` for Both.
+  - [x] Mode-aware ABR with hysteresis (`src/public/js/abr-policy.js`); only Constant FPS viewers ever get a smaller picture.
+  - [x] Sender diagnostics line: sent vs source FPS, target bitrate, available bandwidth, limit reason and durations, resolution changes, content type, content hint, ABR level, grace state; snapshots at connect +3 s / +8 s / +15 s.
+  - [x] Hardware encoder detection recognises `D3D12VideoEncodeAccelerator`, unknown encoders never force VP8, the VP8 latch expires after 24 h.
+  - [x] Screen Share Content Type switch (Motion / Detail) for A/B testing on real screen capture.
+  - [ ] Verify on the real sender: 120 s per mode with a moving test page; read `src` fps vs `sent` fps in the `[STATS]` line to see whether Windows 10 screen capture itself caps at about 21 fps (then share a window or a tab instead of the whole screen).
+  - [ ] Decide the default Screen Share Content Type (Motion vs Detail) from those runs.
+  - [ ] Multi-viewer load test (2-3 viewers at 12-16 Mbps each) and real Wi-Fi start-bitrate tuning.

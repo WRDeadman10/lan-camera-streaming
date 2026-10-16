@@ -22,6 +22,30 @@ export function setupSignaling(httpServer, config, logger) {
 
   const failedAttempts = new Map(); // socketId -> { count: number, blockedUntil: number }
 
+  // A viewer's chosen video priority is kept server-side so a sender that joins (or restarts) later still learns it
+  const QualityModes = new Set(['fps', 'resolution', 'both']);
+  const QualityEventLimit = 5;
+  const QualityEventWindowMs = 5000;
+  const viewerQualityModes = new Map(); // viewer socketId -> 'fps' | 'resolution' | 'both'
+  const qualityEventTimes = new Map(); // viewer socketId -> recent event timestamps
+
+  function allowQualityEvent(socketId) {
+    const now = Date.now();
+    const recent = (qualityEventTimes.get(socketId) || []).filter((time) => now - time < QualityEventWindowMs);
+    if (recent.length >= QualityEventLimit) {
+      qualityEventTimes.set(socketId, recent);
+      return false;
+    }
+    recent.push(now);
+    qualityEventTimes.set(socketId, recent);
+    return true;
+  }
+
+  function forgetViewerQuality(socketId) {
+    viewerQualityModes.delete(socketId);
+    qualityEventTimes.delete(socketId);
+  }
+
   // Tell the room's sender when MJPEG consumers appear or disappear so it uploads frames only on demand
   if (config.mjpegStreamer) {
     config.mjpegStreamer.onDemandChange = (roomId, active) => {
@@ -59,8 +83,20 @@ export function setupSignaling(httpServer, config, logger) {
           return;
         }
 
-        const { roomId, role, pin, mediaMode } = payload;
-        const result = roomManager.createOrJoinRoom(roomId, role, socket.id, pin, mediaMode);
+        const { roomId, role, pin, mediaMode, reconnect } = payload;
+        let shouldReconnect = Boolean(reconnect);
+        const existingRoom = roomManager.getRoom(roomId);
+        if (existingRoom && existingRoom.senderSocketId && existingRoom.senderSocketId !== socket.id) {
+          const oldSock = io.sockets.sockets.get(existingRoom.senderSocketId);
+          if (!oldSock || !oldSock.connected) {
+            shouldReconnect = true;
+          }
+        }
+
+        const result = roomManager.createOrJoinRoom(roomId, role, socket.id, pin, mediaMode, {
+          reconnect: shouldReconnect,
+          studioMode: role === 'studio-sender'
+        });
 
         if (!result.success) {
           const count = (record ? record.count : 0) + 1;
@@ -75,8 +111,32 @@ export function setupSignaling(httpServer, config, logger) {
         // Reset failures on success
         failedAttempts.delete(socket.id);
 
+        if (result.evictedSenderId) {
+          logger.info(`Evicting stale sender socket ${result.evictedSenderId} in room "${roomId}" for reconnected sender ${socket.id}`);
+          const staleSock = io.sockets.sockets.get(result.evictedSenderId);
+          if (staleSock) {
+            // Tell the old sender it was replaced so it stops instead of auto-rejoining and evicting the new sender back.
+            staleSock.emit('sender:evicted', { roomId, replacedBy: socket.id });
+            staleSock.leave(roomId);
+            staleSock.disconnect(true);
+          }
+          io.to(roomId).emit('peer:left', { role: 'sender', peerId: result.evictedSenderId });
+        }
+
         socket.join(roomId);
         logger.info(`Socket ${socket.id} joined room "${roomId}" as ${role} [mode: ${result.mediaMode}]`);
+
+        if (result.role === 'sender') {
+          const viewerQuality = {};
+          for (const viewerId of Array.isArray(result.peerSocketIds) ? result.peerSocketIds : []) {
+            if (viewerQualityModes.has(viewerId)) {
+              viewerQuality[viewerId] = viewerQualityModes.get(viewerId);
+            }
+          }
+          if (Object.keys(viewerQuality).length > 0) {
+            result.viewerQuality = viewerQuality;
+          }
+        }
 
         if (typeof callback === 'function') {
           callback(result);
@@ -100,6 +160,17 @@ export function setupSignaling(httpServer, config, logger) {
               mediaMode: result.mediaMode,
               peerId: socket.id
             });
+          }
+        }
+
+        if (result.isStudio || roomManager.getRoom(roomId)?.isStudio) {
+          const roomObj = roomManager.getRoom(roomId);
+          if (roomObj && roomObj.senderSocketIds) {
+            const cameras = Array.from(roomObj.senderSocketIds).map((id, idx) => ({
+              id,
+              label: `Camera ${idx + 1}`
+            }));
+            io.to(roomId).emit('studio:cameras', { cameras });
           }
         }
       } catch (err) {
@@ -180,9 +251,10 @@ export function setupSignaling(httpServer, config, logger) {
 
       if (membership.role === 'viewer') {
         // Viewer answering sender
-        if (room.senderSocketId) {
-          logger.debug(`Relaying SDP answer from viewer ${socket.id} to sender ${room.senderSocketId}`);
-          io.to(room.senderSocketId).emit('webrtc:answer', {
+        const targetSenderId = payload.targetId || payload.senderId || room.senderSocketId;
+        if (targetSenderId) {
+          logger.debug(`Relaying SDP answer from viewer ${socket.id} to sender ${targetSenderId}`);
+          io.to(targetSenderId).emit('webrtc:answer', {
             sdp: payload.sdp,
             type: payload.type,
             senderId: socket.id
@@ -241,8 +313,9 @@ export function setupSignaling(httpServer, config, logger) {
         }
       } else {
         // Viewer sending ICE candidate to sender
-        if (room.senderSocketId) {
-          io.to(room.senderSocketId).emit('webrtc:ice-candidate', {
+        const targetSenderId = payload.targetId || payload.senderId || room.senderSocketId;
+        if (targetSenderId) {
+          io.to(targetSenderId).emit('webrtc:ice-candidate', {
             candidate: payload.candidate,
             sdpMid: payload.sdpMid,
             sdpMLineIndex: payload.sdpMLineIndex,
@@ -335,8 +408,61 @@ export function setupSignaling(httpServer, config, logger) {
       }
     });
 
+    // Intercom / talkback signaling event
+    socket.on('intercom:message', (payload) => {
+      const membership = roomManager.getMembership(socket.id);
+      if (!membership) return;
+      socket.to(membership.roomId).emit('intercom:message', {
+        senderId: socket.id,
+        role: membership.role,
+        message: payload?.message || 'Chime',
+        type: payload?.type || 'chime',
+        timestamp: Date.now()
+      });
+    });
+
+    // A viewer chooses whether its video stays at constant FPS, constant resolution, or both; relay it to the sender
+    socket.on('viewer:quality-priority', (payload) => {
+      const membership = roomManager.getMembership(socket.id);
+      if (!membership || membership.role !== 'viewer') {
+        return;
+      }
+      const mode = payload && typeof payload.mode === 'string' ? payload.mode : '';
+      if (!QualityModes.has(mode) || !allowQualityEvent(socket.id)) {
+        return;
+      }
+      const previous = viewerQualityModes.get(socket.id);
+      viewerQualityModes.set(socket.id, mode);
+      if (previous === mode) {
+        return;
+      }
+      const room = roomManager.getRoom(membership.roomId);
+      if (room && room.senderSocketId) {
+        io.to(room.senderSocketId).emit('viewer:quality-priority', { viewerId: socket.id, mode });
+      }
+    });
+
+    // Sender battery status broadcast to viewers
+    socket.on('sender:battery', (payload) => {
+      const membership = roomManager.getMembership(socket.id);
+      if (!membership || membership.role !== 'sender') {
+        return;
+      }
+      const room = roomManager.getRoom(membership.roomId);
+      if (room && payload) {
+        const batteryData = {
+          level: typeof payload.level === 'number' ? Math.round(payload.level) : null,
+          charging: Boolean(payload.charging)
+        };
+        for (const viewerId of room.viewerSocketIds) {
+          io.to(viewerId).emit('sender:battery', batteryData);
+        }
+      }
+    });
+
     // Leave room
     socket.on('room:leave', () => {
+      forgetViewerQuality(socket.id);
       const leaveResult = roomManager.leave(socket.id);
       if (leaveResult) {
         socket.leave(leaveResult.roomId);
@@ -351,6 +477,29 @@ export function setupSignaling(httpServer, config, logger) {
             io.to(leaveResult.peerSocketId).emit('peer:left', { role: leaveResult.role, peerId: socket.id });
           }
         }
+        if (leaveResult.isStudio) {
+          const roomObj = roomManager.getRoom(leaveResult.roomId);
+          const cameras = roomObj && roomObj.senderSocketIds ? Array.from(roomObj.senderSocketIds).map((id, idx) => ({
+            id,
+            label: `Camera ${idx + 1}`
+          })) : [];
+          io.to(leaveResult.roomId).emit('studio:cameras', { cameras });
+        }
+      }
+    });
+
+    // Studio camera switcher event
+    socket.on('studio:switch', (payload) => {
+      const membership = roomManager.getMembership(socket.id);
+      if (!membership || membership.role !== 'viewer') return;
+      const room = roomManager.getRoom(membership.roomId);
+      if (!room || !room.isStudio) return;
+      const targetCameraId = payload && payload.cameraId;
+      if (targetCameraId && room.senderSocketIds && room.senderSocketIds.has(targetCameraId)) {
+        room.senderSocketId = targetCameraId;
+        io.to(membership.roomId).emit('studio:switched', {
+          activeCameraId: targetCameraId
+        });
       }
     });
 
@@ -358,6 +507,7 @@ export function setupSignaling(httpServer, config, logger) {
     socket.on('disconnect', (reason) => {
       logger.debug(`Socket disconnected: ${socket.id} (${reason})`);
       failedAttempts.delete(socket.id);
+      forgetViewerQuality(socket.id);
       const leaveResult = roomManager.leave(socket.id);
       if (leaveResult) {
         socket.leave(leaveResult.roomId);
@@ -371,6 +521,14 @@ export function setupSignaling(httpServer, config, logger) {
           if (leaveResult.peerSocketId) {
             io.to(leaveResult.peerSocketId).emit('peer:left', { role: leaveResult.role, peerId: socket.id });
           }
+        }
+        if (leaveResult.isStudio) {
+          const roomObj = roomManager.getRoom(leaveResult.roomId);
+          const cameras = roomObj && roomObj.senderSocketIds ? Array.from(roomObj.senderSocketIds).map((id, idx) => ({
+            id,
+            label: `Camera ${idx + 1}`
+          })) : [];
+          io.to(leaveResult.roomId).emit('studio:cameras', { cameras });
         }
       }
     });

@@ -33,7 +33,14 @@ export class CameraManager {
     }
   }
 
-  async startCapture({ deviceId, facingMode, width = 'max', height = 'max', frameRate = 30 } = {}) {
+  async startCapture({
+    deviceId,
+    facingMode,
+    width = 'max',
+    height = 'max',
+    frameRate = 30,
+    withAudio = false
+  } = {}) {
     if (!CameraManager.isSecureContext()) {
       throw new Error('Camera access requires a secure context (HTTPS or localhost).');
     }
@@ -73,15 +80,34 @@ export class CameraManager {
       videoConstraints.facingMode = { ideal: this.facingMode };
     }
 
+    const audioConstraint = typeof withAudio === 'object' && withAudio !== null
+      ? withAudio
+      : Boolean(withAudio);
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: videoConstraints,
-        audio: false // Initial release is strictly video-only per AGENTS.md / architecture
+        audio: audioConstraint
       });
 
       this.currentStream = stream;
       return stream;
     } catch (err) {
+      if (audioConstraint) {
+        // If capture failed with audio requested, attempt video-only fallback
+        try {
+          const videoOnlyStream = await navigator.mediaDevices.getUserMedia({
+            video: videoConstraints,
+            audio: false
+          });
+          console.warn('Audio capture failed; falling back to video-only capture stream.', err);
+          this.currentStream = videoOnlyStream;
+          return videoOnlyStream;
+        } catch (_videoErr) {
+          // Both failed, proceed to standard error categorization
+        }
+      }
+
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
         throw new Error('Camera permission denied by user or system policy.');
       }
@@ -95,12 +121,249 @@ export class CameraManager {
         // Fallback to minimal constraints if resolution is overconstrained
         const fallbackStream = await navigator.mediaDevices.getUserMedia({
           video: true,
-          audio: false
+          audio: audioConstraint
         });
         this.currentStream = fallbackStream;
         return fallbackStream;
       }
       throw new Error(`Failed to access camera: ${err.message || err.name}`);
+    }
+  }
+
+  getCapabilities() {
+    if (!this.currentStream) {
+      return null;
+    }
+    const track = this.currentStream.getVideoTracks()[0];
+    if (track && typeof track.getCapabilities === 'function') {
+      try {
+        return track.getCapabilities();
+      } catch (e) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  async applyTorch(state) {
+    if (!this.currentStream) {
+      return false;
+    }
+    const track = this.currentStream.getVideoTracks()[0];
+    if (track && typeof track.applyConstraints === 'function') {
+      try {
+        await track.applyConstraints({ advanced: [{ torch: Boolean(state) }] });
+        return true;
+      } catch (err) {
+        console.warn('Failed to toggle torch:', err);
+        return false;
+      }
+    }
+    return false;
+  }
+
+  async applyZoom(zoomValue) {
+    if (!this.currentStream) {
+      return false;
+    }
+    const track = this.currentStream.getVideoTracks()[0];
+    if (track && typeof track.applyConstraints === 'function') {
+      try {
+        await track.applyConstraints({ advanced: [{ zoom: Number(zoomValue) }] });
+        return true;
+      } catch (err) {
+        console.warn('Failed to apply zoom:', err);
+        return false;
+      }
+    }
+    return false;
+  }
+
+  async applyFocusMode(mode) {
+    if (!this.currentStream) {
+      return false;
+    }
+    const track = this.currentStream.getVideoTracks()[0];
+    if (track && typeof track.applyConstraints === 'function') {
+      try {
+        await track.applyConstraints({ advanced: [{ focusMode: mode }] });
+        return true;
+      } catch (err) {
+        console.warn(`Failed to apply focusMode '${mode}':`, err);
+        return false;
+      }
+    }
+    return false;
+  }
+
+  async applyFocusDistance(distance) {
+    if (!this.currentStream) {
+      return false;
+    }
+    const track = this.currentStream.getVideoTracks()[0];
+    if (track && typeof track.applyConstraints === 'function') {
+      try {
+        await track.applyConstraints({
+          advanced: [{
+            focusMode: 'manual',
+            focusDistance: Number(distance)
+          }]
+        });
+        return true;
+      } catch (err) {
+        console.warn(`Failed to apply focusDistance '${distance}':`, err);
+        return false;
+      }
+    }
+    return false;
+  }
+
+  getFocusCapabilities() {
+    const caps = this.getCapabilities();
+    if (!caps) {
+      return null;
+    }
+    return {
+      focusMode: Array.isArray(caps.focusMode) ? caps.focusMode : null,
+      focusDistance: caps.focusDistance && typeof caps.focusDistance === 'object' ? caps.focusDistance : null
+    };
+  }
+
+  static isScreenCaptureSupported() {
+    return Boolean(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+  }
+
+  getScreenConstraints(resolution = 'max', frameRate = 30) {
+    if (resolution === 'max' || resolution === 'full') {
+      return {
+        width: { max: 7680 },
+        height: { max: 4320 },
+        frameRate: { ideal: frameRate, max: 60 }
+      };
+    }
+
+    let maxLong = 1920;
+    let maxShort = 1080;
+    if (resolution === '1080p') {
+      maxLong = 1920;
+      maxShort = 1080;
+    } else if (resolution === '720p') {
+      maxLong = 1280;
+      maxShort = 720;
+    } else if (resolution === '480p') {
+      maxLong = 854;
+      maxShort = 480;
+    }
+
+    return {
+      width: { max: maxLong },
+      height: { max: maxShort },
+      frameRate: { ideal: frameRate, max: 60 }
+    };
+  }
+
+  async startScreenCapture({
+    resolution = 'max',
+    frameRate = 30,
+    withAudio = false
+  } = {}) {
+    if (!CameraManager.isSecureContext()) {
+      throw new Error('Screen capture requires a secure context (HTTPS or localhost).');
+    }
+
+    if (!CameraManager.isScreenCaptureSupported()) {
+      throw new Error('Screen capture API (navigator.mediaDevices.getDisplayMedia) is not supported in this browser.');
+    }
+
+    // Keep the live stream running while the browser picker is open: cancelling the picker must not kill the active stream.
+    const previousStream = this.currentStream;
+    const releasePreviousStream = (nextStream) => {
+      if (previousStream && previousStream !== nextStream) {
+        previousStream.getTracks().forEach((track) => {
+          try {
+            track.stop();
+          } catch (e) {
+            // ignore
+          }
+        });
+      }
+    };
+
+    const videoConstraints = this.getScreenConstraints(resolution, frameRate);
+    const audioConstraint = typeof withAudio === 'object' && withAudio !== null
+      ? withAudio
+      : Boolean(withAudio);
+
+    try {
+      const displayMediaOptions = {
+        video: videoConstraints
+      };
+      if (audioConstraint) {
+        displayMediaOptions.audio = audioConstraint;
+      }
+
+      const stream = await navigator.mediaDevices.getDisplayMedia(displayMediaOptions);
+      releasePreviousStream(stream);
+      this.currentStream = stream;
+      return stream;
+    } catch (err) {
+      const isUserDenial = err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError' || err.name === 'AbortError';
+      if (audioConstraint && !isUserDenial) {
+        try {
+          const videoOnlyStream = await navigator.mediaDevices.getDisplayMedia({
+            video: videoConstraints
+          });
+          console.warn('Screen audio capture failed; falling back to video-only screen capture stream.', err);
+          releasePreviousStream(videoOnlyStream);
+          this.currentStream = videoOnlyStream;
+          return videoOnlyStream;
+        } catch (_videoErr) {
+          // Fall through to error handler
+        }
+      }
+
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        throw new Error('Screen sharing permission denied or cancelled by user.');
+      }
+      if (err.name === 'NotFoundError') {
+        throw new Error('No screen or display source available to share.');
+      }
+      if (err.name === 'NotReadableError') {
+        throw new Error('Display source is currently busy or could not be captured.');
+      }
+      throw new Error(`Failed to capture screen: ${err.message || err.name}`);
+    }
+  }
+
+  async applyScreenResolution(resolution = 'max') {
+    if (!this.currentStream) {
+      return false;
+    }
+    const track = this.currentStream.getVideoTracks()[0];
+    if (!track || typeof track.applyConstraints !== 'function') {
+      return false;
+    }
+
+    const settings = track.getSettings ? track.getSettings() : {};
+    const isPortrait = settings.height && settings.width && settings.height > settings.width;
+
+    let constraints = this.getScreenConstraints(resolution);
+    if (isPortrait && resolution !== 'max' && resolution !== 'full') {
+      const maxW = constraints.width ? constraints.width.max : 1280;
+      const maxH = constraints.height ? constraints.height.max : 720;
+      constraints = {
+        width: { max: Math.min(maxW, maxH) },
+        height: { max: Math.max(maxW, maxH) },
+        frameRate: constraints.frameRate
+      };
+    }
+
+    try {
+      await track.applyConstraints(constraints);
+      return true;
+    } catch (err) {
+      console.warn('Failed to apply dynamic resolution constraints to screen track:', err);
+      return false;
     }
   }
 
