@@ -381,9 +381,9 @@ Decision: **ADR-025**.
 - [x] Native tests and build verification with MSVC CMake. Commit inside submodule first.
 
 ### Phase 3: Signaling Protocol & Server Control Bridge
-- [ ] Extend Socket.IO signaling in `src/server/signaling.js` with control events (`control:request-lease`, `control:lease-granted`, `control:lease-rejected`, `control:revoke`, `control:release`, `control:input`).
-- [ ] Implement `src/server/control-bridge.js` to communicate with the native helper on `127.0.0.1:8765`.
-- [ ] Add unit tests for signaling events and control bridge.
+- [x] Extend Socket.IO signaling in `src/server/signaling.js` with control events (`control:request-lease`, `control:lease-granted`, `control:lease-rejected`, `control:revoke`, `control:release`, `control:input`).
+- [x] Implement `src/server/control-bridge.js` to communicate with the native helper on `127.0.0.1:8765`.
+- [x] Add unit tests for signaling events and control bridge.
 
 ### Phase 4: WebRTC DataChannel Transport & Coordinate Translation
 - [ ] Implement `lancam-control` DataChannel in `src/public/js/webrtc-peer.js` for sub-5ms low-latency input transport with Socket.IO relay fallback.
