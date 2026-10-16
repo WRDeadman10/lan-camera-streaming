@@ -35,7 +35,7 @@ The project is feature-complete across all 14 proposed ecosystem features and ve
 | Persistent and Resilient zrok Share Reservation (ADR-033) | **Delivered**: Pure JSON `zrok overview` parsing in `src/server/zrok-helper.js` and `start.ps1`; existing share detection and reuse with `zrok share reserved <shareToken> --override-endpoint <targetUrl> --headless`; candidate word generation (`lancam`, `lancamera`, `lancamstream`, `lancamlive`, `lancam<hex>`) with auto-generated fallback; eliminates `Could not bind to reserved 'public:lan'` and `createdAt` regex URL corruption (`1792164730133.shares.zrok.io`); persists reserved share across runs |
 | Automated tests | 176/176 pass (`npm test`) |
 
-Version: `package.json` is 1.0.30.
+Version: `package.json` is 1.0.33.
 
 ## Read before implementation
 
