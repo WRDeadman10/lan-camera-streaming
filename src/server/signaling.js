@@ -48,6 +48,9 @@ export function setupSignaling(httpServer, config, logger) {
   const viewerQualityModes = new Map(); // viewer socketId -> 'fps' | 'resolution' | 'both'
   const qualityEventTimes = new Map(); // viewer socketId -> recent event timestamps
 
+  const roomChatHistories = new Map(); // roomId -> Array<ChatMessage>
+  const MAX_CHAT_HISTORY = 50;
+
   function allowQualityEvent(socketId) {
     const now = Date.now();
     const recent = (qualityEventTimes.get(socketId) || []).filter((time) => now - time < QualityEventWindowMs);
@@ -866,6 +869,146 @@ export function setupSignaling(httpServer, config, logger) {
       }
     });
 
+    // In-room Chat Message Relay
+    socket.on('chat:message', (payload, callback) => {
+      try {
+        const membership = roomManager.getMembership(socket.id);
+        if (!membership) {
+          if (typeof callback === 'function') {
+            callback({ success: false, error: 'Unauthorized: Not joined in a room.' });
+          }
+          return;
+        }
+
+        if (!payload || typeof payload !== 'object' || typeof payload.text !== 'string') {
+          if (typeof callback === 'function') {
+            callback({ success: false, error: 'Malformed message payload.' });
+          }
+          return;
+        }
+
+        const rawText = payload.text.trim();
+        if (rawText.length === 0) {
+          if (typeof callback === 'function') {
+            callback({ success: false, error: 'Message text cannot be empty.' });
+          }
+          return;
+        }
+
+        if (rawText.length > 2000) {
+          if (typeof callback === 'function') {
+            callback({ success: false, error: 'Message exceeds maximum length (2000 characters).' });
+          }
+          return;
+        }
+
+        const senderName = typeof payload.senderName === 'string' && payload.senderName.trim().length > 0
+          ? payload.senderName.trim().slice(0, 40)
+          : (membership.role === 'sender' ? 'Streamer' : 'Viewer');
+
+        const senderUserId = typeof payload.senderUserId === 'string' && payload.senderUserId.trim().length > 0
+          ? payload.senderUserId.trim().slice(0, 64)
+          : null;
+
+        const message = {
+          id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+          roomId: membership.roomId,
+          senderId: socket.id,
+          senderUserId,
+          senderRole: membership.role,
+          senderName,
+          text: rawText,
+          timestamp: Date.now()
+        };
+
+        let history = roomChatHistories.get(membership.roomId);
+        if (!history) {
+          history = [];
+          roomChatHistories.set(membership.roomId, history);
+        }
+        history.push(message);
+        if (history.length > MAX_CHAT_HISTORY) {
+          history.shift();
+        }
+
+        io.to(membership.roomId).emit('chat:message', message);
+
+        if (typeof callback === 'function') {
+          callback({ success: true, messageId: message.id, timestamp: message.timestamp });
+        }
+      } catch (err) {
+        logger.error(`Error in chat:message: ${err.message}`);
+        if (typeof callback === 'function') {
+          callback({ success: false, error: 'Internal server error' });
+        }
+      }
+    });
+
+    // In-room Chat History Request
+    socket.on('chat:history', (payload, callback) => {
+      try {
+        const membership = roomManager.getMembership(socket.id);
+        if (!membership) {
+          if (typeof callback === 'function') {
+            callback({ success: false, error: 'Unauthorized: Not joined in a room.' });
+          }
+          return;
+        }
+
+        const history = roomChatHistories.get(membership.roomId) || [];
+        if (typeof callback === 'function') {
+          callback({ success: true, messages: history });
+        }
+      } catch (err) {
+        logger.error(`Error in chat:history: ${err.message}`);
+        if (typeof callback === 'function') {
+          callback({ success: false, error: 'Internal server error' });
+        }
+      }
+    });
+
+    // In-room Name Change Notification
+    socket.on('chat:name-change', (payload) => {
+      try {
+        const membership = roomManager.getMembership(socket.id);
+        if (!membership) {
+          return;
+        }
+
+        if (!payload || typeof payload !== 'object') {
+          return;
+        }
+
+        const oldName = typeof payload.oldName === 'string' ? payload.oldName.trim().slice(0, 40) : '';
+        const newName = typeof payload.newName === 'string' ? payload.newName.trim().slice(0, 40) : '';
+        if (!newName || oldName === newName) {
+          return;
+        }
+
+        const sysMessage = {
+          id: `sys_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+          roomId: membership.roomId,
+          isSystem: true,
+          text: `"${oldName || 'A participant'}" changed their name to "${newName}"`,
+          timestamp: Date.now()
+        };
+
+        let history = roomChatHistories.get(membership.roomId);
+        if (!history) {
+          history = [];
+          roomChatHistories.set(membership.roomId, history);
+        }
+        history.push(sysMessage);
+        if (history.length > MAX_CHAT_HISTORY) {
+          history.shift();
+        }
+
+        io.to(membership.roomId).emit('chat:system', sysMessage);
+      } catch (err) {
+        logger.error(`Error in chat:name-change: ${err.message}`);
+      }
+    });
+
     // Disconnect handler
     socket.on('disconnect', (reason) => {
       logger.debug(`Socket disconnected: ${socket.id} (${reason})`);
@@ -914,9 +1057,13 @@ export function setupSignaling(httpServer, config, logger) {
           })) : [];
           io.to(leaveResult.roomId).emit('studio:cameras', { cameras });
         }
+        if (!roomManager.getRoom(leaveResult.roomId)) {
+          roomChatHistories.delete(leaveResult.roomId);
+        }
       }
     });
   });
 
-  return { io, roomManager, remoteControlManager, controlBridge };
+  return { io, roomManager, remoteControlManager, controlBridge, roomChatHistories };
 }
+

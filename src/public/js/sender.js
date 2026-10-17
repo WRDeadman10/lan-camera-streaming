@@ -12,6 +12,7 @@ import { AbrLevel, createAbrState, getAbrLimits, stepAbr } from './abr-policy.js
 import { getRecommendedBitrateHints, isQualityMode, readVideoBitrateParams } from './sdp-bitrate.js';
 import { classifyEncoder } from './encoder-info.js';
 import { formatSenderStats } from './sender-stats.js';
+import { getChatManager } from './chat.js';
 
 const cameraManager = new CameraManager();
 let socket = null;
@@ -1363,7 +1364,21 @@ async function fetchIceServers() {
     const res = await fetch('/api/config');
     if (res.ok) {
       const data = await res.json();
+      if (data && data.version) {
+        const badges = document.querySelectorAll('.brand-version, #appVersionBadge');
+        badges.forEach((b) => {
+          b.textContent = `v${data.version}`;
+          b.setAttribute('title', `LAN Camera Streaming v${data.version}`);
+        });
+      }
       cachedIceServers = data.iceServers;
+      if (Array.isArray(cachedIceServers) && cachedIceServers.length > 0) {
+        const summary = cachedIceServers.map((s) => {
+          const urls = Array.isArray(s.urls) ? s.urls.join(', ') : s.urls;
+          return s.username ? `TURN(${urls})` : `STUN(${urls})`;
+        }).join('; ');
+        logDiagnostic(`[ICE] Loaded servers: ${summary}`, 'INFO');
+      }
       return cachedIceServers;
     }
   } catch (err) {
@@ -1837,6 +1852,8 @@ if (viewerPeers.size > 0) {
     hasJoinedRoom = true;
     seedViewerQuality(response);
     logDiagnostic(`Joined room "${roomId}" as ${role} [mode: ${response.mediaMode}].`);
+    getChatManager().setSocket(socket);
+    getChatManager().setRoom(roomId, role);
     broadcastBatteryToViewers();
 
     // Display Share QR Code for Viewer
@@ -1982,6 +1999,8 @@ async function rejoinRoomAsSender() {
     hasJoinedRoom = true;
     seedViewerQuality(response);
     logDiagnostic(`[AutoReconnect] Successfully rejoined room "${activeRoomId}" as ${role} [mode: ${response.mediaMode}].`, 'INFO');
+    getChatManager().setSocket(socket);
+    getChatManager().setRoom(activeRoomId, role);
     showInfo('✓ Stream reconnected to room');
     setTimeout(clearInfo, 2500);
 
@@ -2260,6 +2279,9 @@ function ensureSocket() {
     setupSocketListeners();
   } else if (!socket.connected) {
     socket.connect();
+  }
+  if (socket) {
+    getChatManager().setSocket(socket);
   }
   return socket;
 }
@@ -2741,6 +2763,7 @@ function stopSession() {
   isRejoining = false;
   isStreamingRequested = false;
   hasJoinedRoom = false;
+  getChatManager().setRoom(null);
   stopStatsPolling();
   stopMjpegFrameLoop();
   stopTunnelFrameLoop();

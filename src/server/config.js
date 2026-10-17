@@ -134,10 +134,10 @@ function parseString(val, defaultVal) {
   return String(val).trim();
 }
 
-function parseIceServers() {
+function parseIceServers(env = process.env) {
   const iceServers = [];
 
-  const rawStun = process.env.STUN_SERVERS;
+  const rawStun = env.STUN_SERVERS;
   if (rawStun && rawStun.trim().length > 0) {
     const stunUrls = rawStun.split(',').map((u) => u.trim()).filter(Boolean);
     if (stunUrls.length > 0) {
@@ -154,17 +154,20 @@ function parseIceServers() {
     });
   }
 
-  const rawTurn = process.env.TURN_SERVERS;
+  const rawTurn = env.TURN_SERVERS;
   if (rawTurn && rawTurn.trim().length > 0) {
+    if (rawTurn.includes('openrelay.metered.ca')) {
+      console.warn('[WARN] Notice: openrelay.metered.ca is deprecated by Metered and resolves to non-routable IP 192.0.2.1. WebRTC cannot gather relay candidates from it. Please use active credentials from metered.ca (e.g. global.relay.metered.ca) or use Mode B (tunnel-relay).');
+    }
     const turnUrls = rawTurn.split(',').map((u) => u.trim()).filter(Boolean);
     const turnConfig = {
       urls: turnUrls
     };
-    if (process.env.TURN_USERNAME) {
-      turnConfig.username = process.env.TURN_USERNAME;
+    if (env.TURN_USERNAME) {
+      turnConfig.username = env.TURN_USERNAME;
     }
-    if (process.env.TURN_CREDENTIAL) {
-      turnConfig.credential = process.env.TURN_CREDENTIAL;
+    if (env.TURN_CREDENTIAL) {
+      turnConfig.credential = env.TURN_CREDENTIAL;
     }
     iceServers.push(turnConfig);
   }
@@ -191,7 +194,7 @@ export function loadConfig(env = process.env) {
     throw new Error('Invalid configuration: HTTPS_CERT_PATH and HTTPS_KEY_PATH must be set together.');
   }
 
-  const iceServers = parseIceServers();
+  const iceServers = parseIceServers(env);
 
   return {
     port,

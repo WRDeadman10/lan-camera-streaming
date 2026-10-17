@@ -644,6 +644,108 @@ Real-world field testing over a public zrok tunnel (`*.share.zrok.io`) revealed 
 **Consequences:**
 Remote desktop control functions seamlessly over public zrok tunnels and LAN connections. Senders can configure control PINs and permanent passwords before starting streaming. The helper is detected without PNA or CSP errors, and tab switching does not disrupt active streams.
 
+## ADR-035: zrok2 CLI Compatibility & Reserved Name Discovery
+
+**Status:** Accepted (2026-10-18)
+
+**Context:**
+Users utilizing `zrok2` (zrok v2.0+) encountered startup failures when executing `dist\lan-camera-streaming.exe` or `start.ps1`. Even when the name `"lan"` (`lan.shares.zrok.io`) was already registered and reserved, the application reported `No existing reserved share found`, iterated through reservation attempts, and failed with `Error: unknown command "reserve" for "zrok2"`.
+
+Root causes:
+1. `zrok2 overview` outputs formatted text tables with Unicode box-drawing characters unless explicitly invoked with `--json`. The previous `overview` command returned no JSON braces, causing `getZrokShares` to return an empty array `[]`.
+2. In `zrok2 overview --json`, inactive reserved names reside in the top-level `names` array (`{ "name": "lan", "namespaceToken": "public", "reserved": true }`), not in `environments[].shares`. `getZrokShares` only inspected `environments[].shares`, completely ignoring `data.names`.
+3. In `zrok2`, the legacy commands `reserve public`, `share reserved`, and `release <token>` were removed or restructured:
+   - Reserving a name is performed via `zrok2 create name <name>` and `zrok2 modify name <name> --reserved`.
+   - Hosting on a reserved name is performed via `zrok2 share public <target> -n <namespaceToken>:<name> --backend-mode proxy --headless`.
+   - Releasing an ephemeral share backend is performed via `zrok2 delete share <token>`.
+
+**Decision:**
+1. **Dual-Mode CLI Discovery:** Implemented `isZrokV2(zrokBinary)` to detect `zrok2` vs legacy `zrok` v0.4 from binary paths and version outputs.
+2. **Overview JSON Extraction:** `getZrokOverviewData` queries `--json` first with fallback to plain `overview`. `parseZrokOverviewJson` extracts both active shares (`environments[].shares`) and registered reserved names (`data.names`), synthesizing reserved share objects with normalized endpoints (`https://<name>.<namespaceName>`) and name selections (`<namespaceToken>:<name>`).
+3. **Share Lifecycle Compatibility:**
+   - For `zrok2`: hosts on reserved names using `share public <target> -n <nameSelection> --backend-mode proxy --headless`. Reserves new names via `create name` and `modify name -r`. Releases dynamic shares on exit via `delete share <token>`.
+   - For legacy `zrok`: maintains full compatibility with `share reserved <token>` / `reserve public` / `release <token>`.
+
+**Consequences:**
+Existing reserved names like `lan` are immediately discovered and hosted as `https://lan.shares.zrok.io`. Terminal QR codes and URLs accurately display the reserved address. Both `zrok2` and legacy `zrok` environments are fully supported with zero regressions.
+
+## ADR-036: In-Room Real-Time WhatsApp-Style Chat with Local Persistence, Slide-Out Drawer & Dimmed Unsplash Wallpaper
+
+**Status:** Accepted (2026-10-18)
+
+**Context:**
+Participants streaming or watching video feeds in a room require bidirectional text communication. User requirements specify:
+1. Room-scoped chat functionality so senders and viewers can communicate seamlessly.
+2. Automatic name assignment with interactive user editing and persistent storage in `localStorage` (`lancam_chat_username`) across visits.
+3. Slide-out drawer UI with smooth entry/exit animations, accessible via a floating toggle action button.
+4. Unread notification indicator dot/badge on the toggle button that clears upon opening the panel.
+5. User ability to mute/unmute notifications, with mute preferences persisted in `localStorage` (`lancam_chat_muted`).
+6. WhatsApp-inspired styling with distinct sent (green) and received (slate) message bubbles, tails, timestamps, delivery checkmarks, and colored sender badges.
+7. Atmospheric chat background loaded dynamically from Unsplash random photos, heavily dimmed with a dark overlay to maintain complete contrast and zero distraction from chat readability.
+
+**Decision:**
+1. **Signaling & History Buffer:**
+   - Add `chat:message` socket event in `src/server/signaling.js`. Validate room membership, sanitize text (trim, length limit 2000 chars), sanitize sender display name (max 40 chars), generate unique message IDs, and broadcast to `io.to(roomId)`.
+   - Maintain a bounded in-memory message history buffer (last 50 messages per room) with `chat:history` retrieval for late-joining viewers or reconnecting participants.
+   - Clean up room chat history when all participants leave.
+2. **Client Chat Architecture (`src/public/js/chat.js`):**
+   - Provide an auto-name generator generating memorable combinations (adjective + noun + random 3-digit number).
+   - Check `localStorage.getItem('lancam_chat_username')` on load and persist changes immediately.
+   - Provide inline name editing in the chat header with validation.
+   - Implement mute toggle with `localStorage.getItem('lancam_chat_muted')` persistence and muted UI states.
+   - Implement floating action button with unread message counter badge dot.
+   - Implement slide-out drawer (`.chat-drawer`) with smooth GPU-accelerated CSS translation (`translateX(100%)` -> `translateX(0)`), close button, and backdrop overlay.
+   - WhatsApp dark theme bubble layout with incoming/outgoing tails, sender identity tags, timestamps, and double checkmark icons.
+   - Dimmed Unsplash background: queries Unsplash Random Photo API, caches URL, applies an obsidian veil (`rgba(11, 20, 26, 0.88)` / `filter: brightness(0.22)`), and provides a one-click shuffle button for fresh wallpapers.
+   - Web Audio API notification chime when messages arrive while drawer is closed and chat is unmuted.
+3. **Integration:**
+   - Integrate `ChatManager` into `src/public/sender.js` and `src/public/viewer.js`, binding to active room sessions.
+   - Style all chat drawer elements in `src/public/css/style.css` matching the dark mode design tokens.
+4. **Mobile Responsive Architecture:**
+   - Enforce `100dvh` dynamic viewport sizing and Safe Area insets (`env(safe-area-inset-top)`, `env(safe-area-inset-bottom)`) for iOS notch, Dynamic Island, and Android gesture navigation bars.
+   - Set 16px font size on mobile inputs to prevent disruptive iOS Safari auto-zooming on focus.
+   - Lock body background scrolling via `body.chat-drawer-open` while the chat drawer is open.
+   - Implement touch swipe-to-dismiss gesture (`setupSwipeToDismiss`) allowing users to swipe the drawer right to close.
+   - Integrate VisualViewport API (`setupMobileViewport`) to dynamically resize and pin the drawer above the virtual keyboard when typing on mobile devices.
+   - Provide compact landscape mobile styles (`orientation: landscape and max-height: 500px`) allowing video streams and chat to be enjoyed simultaneously without obscuring the screen.
+5. **Rejoin Deduplication & Persistent Client Identity (`senderUserId`):**
+   - Store a persistent unique client ID in `localStorage` (`lancam_chat_user_id` / `getOrCreateUserId()`) and attach it as `senderUserId` to every outgoing message payload.
+   - Signaling server validates, sanitizes (max 64 chars), and embeds `senderUserId` in broadcast messages and history buffer.
+   - In `ChatManager`, maintain a `renderedMessageIds = new Set()` and check both the Set and DOM element IDs before rendering any message bubble or system chip.
+   - When users reconnect or history is reloaded on rejoin (`chat:history`), duplicates are silently ignored.
+   - Messages are evaluated as self (`outgoing` green bubbles) via `(msg.senderUserId && msg.senderUserId === this.userId) || (msg.senderId === this.socket.id)`, ensuring a user's own previous messages remain recognized as theirs even after socket IDs change upon reconnecting.
+   - History rendering passes `isHistory = true`, preventing unread counter increment and notification sound triggers during initial or reconnect history loads.
+   - When switching rooms (`roomId !== this.roomId`), message container and rendered IDs are reset via `clearMessages()`; when rejoining the same room, existing DOM messages are preserved.
+
+**Consequences:**
+Senders and viewers in any room can chat with WhatsApp-like familiarity, custom or auto names persist between visits, unread notifications are surfaced with badge dots, chat can be muted silently, the chat background remains aesthetically pleasing without impairing text legibility, mobile phones in both portrait and landscape enjoy full touch gestures, safe area spacing, and virtual keyboard ergonomics, and rejoining or reconnecting to a room never causes duplicate messages or false incoming self-message alerts.
+
+## ADR-037: Dynamic Server-Derived Application Versioning
+
+**Status:** Accepted (2026-10-18)
+
+**Context:**
+The header brand badges across sender, viewer, and discovery pages previously had hardcoded strings (`v1.0.23`). When the package version was bumped (e.g. to `1.0.36`), the badges remained frozen at outdated versions unless manually edited in multiple HTML and server files. Furthermore, standalone executable builds (SEA) do not distribute `package.json` on disk, requiring an architecture that resolves version dynamically in all execution environments.
+
+**Decision:**
+1. **Single Source of Truth (`src/server/version.js`):**
+   - Provide `getAppVersion()` resolving the version dynamically:
+     - Check `__APP_VERSION__` injected at build-time by `esbuild` for standalone single-executable applications.
+     - Check `package.json` on disk relative to module and current working directory for source / development runs.
+     - Fallback to current release tag.
+2. **Server API Exposure:**
+   - Expose version in `/api/version`, `/api/config`, `/api/discover`, and `/health` endpoints.
+   - Expose `embeddedVersion` in `scripts/build-embedded-assets.js`.
+   - Update `cli.js` to derive `APP_VERSION` from `getAppVersion()`.
+3. **Frontend Dynamic Hydration (`src/public/js/ui-utils.js`):**
+   - Provide `initializeVersionBadge()` querying `.brand-version, #appVersionBadge` and hydrating with `v${data.version}` from `/api/version`.
+   - Auto-execute on DOM readiness.
+   - Additionally update badges in `sender.js` and `viewer.js` when `/api/config` is loaded.
+   - Replace static version text in `sender.html`, `viewer.html`, and `index.html` with empty badge containers styled with `.brand-version:empty { display: none; }` to prevent empty layout shifts.
+
+**Consequences:**
+Any version bump in `package.json` immediately and automatically reflects across the server, API endpoints, CLI, sender header, viewer header, and hub page without requiring manual string updates across frontend files or server templates. Standalone executables, development runs, and LAN discovery beacons remain consistently synchronized.
+
 ## Open decisions to revisit after the first working stream
 
 - Whether to code-sign the installer and executables (ADR-024).

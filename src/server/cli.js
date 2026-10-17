@@ -15,6 +15,7 @@ import { Logger } from './logger.js';
 import { createServer } from './server.js';
 import { setupSignaling } from './signaling.js';
 import { MjpegStreamer } from './mjpeg-streamer.js';
+import { getAppVersion } from './version.js';
 
 function parseCliArgs(args) {
   const options = {
@@ -58,7 +59,7 @@ function parseCliArgs(args) {
   return options;
 }
 
-const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.0.0';
+const APP_VERSION = getAppVersion();
 
 function printHelp() {
   console.log(`
@@ -105,6 +106,8 @@ function getLanIpv4Addresses() {
 
 import {
   findZrokBinary,
+  isZrokV2,
+  cleanupStaleZrokShares,
   getZrokShares,
   findExistingShare,
   reserveNewShare
@@ -202,9 +205,13 @@ async function main() {
       }
 
       const zrokBinary = findZrokBinary();
-      if (zrokBinary && !isShareReserved && activeShareToken) {
+      if (zrokBinary && activeShareToken) {
         try {
-          execSync(`"${zrokBinary}" release ${activeShareToken}`, { stdio: 'ignore' });
+          if (isZrokV2(zrokBinary)) {
+            execSync(`"${zrokBinary}" delete share ${activeShareToken}`, { stdio: 'ignore' });
+          } else if (!isShareReserved) {
+            execSync(`"${zrokBinary}" release ${activeShareToken}`, { stdio: 'ignore' });
+          }
         } catch {}
       }
 
@@ -277,14 +284,18 @@ async function main() {
 
       const targetUrl = `http://127.0.0.1:${config.port}`;
       console.log(`Configuring zrok public share for ${targetUrl}...`);
+      cleanupStaleZrokShares(zrokBinary, config.port, 'lan');
 
       const existingShares = getZrokShares(zrokBinary);
       const chosenShare = findExistingShare(existingShares, config.port);
       let shareToken = null;
       let shareUrl = null;
+      let nameSelection = null;
+      const isV2 = isZrokV2(zrokBinary);
 
       if (chosenShare) {
-        shareToken = chosenShare.shareToken;
+        shareToken = chosenShare.name || chosenShare.shareToken;
+        nameSelection = chosenShare.nameSelection || (chosenShare.isNamedReservation ? `public:${chosenShare.name}` : `public:${shareToken}`);
         shareUrl = chosenShare.frontendEndpoint || `https://${shareToken}.share.zrok.io`;
         isShareReserved = true;
         console.log(`Found existing reserved share '${shareToken}' (${shareUrl}).`);
@@ -293,7 +304,8 @@ async function main() {
         console.log('No existing reserved share found. Reserving a new share for future runs...');
         const reserved = reserveNewShare(zrokBinary, targetUrl);
         if (reserved) {
-          shareToken = reserved.token;
+          shareToken = reserved.name || reserved.token;
+          nameSelection = reserved.nameSelection || `public:${reserved.token}`;
           shareUrl = reserved.url;
           isShareReserved = true;
           console.log(`Hosting on newly reserved share '${shareToken}'...`);
@@ -301,12 +313,34 @@ async function main() {
       }
 
       if (shareToken) {
-        zrokProcess = spawn(zrokBinary, ['share', 'reserved', shareToken, '--override-endpoint', targetUrl, '--headless'], {
+        const spawnArgs = isV2
+          ? ['share', 'public', targetUrl, '-n', nameSelection || `public:${shareToken}`, '--backend-mode', 'proxy', '--headless']
+          : (chosenShare?.isNamedReservation
+            ? ['share', 'public', targetUrl, '-n', nameSelection || `public:${shareToken}`, '--backend-mode', 'proxy', '--headless']
+            : ['share', 'reserved', shareToken, '--override-endpoint', targetUrl, '--headless']);
+
+        zrokProcess = spawn(zrokBinary, spawnArgs, {
           stdio: 'ignore',
           detached: false
         });
+        zrokProcess.on('error', (err) => {
+          console.warn('zrok process error:', err.message);
+        });
 
         await new Promise((resolve) => setTimeout(resolve, 2000));
+
+        if (zrokProcess.exitCode !== null) {
+          console.warn(`Could not start reserved share '${shareToken}'. Cleaning stale bindings and retrying...`);
+          cleanupStaleZrokShares(zrokBinary, config.port, chosenShare?.name || 'lan');
+          zrokProcess = spawn(zrokBinary, spawnArgs, {
+            stdio: 'ignore',
+            detached: false
+          });
+          zrokProcess.on('error', (err) => {
+            console.warn('zrok process error:', err.message);
+          });
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
 
         if (zrokProcess.exitCode !== null) {
           console.warn(`Could not start reserved share '${shareToken}'. Falling back to dynamic share...`);
@@ -314,15 +348,33 @@ async function main() {
           shareUrl = null;
           isShareReserved = false;
         } else {
-          activeShareToken = shareToken;
+          if (isV2) {
+            try {
+              const activeShares = getZrokShares(zrokBinary);
+              const activeMatch = activeShares.find(
+                (s) => (s.backendProxyEndpoint || s.target)?.includes(`:${config.port}`) || s.name === shareToken
+              );
+              activeShareToken = activeMatch?.backendShareToken || activeMatch?.shareToken || shareToken;
+            } catch {
+              activeShareToken = shareToken;
+            }
+          } else {
+            activeShareToken = shareToken;
+          }
         }
       }
 
       if (!shareToken) {
         console.log('Starting dynamic share...');
+        const prevTokens = new Set(getZrokShares(zrokBinary).map((s) => s.shareToken));
+        shareUrl = null;
+
         zrokProcess = spawn(zrokBinary, ['share', 'public', targetUrl, '--backend-mode', 'proxy', '--headless'], {
           stdio: 'ignore',
           detached: false
+        });
+        zrokProcess.on('error', (err) => {
+          console.warn('zrok dynamic process error:', err.message);
         });
 
         for (let attempt = 0; attempt < 15; attempt++) {
@@ -330,8 +382,8 @@ async function main() {
           try {
             const shares = getZrokShares(zrokBinary);
             const match = shares.find(
-              (s) => s.backendProxyEndpoint && s.backendProxyEndpoint.includes(`:${config.port}`)
-            ) || shares[shares.length - 1];
+              (s) => !prevTokens.has(s.shareToken) && (s.backendProxyEndpoint || s.target) && (s.backendProxyEndpoint || s.target).includes(`:${config.port}`)
+            ) || shares.find((s) => !prevTokens.has(s.shareToken));
             if (match && match.shareToken) {
               activeShareToken = match.shareToken;
               shareUrl = match.frontendEndpoint || `https://${match.shareToken}.share.zrok.io`;
@@ -376,7 +428,9 @@ if (isMain) {
 export {
   parseCliArgs,
   findZrokBinary,
+  isZrokV2,
   getZrokShares,
   findExistingShare,
-  reserveNewShare
+  reserveNewShare,
+  cleanupStaleZrokShares
 };

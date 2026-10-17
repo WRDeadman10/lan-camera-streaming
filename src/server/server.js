@@ -18,6 +18,7 @@ import { embeddedAssets } from './embedded-assets.js';
 import { MdnsBeacon } from './mdns-beacon.js';
 import { VcamShmBridge } from './vcam-shm-bridge.js';
 import { RtspServer } from './rtsp-server.js';
+import { getAppVersion } from './version.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -105,6 +106,7 @@ export function createServer(config, logger) {
   app.get('/health', (req, res) => {
     res.status(200).json({
       status: 'ok',
+      version: getAppVersion(),
       timestamp: new Date().toISOString(),
       uptime: Math.floor(process.uptime())
     });
@@ -113,7 +115,15 @@ export function createServer(config, logger) {
   // Safe client configuration endpoint (never returns ACCESS_PIN or secrets)
   app.get('/api/config', (req, res) => {
     res.status(200).json({
-      iceServers: config.iceServers
+      iceServers: config.iceServers,
+      version: getAppVersion()
+    });
+  });
+
+  // Application version endpoint
+  app.get('/api/version', (req, res) => {
+    res.status(200).json({
+      version: getAppVersion()
     });
   });
 
@@ -133,7 +143,7 @@ export function createServer(config, logger) {
       hostname: os.hostname(),
       port: config.port,
       protocol: config.useHttps ? 'https' : 'http',
-      version: '1.0.23'
+      version: getAppVersion()
     });
   });
 

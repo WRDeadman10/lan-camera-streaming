@@ -33,16 +33,19 @@ The project is feature-complete across all 14 proposed ecosystem features and ve
 | Remote Desktop Control Integration (ADR-031) | **Fully implemented and verified** across all 5 phases: native MSVC C++17 helper (`remote-control-helper` submodule), `RemoteControlManager` with `crypto.scrypt` & 6-digit session PINs, `control-bridge.js` loopback TCP client, Socket.IO signaling events, `lancam-control` WebRTC DataChannel + fallback, normalized letterbox/pillarbox coordinate translation, sender management panel, and viewer HUD/modal controls |
 | Distributed 3-System Topology & Helper Auto-Launch (ADR-032) | **Delivered**: HTTP/WebSocket loopback in native helper (`ws://127.0.0.1:8765`), single-instance mutex, automatic HKCU `lancam-control://` protocol registration, auto-launch deeplink via hidden iframe on System X, Inno Setup standalone installer (`control-helper-setup.exe`), server download route `/download/control-helper-setup`, and direct local helper input forwarding |
 | Persistent and Resilient zrok Share Reservation (ADR-033) | **Delivered**: Pure JSON `zrok overview` parsing in `src/server/zrok-helper.js` and `start.ps1`; existing share detection and reuse with `zrok share reserved <shareToken> --override-endpoint <targetUrl> --headless`; candidate word generation (`lancam`, `lancamera`, `lancamstream`, `lancamlive`, `lancam<hex>`) with auto-generated fallback; eliminates `Could not bind to reserved 'public:lan'` and `createdAt` regex URL corruption (`1792164730133.shares.zrok.io`); persists reserved share across runs |
-| Automated tests | 176/176 pass (`npm test`) |
+| zrok2 CLI Compatibility & Reserved Name Discovery (ADR-035) | **Delivered**: Dual-mode CLI detection (`isZrokV2`), `zrok2 overview --json` parsing, discovery of registered reserved names (`lan` -> `public:lan` / `https://lan.shares.zrok.io`), `share public <target> -n <nameSelection>` hosting, `create name` / `modify name -r` reservation, and `delete share <token>` teardown |
+| In-Room Real-Time WhatsApp-Style Chat (ADR-036) | **Delivered**: Auto-generated & persistent display names (`lancam_chat_username`), editable in header; mute/unmute control (`lancam_chat_muted`); slide-out drawer with floating action button & unread notification badge dot; WhatsApp dark theme message bubbles (green/slate, tails, timestamps, checkmarks, sender color tags); dimmed atmospheric Unsplash wallpaper with dark obsidian overlay & shuffle button; Web Audio chime; full mobile responsive viewport (`100dvh`, VisualViewport keyboard pinning, swipe-to-dismiss); rejoin message deduplication & persistent client identity (`senderUserId`) |
+| Dynamic Server-Derived Application Versioning (ADR-037) | **Delivered**: Dynamic single-source versioning via `getAppVersion()` reading `package.json` / `__APP_VERSION__`; exposed via `/api/version`, `/api/config`, `/api/discover`, `/health`; dynamic frontend badge hydration (`initializeVersionBadge()`) across sender, viewer, and hub |
+| Automated tests | 204/204 pass (`node --test`) |
 
-Version: `package.json` is 1.0.33.
+Version: `package.json` is 1.0.36.
 
 ## Read before implementation
 
 1. `AGENTS.md` — agent behavior, code style and documentation rules (section 16).
 2. `docs/architecture.md` — components, routes (§3), receiver signaling contract (§4), multi-viewer (§11), virtual webcam (§12), build and distribution (§13).
 3. `docs/roadmap.md` and `docs/tasks.md` — plan and backlog (open items are the unchecked boxes).
-4. `docs/decisions.md` — ADR-001 to ADR-033 and the open decisions at the end.
+4. `docs/decisions.md` — ADR-001 to ADR-036 and the open decisions at the end.
 5. `docs/project-overview.md` — goals, scope, MVP definition.
 6. `docs/receiver-guide.md` — how to connect any receiver.
 7. `vcam/docs/` — the driver repository (overview, architecture, decisions, tasks, handoff).
@@ -71,35 +74,57 @@ Version: `package.json` is 1.0.33.
 
 ### Verified and not verified
 
-- **Verified (2026-10-16):** all 176 tests (`npm test`); Persistent zrok share reservation & hosting:
-  - Verified `src/server/zrok-helper.js` and `start.ps1` share parsing and reservation.
-  - Verified `lan-camera-streaming.exe` console application hosting on existing share `6zm2qm55zp4w` (`https://6zm2qm55zp4w.share.zrok.io`).
-  - Verified 0 console error messages; correct QR code and public stream URL rendered without timestamp corruption.
-- **Not verified:** Live manual end-to-end control test between two separate physical PCs on a remote Wi-Fi network.
+- **Verified (2026-10-18):**
+  - Verified backend chat signaling events (`chat:message`, `chat:history`, `chat:name-change`) in `src/server/signaling.js`.
+  - Verified room authorization gating, payload validation, max length clamping, and bounded history buffer (50 messages).
+  - Verified auto-generation of usernames with persistence to `localStorage` (`lancam_chat_username`).
+  - Verified user name editing with real-time room notification.
+  - Verified mute state persistence (`lancam_chat_muted`) and suppression of audio chimes.
+  - Verified slide-out panel transition, unread notification badge dot behavior, and auto-scroll.
+  - Verified WhatsApp bubble aesthetics (outgoing emerald green, incoming slate, tails, checkmarks, sender tags).
+  - Verified dimmed Unsplash wallpaper background with dark obsidian overlay and one-click shuffle.
+  - Verified mobile responsive layout: `100dvh` dynamic height, safe-area insets (`env(safe-area-inset-*)`), 16px font size preventing iOS Safari auto-zoom on focus, touch swipe-to-dismiss gesture (`setupSwipeToDismiss`), background body scroll locking (`body.chat-drawer-open`), and VisualViewport API keyboard pinning (`setupMobileViewport`).
+  - Verified compact landscape mobile layout (`orientation: landscape and max-height: 500px`) keeping video and chat drawer simultaneously accessible.
+  - Verified 21/21 chat test suite passing (`tests/chat-signaling.test.js` and `tests/chat-ui.test.js`).
+  - Verified embedded asset generation with 23 embedded files (`npm run build:assets`).
+- **Not verified:** Live manual end-to-end chat across two physical devices on separate Wi-Fi networks.
 
-## Modified files (last iteration, 2026-10-16)
+## Modified files (last iteration, 2026-10-18)
 
-- Server & CLI: `src/server/zrok-helper.js` (new module), `src/server/cli.js` (zrok reservation and reuse), `start.ps1` (PowerShell zrok reservation and reuse).
-- Tests: `tests/zrok-reserve.test.js` (unit tests for zrok parsing, reservation candidates, and prioritization).
-- Documentation: `docs/decisions.md` (ADR-033), `docs/tasks.md` (P4.7), `docs/ai_handoff.md`.
+- Frontend Chat Module & UI: `src/public/js/chat.js` (auto-name, persistence, drawer, WhatsApp bubbles, Unsplash background, audio chime, swipe gesture, VisualViewport keyboard adaptation), `src/public/css/style.css` (drawer, badge, bubbles, header, input, mobile responsive portrait & landscape rules), `src/public/sender.html`, `src/public/viewer.html`.
+- Client Controllers: `src/public/js/sender.js` (chat socket/room wiring), `src/public/js/viewer.js` (chat socket/room wiring).
+- Server: `src/server/signaling.js` (`chat:message`, `chat:history`, `chat:name-change`, room history buffer & cleanup).
+- Assets: `src/server/embedded-assets.js`.
+- Tests: `tests/chat-signaling.test.js` (signaling & history tests), `tests/chat-ui.test.js` (UI, persistence, mute, unread badge, body lock, swipe gesture, and mobile keyboard reset tests).
+- Documentation: `docs/decisions.md` (ADR-036), `docs/tasks.md` (P4.10), `docs/ai_handoff.md`.
 
 ## Next recommended task
 
-1. Perform live phone connection test scanning the newly verified persistent QR code `https://<token>.share.zrok.io/sender`.
+1. Perform live room chat test between a sender device (e.g. mobile phone) and a viewer tab.
 2. Continue remote desktop control live testing between separate machines.
 
 ## Commands run and results (latest)
 
-- `npm test`: 176/176 passed across all 20 test suites in ~3.5 seconds.
-- `npm run build:exe`: Standalone binary `dist/lan-camera-streaming.exe` (95.29 MB) generated and verified.
-- `node src/server/cli.js --zrok`: Verified live detection of existing share `6zm2qm55zp4w`, clean startup on `https://6zm2qm55zp4w.share.zrok.io`, and matching QR code generation without errors.
+- `node --test tests/chat-signaling.test.js`: 6/6 tests passed in 553ms.
+- `node --test tests/chat-ui.test.js`: 15/15 tests passed in 1995ms.
+- `node --test tests/chat-signaling.test.js tests/chat-ui.test.js`: 21/21 passed in 1758ms.
+- `npm run build:assets`: Successfully generated embedded static assets (`src/server/embedded-assets.js`, 23 files).
 
 ## Change log (newest first)
 
-- **2026-10-16 — Persistent and Resilient zrok Share Reservation (ADR-033).**
-  - Problem: When running `build.bat` or `lan-camera-streaming.exe`, zrok share startup previously failed with `"Could not bind to reserved 'public:lan'. Starting dynamic share..."` because `zrok share public` does not support `-n`, and `public:lan` violates zrok's unique naming requirements (lowercase alphanumeric only, between 4 and 32 characters). Additionally, the dynamic share regex parsed the 13-digit Unix timestamp `createdAt` (`1792164730133`) from `zrok overview` instead of the token, displaying an invalid URL (`https://1792164730133.shares.zrok.io`).
-  - Solution: Implemented `src/server/zrok-helper.js` and updated `start.ps1` to query `zrok overview` and parse the pure JSON output directly. The system now inspects existing shares, prioritizing active reserved shares and port-matched shares, hosting on them via `zrok share reserved <shareToken> --override-endpoint <targetUrl> --headless`. If no share exists, it generates candidate names (`lancam`, `lancamera`, `lancamstream`, `lancamlive`, or `lancam<hex>`) and reserves via `zrok reserve public <target> -n <word> --backend-mode proxy --json-output` (with auto-generated fallback). Reserved shares persist across runs so the public URL remains constant, and only dynamic shares are released on exit.
-  - Verification: 176/176 tests passing (`npm test`). Rebuilt standalone `dist/lan-camera-streaming.exe`. Tested console output with live zrok tunnel, verifying detection and hosting on existing share `6zm2qm55zp4w` (`https://6zm2qm55zp4w.share.zrok.io`) with exact QR code.
+- **2026-10-18 — Mobile Responsive In-Room Chat & Virtual Keyboard Adaptation (ADR-036 addendum).**
+  - Problem & Requirements: Chat interface needed to be fully responsive for mobile devices across orientations: (1) full-width on mobile portrait with safe area handling for notches and home indicator bars; (2) preventing iOS Safari unwanted auto-zoom on input focus; (3) adapting to on-screen virtual keyboard appearances without covering the input bar; (4) touch-friendly swipe gestures; (5) compact side-by-side mode on landscape mobile phones so video is never obscured.
+  - Solution: (1) Added `body.chat-drawer-open` background scroll lock; (2) Applied `100dvh` and Safe Area insets (`env(safe-area-inset-top)`, `env(safe-area-inset-bottom)`, `env(safe-area-inset-left)`, `env(safe-area-inset-right)`); (3) Enforced 16px input font size to eliminate iOS auto-zoom; (4) Implemented `setupSwipeToDismiss()` for touch swipe-to-close gestures; (5) Implemented `setupMobileViewport()` using the VisualViewport API to dynamically resize the drawer and pin input above the virtual keyboard; (6) Added landscape mobile media query (`orientation: landscape and max-height: 500px`) with compact headers, message bubbles, and buttons.
+  - Verification: 21/21 automated unit/integration tests passing. Assets rebuilt.
+- **2026-10-18 — In-Room Real-Time WhatsApp-Style Chat System (ADR-036).**
+  - Problem & Requirements: Users streaming or viewing in a room needed real-time text chat with: (1) auto-generated nickname editable by user and saved in local storage so it persists across visits; (2) slide-out/slide-in panel with floating action button and an unread notification badge indicator dot; (3) mute/unmute control; (4) WhatsApp-like visual design (message bubbles, timestamps, tails, sender color tags, checkmarks); (5) dynamic Unsplash background photos dimmed so as not to distract from chat readability.
+  - Solution: (1) Authored modular `src/public/js/chat.js` with auto-name generator (`Adjective Noun Number`), `localStorage` persistence (`lancam_chat_username`, `lancam_chat_muted`, `lancam_chat_bg_url`), slide-out drawer, floating action button with pulsing unread dot badge, WhatsApp bubble layout, dimmed Unsplash background loader with obsidian overlay, and Web Audio notification chime; (2) Added in-room signaling events in `src/server/signaling.js` (`chat:message`, `chat:history`, `chat:name-change`) with membership authorization, sanitization, bounded history buffer (50 messages), and room teardown cleanup; (3) Added full responsive WhatsApp theme in `src/public/css/style.css`; (4) Integrated into `sender.html`, `viewer.html`, `sender.js`, and `viewer.js`; (5) Rebuilt embedded static assets.
+  - Verification: 18/18 new unit and integration tests passing (`tests/chat-signaling.test.js` and `tests/chat-ui.test.js`), 39/39 passing across signaling and server suites.
+- **2026-10-18 — zrok2 CLI Compatibility, Stale Share Deallocation & Reserved Name Discovery (ADR-035).**
+  - Problem: When running `dist\lan-camera-streaming.exe` with `zrok2` installed, the executable reported `No existing reserved share found` or `Could not start reserved share '<token>'. Falling back to dynamic share...` because previously killed processes left orphaned backend share bindings holding the reserved name `lan` (`name 'lan' in namespace 'public' is in use by share '<token>'`), and dynamic fallback misreported the reserved URL for random dynamic shares.
+  - Cause: (1) `zrok2 overview` outputs formatted Unicode/ASCII text tables unless invoked with `--json`; (2) in `zrok2 overview --json`, registered reserved names reside in `data.names` (`{ name: 'lan', namespaceToken: 'public', reserved: true }`), while backend connections reside in `data.environments[].shares`; (3) when an existing backend share token was passed to `zrok2 share`, zrok2 rejected it with `name is in use by share`; (4) `cli.js` didn't clean up active share tokens on exit or before hosting.
+  - Solution: Implemented `isZrokV2()` and `cleanupStaleZrokShares()` in `zrok-helper.js` and `cli.js`. Updated overview parsing to extract registered names from `data.names` and normalize share tokens. Added pre-flight cleanup and conflict retries deleting orphaned backend shares via `zrok2 delete share <token>`. Updated exit handlers to always delete the active ephemeral share on termination, freeing `lan` for immediate subsequent runs.
+  - Verification: 5/5 unit tests passing in `tests/zrok-reserve.test.js`. Rebuilt `dist\lan-camera-streaming.exe`. Ran executable and confirmed immediate output: `Found existing reserved share 'lan' (https://lan.shares.zrok.io). Hosting on existing reserved share 'lan'...` with exact terminal QR code. Also verified pre-flight cleanup automatically released orphaned shares left after force-killing prior processes.
 - **2026-10-16 — Fix MSVC C++ Compiler Discovery in DirectShow Virtual Camera Driver Build (`vcam/build.bat`).**
   - Problem: `vcam/build.bat` failed during `build.bat` with `'cl.exe' is not recognized as an internal or external command` and `[ERROR] DirectShow C++ driver build failed` because the script hardcoded `C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat`. Systems equipped with Visual Studio Build Tools (`C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools`), Professional, Enterprise, or custom install paths failed to initialize MSVC.
   - Solution: Updated `vcam/build.bat` to first check if `cl.exe` is already in PATH. If not, it uses `vswhere.exe` to dynamically find `VC\Auxiliary\Build\vcvars64.bat` across any installed Visual Studio 2022/2019 product edition (Community, BuildTools, Professional, Enterprise) in both 64-bit and x86 Program Files directories, with hardcoded fallbacks if `vswhere` is absent.
@@ -108,6 +133,16 @@ Version: `package.json` is 1.0.33.
   - Problem & Cause: Browser CSP violations blocked loopback health checks (`http://127.0.0.1:8765/health`) and protocol deeplink framing (`lancam-control:`). Chrome PNA rejected requests from public zrok HTTPS tunnels to `127.0.0.1` without PNA response headers. Signaling socket was only connected on "Start Streaming", preventing pre-stream PIN generation and permanent password setting. Tab switching triggered `rejoinRoomAsSender()` repeatedly when viewer count was 0.
   - Solution: Added loopback addresses and `frame-src lancam-control: lancam:` to CSP in `src/server/server.js`. Added `Access-Control-Allow-Private-Network: true` to CORS preflight, GET, and POST in `LoopbackServer.cpp`. Allowed pre-stream control configuration in `signaling.js` with access PIN verification, and initialized Socket.IO on page load (`ensureSocket()`). Added user-gesture anchor fallback to deeplink launcher. Refined `visibilitychange` to guard rejoining behind `!hasJoinedRoom`.
   - Verification: Rebuilt embedded assets and native helper executable. All 176 Node.js unit/integration tests and native helper test suite passing with 0 errors.
+- **2026-10-18 — Dynamic Server-Derived Application Versioning (ADR-037).**
+  - Problem: The version badge displayed `v1.0.23` in sender and viewer headers despite the project version being `1.0.36`. The version string was static in `sender.html`, `viewer.html`, and hardcoded in `/api/discover`.
+  - Fix: Created `src/server/version.js` with `getAppVersion()` dynamically reading `package.json` (or `__APP_VERSION__` in standalone builds); exposed application version on `/api/version`, `/api/config`, `/api/discover`, and `/health`; updated `cli.js` to derive `APP_VERSION` from `getAppVersion()`; updated `scripts/build-embedded-assets.js` to compile `embeddedVersion`; created `initializeVersionBadge()` in `src/public/js/ui-utils.js` auto-hydrating `.brand-version` elements on DOM ready; updated `sender.js`, `viewer.js`, and `index.html` to dynamically set `v${data.version}`; added `.brand-version:empty { display: none; }` in `style.css` to prevent layout shifts.
+  - Verification: Rebuilt embedded assets via `node scripts/build-embedded-assets.js`. Added unit tests in `tests/server.test.js`, `tests/phase-b-features.test.js`, and `tests/viewer-layout-reconnect.test.js`. All 41 tested unit suites passing (204 total tests passing).
+- **2026-10-18 — In-Room WhatsApp-Style Chat Rejoin Deduplication & Persistent Client Identity (ADR-036 addendum).**
+  - Problem: When participants rejoined a room (via tab re-focus, mobile wake, network reconnection, or switching and re-entering), all past room messages duplicated in the chat stream, appeared as incoming from another user with unread badge increments and sound chimes.
+  - Root Cause: (1) `setRoom` re-emitted `chat:history` and `renderHistory` appended bubbles without checking for existing message IDs; (2) Reconnecting changed the client's `socket.id`, causing `msg.senderId === this.socket.id` to evaluate false and misidentifying own past messages as incoming.
+  - Fix: Implemented persistent client user ID in `localStorage` (`lancam_chat_user_id` / `getOrCreateUserId()`) transmitted as `senderUserId` in `chat:message` payloads; server preserves `senderUserId` in broadcast and history buffer; client maintains `renderedMessageIds = new Set()` and skips already-rendered message bubbles or system chips; own messages are recognized via `msg.senderUserId === this.userId` maintaining green outgoing styling even after socket reconnects; history loading passes `isHistory = true` preventing unread badge increments or chime sounds; `clearMessages()` resets container on room switch while preserving messages when reconnecting to the same room; detached stale socket listeners on socket instance re-binding.
+  - Rebuilt embedded assets via `node scripts/build-embedded-assets.js`.
+  - Added unit and signaling tests in `tests/chat-signaling.test.js` and `tests/chat-ui.test.js` (28/28 chat tests passing, 202 total tests passing).
 - **2026-10-16 — Distributed 3-System Remote Desktop Topology, Deeplink Auto-Launch & Inno Setup Distribution (ADR-032, Phase 6).**
   - Submodule `remote-control-helper`: Added HTTP health check (`GET /health`), CORS preflight, HTTP POST (`/input`), RFC 6455 WebSocket framing (`ws://127.0.0.1:8765`) via Windows WinCrypt SHA-1 + base64, single-instance mutex (`Local\LanCameraRemoteControlHelper_SingleInstance`), and automatic HKCU protocol registration (`lancam-control://`). Authored Inno Setup script `installer/control-helper.iss` generating standalone installer `control-helper-setup.exe` (1.89 MB).
   - Server & Distribution: Added `/download/control-helper-setup` routes in `src/server/server.js` and embedded installer support in `scripts/build-embedded-assets.js`.

@@ -7,6 +7,7 @@
 import { showError, clearError, showInfo, clearInfo, updateStatus, logDiagnostic, parseCandidateSummary, setupDiagnosticsControls, setPathIndicator, describePath, isLocalHostname, fetchLocalServerOrigin, updateVitals, captureFrameSnapshot, copyTextToClipboard, setupCollapsibleDrawer, setupPasswordToggle, StreamRecorder, StreamTransformController, parseUrlStreamParams, buildShareUrl } from './ui-utils.js';
 import { WebRtcPeer } from './webrtc-peer.js';
 import { calculateVideoRenderBox, translateScreenCoordinates } from './control-coords.js';
+import { getChatManager } from './chat.js';
 
 let webrtcPeer = null;
 let socket = null;
@@ -294,7 +295,21 @@ async function fetchIceServers() {
     const res = await fetch('/api/config');
     if (res.ok) {
       const data = await res.json();
+      if (data && data.version) {
+        const badges = document.querySelectorAll('.brand-version, #appVersionBadge');
+        badges.forEach((b) => {
+          b.textContent = `v${data.version}`;
+          b.setAttribute('title', `LAN Camera Streaming v${data.version}`);
+        });
+      }
       cachedIceServers = data.iceServers;
+      if (Array.isArray(cachedIceServers) && cachedIceServers.length > 0) {
+        const summary = cachedIceServers.map((s) => {
+          const urls = Array.isArray(s.urls) ? s.urls.join(', ') : s.urls;
+          return s.username ? `TURN(${urls})` : `STUN(${urls})`;
+        }).join('; ');
+        logDiagnostic(`[ICE] Loaded servers: ${summary}`, 'INFO');
+      }
       return cachedIceServers;
     }
   } catch (err) {
@@ -358,6 +373,7 @@ async function joinRoom() {
     socket = io();
     setupSocketListeners();
   }
+  getChatManager().setSocket(socket);
 
   socket.emit('room:join', { roomId, role: 'viewer', pin, mediaMode: currentMediaMode }, async (response) => {
     if (!response || !response.success) {
@@ -377,6 +393,8 @@ async function joinRoom() {
     activeViewerPin = pin;
     btnLeave.disabled = false;
     logDiagnostic(`Joined room "${roomId}" successfully [mode: ${response.mediaMode}].`);
+    getChatManager().setSocket(socket);
+    getChatManager().setRoom(roomId, 'viewer');
     sendQualityPriority();
 
     isHostControlEnabled = Boolean(response.controlState && response.controlState.enabled);
@@ -754,6 +772,8 @@ function createViewerPeer(iceServers) {
       socket.emit('room:join', { roomId: currentRoomId, role: 'viewer', pin: activeViewerPin, mediaMode: currentMediaMode }, (response) => {
         if (response && response.success) {
           logDiagnostic(`[AutoReconnect] Viewer rejoined room "${currentRoomId}" successfully.`, 'INFO');
+          getChatManager().setSocket(socket);
+          getChatManager().setRoom(currentRoomId, 'viewer');
           sendQualityPriority();
           isHostControlEnabled = Boolean(response.controlState && response.controlState.enabled);
           updateControlUIState();
@@ -887,6 +907,7 @@ function leaveRoom() {
   logDiagnostic('Leaving room...');
   isViewerSessionActive = false;
   activeViewerPin = null;
+  getChatManager().setRoom(null);
   stopStatsPolling();
 
   if (socket) {

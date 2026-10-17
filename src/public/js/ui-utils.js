@@ -633,3 +633,46 @@ export function buildShareUrl(targetPath, { roomId, pin, autostart = true }) {
   return url.toString();
 }
 
+/**
+ * Dynamically loads and sets the application version from the server into all version badges.
+ * @returns {Promise<string|null>}
+ */
+export async function initializeVersionBadge() {
+  if (typeof document === 'undefined') {
+    return null;
+  }
+  const badges = document.querySelectorAll('.brand-version, #appVersionBadge');
+  if (!badges || badges.length === 0) {
+    return null;
+  }
+
+  try {
+    const res = await fetch('/api/version');
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.version) {
+        const versionText = `v${data.version}`;
+        badges.forEach((badge) => {
+          badge.textContent = versionText;
+          badge.setAttribute('title', `LAN Camera Streaming ${versionText}`);
+        });
+        return data.version;
+      }
+    }
+  } catch (err) {
+    // Graceful fallback if network is unreachable
+  }
+  return null;
+}
+
+// Auto-run badge initialization on document readiness
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      initializeVersionBadge();
+    });
+  } else {
+    initializeVersionBadge();
+  }
+}
+

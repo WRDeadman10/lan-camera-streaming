@@ -15,7 +15,7 @@
     <header class="app-header">
       <div class="header-brand">
         <img src="/favicon.png" alt="Logo" class="brand-logo">
-        <span class="brand-title">LAN Camera <span class="brand-sub">Sender</span> <span class="brand-version">v1.0.23</span></span>
+        <span class="brand-title">LAN Camera <span class="brand-sub">Sender</span> <span class="brand-version" id="appVersionBadge"></span></span>
       </div>
       <div class="header-status">
         <span id="statusBadge" class="status-badge status-stopped">
@@ -505,6 +505,7 @@
   </div>
 
   <script src="/vendor/socket.io.js"></script>
+  <script type="module" src="/js/chat.js"></script>
   <script type="module" src="/js/sender.js"></script>
   <script type="module" src="/js/wallpaper.js"></script>
 </body>

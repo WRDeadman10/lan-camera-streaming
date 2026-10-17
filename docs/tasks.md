@@ -434,3 +434,57 @@ Decision: **ADR-025**.
 - [x] Eliminate spurious stream teardown/reconnect loops on tab focus (`visibilitychange`).
 - [x] Add prominent Remote Desktop Control card in viewer sidebar with request/release buttons, status badges, show/hide password toggle, and optional pre-join control PIN input.
 - [x] Rebuild embedded assets and verify all 176 test cases pass (176/176 passing).
+
+## P4.9 — zrok2 Compatibility & Reserved Name Discovery (ADR-035)
+
+- [x] Resolve `No existing reserved share found` and `unknown command "reserve" for "zrok2"` when running standalone executable or `start.ps1`.
+- [x] Implement dual-mode CLI version detection `isZrokV2()` in `src/server/zrok-helper.js` and `start.ps1`.
+- [x] Update overview JSON retrieval (`overview --json`) and parse both active shares (`environments[].shares`) and reserved names (`data.names`).
+- [x] Recognize existing reserved names (`lan` -> `public:lan` / `https://lan.shares.zrok.io`) and prioritize them in `findExistingShare`.
+- [x] Adapt share launching for zrok2: `zrok2 share public <target> -n <nameSelection> --backend-mode proxy --headless`.
+- [x] Adapt reservation and cleanup for zrok2: `zrok2 create name` / `zrok2 modify name -r` and `zrok2 delete share <token>`.
+- [x] Add unit tests in `tests/zrok-reserve.test.js` covering zrok2 JSON overview, name reservation extraction, and CLI version detection.
+- [x] Rebuild standalone executable `dist/lan-camera-streaming.exe` and verify live hosting on reserved share `lan` (`https://lan.shares.zrok.io`).
+
+## P4.10 — In-Room Real-Time WhatsApp-Style Chat System (ADR-036)
+
+- [x] Implement backend chat message validation, history buffer (bounded per room), and Socket.IO broadcast (`chat:message`, `chat:history`) in `src/server/signaling.js`.
+- [x] Implement client-side `src/public/js/chat.js` module:
+  - [x] Auto-name generator with friendly adjective-noun-number identifiers.
+  - [x] Local storage persistence (`lancam_chat_username`) and interactive display name editing.
+  - [x] Mute/unmute toggle with local storage persistence (`lancam_chat_muted`).
+  - [x] Floating action button with unread notification badge indicator dot.
+  - [x] Slide-out/slide-in panel with smooth CSS transition and backdrop overlay.
+  - [x] WhatsApp dark theme message bubbles (outgoing green, incoming slate, timestamp, double checkmarks, unique sender color tags).
+  - [x] Dimmed Unsplash random wallpaper background with dark overlay and wallpaper shuffle action.
+  - [x] Web Audio API subtle chime sound for unmuted incoming messages when panel is closed.
+- [x] Integrate chat into `src/public/sender.html`, `src/public/viewer.html`, `src/public/js/sender.js`, and `src/public/js/viewer.js`.
+- [x] Add WhatsApp chat styles to `src/public/css/style.css`.
+- [x] Rebuild embedded assets via `node scripts/build-embedded-assets.js`.
+- [x] Add comprehensive automated tests:
+  - [x] `tests/chat-signaling.test.js` for server signaling authorization and room broadcast.
+  - [x] `tests/chat-ui.test.js` for client auto-name, persistence, mute, unread badge, and message rendering.
+- [x] Mobile responsive chat design: 100dvh dynamic viewport, notch/home bar safe area insets, 16px iOS auto-zoom prevention, touch swipe-to-dismiss gesture, VisualViewport virtual keyboard pinning, and landscape compact mode.
+- [x] Rejoin and reconnect message deduplication & persistent client identity:
+  - [x] Generate and persist unique client ID (`lancam_chat_user_id` / `getOrCreateUserId()`) in `src/public/js/chat.js`.
+  - [x] Transmit `senderUserId` in `chat:message` socket payload and forward/preserve in server `src/server/signaling.js`.
+  - [x] Track `renderedMessageIds` Set in `ChatManager` and deduplicate message bubbles and system chips by ID.
+  - [x] Prevent duplicate history re-renders when rejoining room or auto-reconnecting on visibility/focus/wake.
+  - [x] Retain `outgoing` green bubble rendering for own past messages across socket ID changes via `senderUserId`.
+  - [x] Gate unread counter increment and notification sound so history loads never increment badge or trigger chimes.
+  - [x] Reset message container on room switch while preserving messages when reconnecting to the same room.
+- [x] Rebuild embedded assets via `node scripts/build-embedded-assets.js` and verify automated test suites (28/28 tests passing).
+- [x] Update documentation (`docs/decisions.md`, `docs/tasks.md`, `docs/ai_handoff.md`).
+
+## P4.11 — Dynamic Server-Derived Application Versioning (ADR-037)
+
+- [x] Create `src/server/version.js` providing `getAppVersion()` reading dynamically from `package.json`, `__APP_VERSION__` (esbuild define for SEA), and fallback.
+- [x] Expose application version in server endpoints: `/api/version`, `/api/config`, `/api/discover`, and `/health` in `src/server/server.js`.
+- [x] Update `cli.js` to derive `APP_VERSION` from `getAppVersion()`.
+- [x] Update `scripts/build-embedded-assets.js` to compile `embeddedVersion` from `package.json`.
+- [x] Add dynamic version badge loader `initializeVersionBadge()` in `src/public/js/ui-utils.js` running automatically on DOM ready.
+- [x] Update `src/public/js/sender.js` and `src/public/js/viewer.js` to hydrate version badges from `/api/config` responses.
+- [x] Remove hardcoded `v1.0.23` strings from `sender.html`, `viewer.html`, and `server.js`; add dynamic version badge to `index.html`.
+- [x] Add `.brand-version:empty { display: none; }` in `src/public/css/style.css` to prevent empty layout shifts.
+- [x] Add automated unit tests in `tests/server.test.js`, `tests/phase-b-features.test.js`, and `tests/viewer-layout-reconnect.test.js`.
+- [x] Rebuild embedded assets via `node scripts/build-embedded-assets.js`.
