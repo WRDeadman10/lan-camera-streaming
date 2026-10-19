@@ -427,3 +427,66 @@ A dedicated Unity Package Manager (UPM) package (`com.vcam.lancamera`):
 - `scripts/lan-camera-tray.ps1`: Docks LAN Camera into the Windows Notification Area with quick links to local viewer, phone sender, and RTSP stream info.
 - `scripts/register-autostart.ps1`: Configures `HKCU:\Software\Microsoft\Windows\CurrentVersion\Run` for auto-boot with `-Enable` and `-Disable` flags.
 
+## 17. Remote Desktop Control System & Native Helper Integration
+
+### 17.1 System Topology & Control Flow
+
+Remote desktop control operates exclusively during active desktop screen sharing sessions. Viewers watch the shared Windows screen feed and may request control by supplying either the host machine's permanent control password or the current screen-sharing session PIN.
+
+```mermaid
+flowchart TB
+    Viewer[Viewer Browser\nWebRTC Video + Mouse/Keyboard Event Capture]
+    Signaling[Node.js Server\nSignaling + RemoteControlManager]
+    Sender[Windows Sender Browser\nScreen Capture + Control DataChannel]
+    Helper[remote-control-helper\nNative C++ Daemon (SendInput)]
+
+    Viewer -->|1. control:request-lease (pwd or PIN)| Signaling
+    Signaling -->|2. Authorize lease & assign controller| Viewer
+    Signaling -->|3. control:lease-granted broadcast| Sender
+
+    Viewer <-->|4. Low-latency input: WebRTC DataChannel (lancam-control)| Sender
+    Viewer -.->|4b. Fallback: control:input via Socket.IO| Signaling
+    Signaling -.->|4b. Relay fallback input| Sender
+
+    Sender -->|5. Authenticated Loopback IPC (ws://127.0.0.1:8765)| Helper
+    Helper -->|6. Validated OS Input (SendInput)| WindowsOS[Windows Desktop OS]
+```
+
+### 17.2 Credential & Authorization Architecture
+
+Two distinct credentials can authorize remote control:
+1. **Permanent Control Password:**
+   - Configured on the sender's computer or server profile.
+   - Hashed using cryptographic `scrypt` with a cryptographically secure 16-byte salt; plaintext is never stored or transmitted in URLs/logs.
+   - Persisted across screen-sharing sessions and application restarts in `.control-auth.json` (or `%LOCALAPPDATA%/LanCamera/control-auth.json`).
+   - Reconfigurable via authenticated sender action with rate limiting against online guessing (5 failed attempts = 30s block).
+2. **Temporary Screen-Sharing Session PIN:**
+   - Automatically generated on-demand whenever a new screen-sharing session starts (`crypto.randomInt(100000, 1000000)`).
+   - Displayed in the sender interface with a quick copy button.
+   - Bound strictly to the active screen-sharing session; invalidated immediately upon stopping screen sharing or session reset.
+
+### 17.3 Single-Controller Lease State Machine
+
+1. **View-Only Default:** All joining viewers default to view-only mode. Remote input is ignored without an active lease.
+2. **Single Active Controller:** Exactly one viewer can own the control lease at any given time. Competing requests while a lease is active are rejected with a descriptive busy status.
+3. **Reconnection Grace Period (60 Seconds):**
+   - If the active controller disconnects unexpectedly, held keys and buttons are immediately released in the native helper to prevent stuck inputs.
+   - A 60-second reservation holds the lease. If the same viewer reconnects within 60 seconds, control resumes without re-authenticating.
+   - If the grace period expires, the reservation is released and becomes available to other viewers.
+4. **Immediate Revocation & Emergency Stop:**
+   - The sender UI provides instant "Revoke Control" and "Disable Remote Control" toggles.
+   - Terminating screen sharing revokes all leases, invalidates the session PIN, and instructs the native helper to release all inputs.
+
+### 17.4 Native Helper Submodule (`remote-control-helper`)
+
+A standalone C++ Windows desktop application mounted as a Git submodule:
+- **Zero Elevation:** Runs under normal user permissions without administrator elevation. Does not bypass secure desktop screens (UAC, Ctrl+Alt+Del, login screen).
+- **Loopback IPC:** Binds strictly to `127.0.0.1:8765`, protected by session token handshake; never exposed on LAN or public interfaces.
+- **Input Validation:** Enforces normalized coordinate bounds `[0.0, 1.0]`, valid mouse button enumerations (`left`, `right`, `middle`), and validated key codes.
+- **Safety Tracking:** Tracks all currently depressed keys and buttons; guarantees complete release upon client disconnect, session termination, revocation, or emergency stop.
+
+### 17.5 Coordinate Mapping & Input Transport
+
+- **Normalized Video Mapping:** The viewer translates mouse coordinates relative to the actual rendered video content rectangle (compensating for letterboxing, aspect ratios, and CSS scaling) into normalized `[0.0, 1.0]` floats.
+- **WebRTC DataChannel (`lancam-control`):** Input messages (movement, clicks, drags, key presses) travel directly between controller viewer and sender peer via an ordered, low-latency DataChannel with Socket.IO relay fallback.
+

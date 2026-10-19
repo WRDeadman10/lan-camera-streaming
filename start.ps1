@@ -110,6 +110,197 @@ function Show-TerminalQr {
     }
 }
 
+function Get-ZrokShares {
+    param([string]$BinaryPath)
+    try {
+        $raw = cmd /c "`"$BinaryPath`" overview --json 2>nul"
+        if (-not $raw) {
+            $raw = cmd /c "`"$BinaryPath`" overview 2>nul"
+        }
+        if (-not $raw) { return @() }
+        $str = $raw -join "`n"
+        $sIdx = $str.IndexOf('{')
+        $eIdx = $str.LastIndexOf('}')
+        if ($sIdx -ge 0 -and $eIdx -gt $sIdx) {
+            $jsonStr = $str.Substring($sIdx, $eIdx - $sIdx + 1)
+            $parsed = $jsonStr | ConvertFrom-Json -ErrorAction SilentlyContinue
+            $shares = @()
+            if ($parsed.environments) {
+                foreach ($env in $parsed.environments) {
+                    if ($env.shares) {
+                        foreach ($s in $env.shares) {
+                            $target = if ($s.target) { $s.target } else { $s.backendProxyEndpoint }
+                            $ep = if ($s.frontendEndpoint) {
+                                $s.frontendEndpoint
+                            } elseif ($s.frontendEndpoints -and $s.frontendEndpoints.Count -gt 0) {
+                                if ($s.frontendEndpoints[0].StartsWith("http")) { $s.frontendEndpoints[0] } else { "https://$($s.frontendEndpoints[0])" }
+                            } else {
+                                "https://$($s.shareToken).share.zrok.io"
+                            }
+                            $nameObj = $null
+                            if ($parsed.names) {
+                                $nameObj = $parsed.names | Where-Object { $_.name -eq $s.shareToken -or $_.shareToken -eq $s.shareToken } | Select-Object -First 1
+                            }
+                            $isRes = ($s.reserved -eq $true -or ($nameObj -and $nameObj.reserved -eq $true))
+                            $nsToken = if ($nameObj -and $nameObj.namespaceToken) { $nameObj.namespaceToken } else { "public" }
+                            $nameStr = if ($nameObj -and $nameObj.name) { $nameObj.name } else { $s.shareToken }
+
+                            $shareObj = [PSCustomObject]@{
+                                shareToken = $s.shareToken
+                                name = $nameStr
+                                namespaceToken = $nsToken
+                                nameSelection = if ($nameObj) { "$nsToken`:$nameStr" } elseif ($isRes) { "public:$($s.shareToken)" } else { $null }
+                                backendProxyEndpoint = $target
+                                target = $target
+                                frontendEndpoint = $ep
+                                reserved = $isRes
+                                isNamedReservation = [bool]($nameObj -and $nameObj.reserved -eq $true)
+                            }
+                            $shares += $shareObj
+                        }
+                    }
+                }
+            }
+            if ($parsed.names) {
+                foreach ($n in $parsed.names) {
+                    if ($n.reserved -eq $true) {
+                        $existing = $shares | Where-Object { $_.shareToken -eq $n.shareToken -or $_.name -eq $n.name } | Select-Object -First 1
+                        $nsName = if ($n.namespaceName) { $n.namespaceName } else { "shares.zrok.io" }
+                        $nsToken = if ($n.namespaceToken) { $n.namespaceToken } else { "public" }
+                        $token = if ($n.shareToken -and $n.shareToken -ne "-") { $n.shareToken } else { $n.name }
+                        $ep = "https://$($n.name).$nsName"
+                        if (-not $existing) {
+                            $shares += [PSCustomObject]@{
+                                shareToken = $token
+                                name = $n.name
+                                namespaceToken = $nsToken
+                                nameSelection = "$nsToken`:$($n.name)"
+                                backendProxyEndpoint = ""
+                                target = ""
+                                frontendEndpoint = $ep
+                                reserved = $true
+                                isNamedReservation = $true
+                            }
+                        } else {
+                            $existing.reserved = $true
+                            $existing.name = $n.name
+                            $existing.nameSelection = "$nsToken`:$($n.name)"
+                            $existing.isNamedReservation = $true
+                            if (-not $existing.frontendEndpoint) {
+                                $existing.frontendEndpoint = $ep
+                            }
+                        }
+                    }
+                }
+            }
+            return $shares
+        }
+    } catch {}
+    return @()
+}
+
+function Find-ExistingZrokShare {
+    param(
+        [array]$Shares,
+        [string]$Port
+    )
+    if (-not $Shares -or $Shares.Count -eq 0) { return $null }
+
+    # 1. Reserved share targeting our port
+    foreach ($s in $Shares) {
+        $endpoint = if ($s.backendProxyEndpoint) { $s.backendProxyEndpoint } else { $s.target }
+        if ($s.reserved -eq $true -and $endpoint -and $endpoint -match ":$Port") {
+            return $s
+        }
+    }
+    # 2. Explicitly reserved named share for 'lan'
+    foreach ($s in $Shares) {
+        if ($s.reserved -eq $true -and ($s.name -eq 'lan' -or $s.shareToken -eq 'lan')) {
+            return $s
+        }
+    }
+    # 3. Any reserved share
+    foreach ($s in $Shares) {
+        if ($s.reserved -eq $true) {
+            return $s
+        }
+    }
+    # 4. Any share targeting our port
+    foreach ($s in $Shares) {
+        $endpoint = if ($s.backendProxyEndpoint) { $s.backendProxyEndpoint } else { $s.target }
+        if ($endpoint -and $endpoint -match ":$Port") {
+            return $s
+        }
+    }
+    return $Shares[0]
+}
+
+function Reserve-NewZrokShare {
+    param(
+        [string]$BinaryPath,
+        [string]$Target
+    )
+    $suffixes = @('stream', 'live', 'cam', 'view', 'feed', 'hub', 'node', 'air', 'cast', 'lens', 'scope', 'link')
+    $candidates = @('lancam', 'lancamera')
+    foreach ($s in $suffixes) {
+        $candidates += "lancam$s"
+    }
+    for ($i = 0; $i -lt 5; $i++) {
+        $rand = (-join ((97..122) | Get-Random -Count 4 | ForEach-Object { [char]$_ }))
+        $candidates += "lancam$rand"
+    }
+
+    $isV2 = ($BinaryPath -match "zrok2(\.exe)?$" -or (cmd /c "`"$BinaryPath`" version 2>&1") -match "zrok2|v2\.")
+
+    if ($isV2) {
+        foreach ($word in $candidates) {
+            Write-Host "Attempting to reserve share name '$word'..." -ForegroundColor Cyan
+            cmd /c "`"$BinaryPath`" create name $word -n public 2>&1" | Out-Null
+            $modOut = cmd /c "`"$BinaryPath`" modify name $word -r -n public 2>&1"
+            $modStr = $modOut -join "`n"
+            if ($modStr -match "now reserved" -or $LASTEXITCODE -eq 0) {
+                Write-Host "Successfully reserved share '$word'!" -ForegroundColor Green
+                return @{ token = $word; name = $word; nameSelection = "public:$word"; url = "https://$word.shares.zrok.io" }
+            }
+            Write-Host "Could not reserve '$word'. Generating another name..." -ForegroundColor Yellow
+        }
+        return $null
+    }
+
+    # Legacy zrok v0.4.x reservation
+    foreach ($word in $candidates) {
+        Write-Host "Attempting to reserve share name '$word'..." -ForegroundColor Cyan
+        $out = cmd /c "`"$BinaryPath`" reserve public `"$Target`" -n `"$word`" --backend-mode proxy --json-output 2>&1"
+        $outStr = $out -join "`n"
+        $sIdx = $outStr.IndexOf('{')
+        $eIdx = $outStr.LastIndexOf('}')
+        if ($sIdx -ge 0 -and $eIdx -gt $sIdx) {
+            $parsed = $outStr.Substring($sIdx, $eIdx - $sIdx + 1) | ConvertFrom-Json -ErrorAction SilentlyContinue
+            if ($parsed -and $parsed.token) {
+                Write-Host "Successfully reserved share '$($parsed.token)'!" -ForegroundColor Green
+                $ep = if ($parsed.frontend_endpoints -and $parsed.frontend_endpoints.Count -gt 0) { $parsed.frontend_endpoints[0] } else { "https://$($parsed.token).share.zrok.io" }
+                return @{ token = $parsed.token; name = $word; nameSelection = "public:$word"; url = $ep }
+            }
+        }
+        Write-Host "Could not reserve '$word'. Generating another name..." -ForegroundColor Yellow
+    }
+
+    Write-Host "Reserving public share with auto-generated name..." -ForegroundColor Cyan
+    $out = cmd /c "`"$BinaryPath`" reserve public `"$Target`" --backend-mode proxy --json-output 2>&1"
+    $outStr = $out -join "`n"
+    $sIdx = $outStr.IndexOf('{')
+    $eIdx = $outStr.LastIndexOf('}')
+    if ($sIdx -ge 0 -and $eIdx -gt $sIdx) {
+        $parsed = $outStr.Substring($sIdx, $eIdx - $sIdx + 1) | ConvertFrom-Json -ErrorAction SilentlyContinue
+        if ($parsed -and $parsed.token) {
+            Write-Host "Successfully reserved share '$($parsed.token)'!" -ForegroundColor Green
+            $ep = if ($parsed.frontend_endpoints -and $parsed.frontend_endpoints.Count -gt 0) { $parsed.frontend_endpoints[0] } else { "https://$($parsed.token).share.zrok.io" }
+            return @{ token = $parsed.token; name = $parsed.token; nameSelection = "public:$($parsed.token)"; url = $ep }
+        }
+    }
+    return $null
+}
+
 # A user-supplied certificate (HTTPS_CERT_PATH / HTTPS_KEY_PATH in .env) is honoured only without the
 # tunnel, because zrok proxies plain HTTP to the local server.
 if (-not $LocalOnly) {
@@ -232,53 +423,73 @@ if ($LocalOnly) {
     exit 0
 }
 
-# 5. Pre-flight cleanup of any stale shares
-Write-Host "Checking for stale zrok shares..." -ForegroundColor Cyan
-cmd /c "`"$zrokBinary`" delete share public:lan 2>&1" | Out-Null
-
-$overviewOut = cmd /c "`"$zrokBinary`" overview 2>&1"
-$overviewLines = $overviewOut -split "`n"
-foreach ($line in $overviewLines) {
-    if ($line -match "http://127\.0\.0\.1:$port" -and $line -match "([a-z0-9]{10,16})") {
-        $staleToken = $matches[1]
-        Write-Host "Cleaning up stale share token '$staleToken'..." -ForegroundColor Yellow
-        cmd /c "`"$zrokBinary`" delete share $staleToken 2>&1" | Out-Null
-    }
-}
-
-# 6. Launch zrok public share with reserved name
-Write-Host ""
-Write-Host "Starting zrok public share for $targetUrl..." -ForegroundColor Cyan
+# 5. Check if already any reserved share exists or reserve a new one
+Write-Host "Configuring zrok public share for $targetUrl..." -ForegroundColor Cyan
 
 $activeShareUrl = $null
 $activeShareToken = $null
-$useReserved = $true
+$isReserved = $false
 
-$zrokShareProcess = Start-Process -FilePath $zrokBinary -ArgumentList "share public $targetUrl -n public:lan --backend-mode proxy --headless" -PassThru -NoNewWindow
-Start-Sleep -Seconds 2
+$existingShares = Get-ZrokShares -BinaryPath $zrokBinary
+$chosenShare = Find-ExistingZrokShare -Shares $existingShares -Port $port
 
-if ($zrokShareProcess.HasExited) {
-    Write-Warning "Could not bind to reserved name 'public:lan'. Starting dynamic public share..."
-    $useReserved = $false
+if ($chosenShare) {
+    $activeShareToken = $chosenShare.shareToken
+    $activeShareUrl = if ($chosenShare.frontendEndpoint) { $chosenShare.frontendEndpoint } else { "https://$activeShareToken.share.zrok.io" }
+    $isReserved = $true
+    Write-Host "Found existing reserved share '$activeShareToken' ($activeShareUrl)." -ForegroundColor Green
+    Write-Host "Hosting on existing reserved share '$activeShareToken'..." -ForegroundColor Cyan
+} else {
+    Write-Host "No existing reserved share found. Reserving a new share for future runs..." -ForegroundColor Cyan
+    $newRes = Reserve-NewZrokShare -BinaryPath $zrokBinary -Target $targetUrl
+    if ($newRes) {
+        $activeShareToken = $newRes.token
+        $activeShareUrl = $newRes.url
+        $isReserved = $true
+        Write-Host "Hosting on newly reserved share '$activeShareToken'..." -ForegroundColor Cyan
+    }
+}
+
+# 6. Launch zrok share
+$isV2 = ($zrokBinary -match "zrok2(\.exe)?$" -or (cmd /c "`"$zrokBinary`" version 2>&1") -match "zrok2|v2\.")
+if ($activeShareToken) {
+    $nSel = if ($chosenShare.nameSelection) { $chosenShare.nameSelection } else { "public:$activeShareToken" }
+    $argList = if ($isV2) {
+        "share public $targetUrl -n $nSel --backend-mode proxy --headless"
+    } elseif ($chosenShare.isNamedReservation) {
+        "share public $targetUrl -n $nSel --backend-mode proxy --headless"
+    } else {
+        "share reserved $activeShareToken --override-endpoint $targetUrl --headless"
+    }
+    $zrokShareProcess = Start-Process -FilePath $zrokBinary -ArgumentList $argList -PassThru -NoNewWindow
+    Start-Sleep -Seconds 2
+
+    if ($zrokShareProcess.HasExited) {
+        Write-Warning "Could not start reserved share '$activeShareToken'. Falling back to dynamic public share..."
+        $activeShareToken = $null
+        $activeShareUrl = $null
+        $isReserved = $false
+    }
+}
+
+if (-not $activeShareToken) {
+    Write-Host "Starting dynamic public share..." -ForegroundColor Cyan
     $zrokShareProcess = Start-Process -FilePath $zrokBinary -ArgumentList "share public $targetUrl --backend-mode proxy --headless" -PassThru -NoNewWindow
-    
+
     # Poll overview for the newly created dynamic share token targeting our port
     $attempts = 0
     while ($attempts -lt 15 -and -not $activeShareUrl) {
         Start-Sleep -Seconds 1
         $attempts++
-        $ov = cmd /c "`"$zrokBinary`" overview 2>&1"
-        $ovLines = $ov -split "`n"
-        foreach ($l in $ovLines) {
-            if ($l -match "http://127\.0\.0\.1:$port" -and $l -match "([a-z0-9]{10,16})") {
-                $activeShareToken = $matches[1]
-                $activeShareUrl = "https://$activeShareToken.shares.zrok.io"
-                break
-            }
+        $shares = Get-ZrokShares -BinaryPath $zrokBinary
+        $match = $shares | Where-Object { ($_.backendProxyEndpoint -and $_.backendProxyEndpoint -match ":$port") -or ($_.target -and $_.target -match ":$port") } | Select-Object -Last 1
+        if (-not $match -and $shares.Count -gt 0) { $match = $shares[-1] }
+        if ($match -and $match.shareToken) {
+            $activeShareToken = $match.shareToken
+            $activeShareUrl = if ($match.frontendEndpoint) { $match.frontendEndpoint } else { "https://$($match.shareToken).share.zrok.io" }
+            break
         }
     }
-} else {
-    $activeShareUrl = "https://lan.shares.zrok.io"
 }
 
 # 7. Display QR Code and URLs for Phone Access
@@ -313,19 +524,12 @@ try {
         Stop-Process -Id $zrokShareProcess.Id -Force -ErrorAction SilentlyContinue
     }
 
-    Write-Host "Releasing share endpoints from zrok cloud controller..." -ForegroundColor Cyan
-    cmd /c "`"$zrokBinary`" delete share public:lan 2>&1" | Out-Null
-    if ($activeShareToken) {
-        cmd /c "`"$zrokBinary`" delete share $activeShareToken 2>&1" | Out-Null
-    }
-
-    # Also clean any share targeting our port
-    $ovAfter = cmd /c "`"$zrokBinary`" overview 2>&1"
-    $ovAfterLines = $ovAfter -split "`n"
-    foreach ($line in $ovAfterLines) {
-        if ($line -match "http://127\.0\.0\.1:$port" -and $line -match "([a-z0-9]{10,16})") {
-            $remToken = $matches[1]
-            cmd /c "`"$zrokBinary`" delete share $remToken 2>&1" | Out-Null
+    if (-not $isReserved -and $activeShareToken) {
+        Write-Host "Releasing dynamic share endpoint '$activeShareToken'..." -ForegroundColor Cyan
+        if ($isV2) {
+            cmd /c "`"$zrokBinary`" delete share $activeShareToken 2>&1" | Out-Null
+        } else {
+            cmd /c "`"$zrokBinary`" release $activeShareToken 2>&1" | Out-Null
         }
     }
 
@@ -333,7 +537,7 @@ try {
         Write-Host "Stopping background Node.js server (PID: $($serverProcess.Id))..." -ForegroundColor Cyan
         Stop-Process -Id $serverProcess.Id -Force -ErrorAction SilentlyContinue
     }
-    Write-Host "Shutdown complete. Endpoints released." -ForegroundColor Green
+    Write-Host "Shutdown complete. Resources released." -ForegroundColor Green
 }
 
 

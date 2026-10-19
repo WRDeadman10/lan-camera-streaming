@@ -100,5 +100,45 @@ describe('Viewer Layout and Reconnect Memory Verification', () => {
     assert.match(viewerJs, /classList\.toggle\('is-fullscreen'/, 'viewer.js must toggle is-fullscreen class');
     assert.match(viewerJs, /videoWrapper\.addEventListener\('dblclick'/, 'viewer.js must toggle fullscreen on double-click');
   });
+
+  test('viewer.html and sender.html provide dynamic brand-version badges without hardcoded version strings', () => {
+    const senderHtml = fs.readFileSync(path.resolve(__dirname, '../src/public/sender.html'), 'utf8');
+    const viewerHtml = fs.readFileSync(path.resolve(__dirname, '../src/public/viewer.html'), 'utf8');
+
+    assert.doesNotMatch(senderHtml, /v1\.0\.23/, 'sender.html must not contain hardcoded v1.0.23');
+    assert.doesNotMatch(viewerHtml, /v1\.0\.23/, 'viewer.html must not contain hardcoded v1.0.23');
+
+    assert.match(senderHtml, /class="brand-version"/, 'sender.html must have brand-version badge element');
+    assert.match(viewerHtml, /class="brand-version"/, 'viewer.html must have brand-version badge element');
+  });
+
+  test('initializeVersionBadge populates DOM badge with dynamic version from /api/version', async () => {
+    const { initializeVersionBadge } = await import('../src/public/js/ui-utils.js');
+    const { getAppVersion } = await import('../src/server/version.js');
+
+    assert.equal(getAppVersion(), '1.0.36');
+
+    const dom = new JSDOM('<!DOCTYPE html><html><body><span class="brand-version" id="appVersionBadge"></span></body></html>');
+    global.window = dom.window;
+    global.document = dom.window.document;
+
+    // Mock fetch for /api/version
+    global.fetch = async (url) => {
+      if (url === '/api/version') {
+        return {
+          ok: true,
+          json: async () => ({ version: '1.0.36' })
+        };
+      }
+      return { ok: false };
+    };
+
+    const ver = await initializeVersionBadge();
+    assert.equal(ver, '1.0.36');
+
+    const badge = dom.window.document.getElementById('appVersionBadge');
+    assert.equal(badge.textContent, 'v1.0.36');
+    assert.equal(badge.getAttribute('title'), 'LAN Camera Streaming v1.0.36');
+  });
 });
 

@@ -1,11 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { embeddedAssets } from '../src/server/embedded-assets.js';
 import { loadConfig } from '../src/server/config.js';
 import { Logger } from '../src/server/logger.js';
 import { createServer } from '../src/server/server.js';
 import { setupSignaling } from '../src/server/signaling.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 test('loadConfig validates default configuration', () => {
   const config = loadConfig({});
@@ -89,6 +94,7 @@ test('createServer responds to /health and /api/config', async () => {
     assert.equal(healthRes.status, 200);
     const healthJson = await healthRes.json();
     assert.equal(healthJson.status, 'ok');
+    assert.equal(healthJson.version, '1.0.36');
     assert.ok(typeof healthJson.uptime === 'number');
 
     // Check config endpoint
@@ -96,8 +102,15 @@ test('createServer responds to /health and /api/config', async () => {
     assert.equal(configRes.status, 200);
     const configJson = await configRes.json();
     assert.ok(Array.isArray(configJson.iceServers));
+    assert.equal(configJson.version, '1.0.36');
     // Verify ACCESS_PIN is not leaked
     assert.equal(configJson.accessPin, undefined);
+
+    // Check version endpoint
+    const versionRes = await fetch(`${baseUrl}/api/version`);
+    assert.equal(versionRes.status, 200);
+    const versionJson = await versionRes.json();
+    assert.equal(versionJson.version, '1.0.36');
   } finally {
     await new Promise((resolve) => httpServer.close(resolve));
   }
@@ -169,6 +182,36 @@ test('createServer sends comprehensive Content-Security-Policy allowing inline s
     assert.ok(csp.includes('data:'), 'CSP img-src must allow data: URIs');
     assert.ok(csp.includes('blob:'), 'CSP img-src and media-src must allow blob: URIs');
     assert.ok(csp.includes('mediastream:'), 'CSP media-src must allow mediastream:');
+    assert.ok(csp.includes('127.0.0.1'), 'CSP connect-src must allow loopback 127.0.0.1 for native helper');
+    assert.ok(csp.includes('lancam-control:'), 'CSP frame-src must allow lancam-control: protocol');
+  } finally {
+    await new Promise((resolve) => httpServer.close(resolve));
+  }
+});
+
+test('remote control helper installer is downloadable when built', async (t) => {
+  const installerPath = path.resolve(__dirname, '../remote-control-helper/build/installer/control-helper-setup.exe');
+  const hasInstaller = fs.existsSync(installerPath) || Boolean(embeddedAssets['/download/control-helper-setup.exe']);
+  if (!hasInstaller) {
+    t.skip('control-helper-setup.exe has not been built');
+    return;
+  }
+
+  const config = loadConfig({ PORT: '3007' });
+  const logger = new Logger('error');
+  const { httpServer } = createServer(config, logger);
+  await new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+  const address = httpServer.address();
+
+  try {
+    for (const route of ['/download/control-helper-setup', '/download/control-helper-setup.exe']) {
+      const res = await fetch(`http://127.0.0.1:${address.port}${route}`);
+      assert.equal(res.status, 200);
+      assert.match(res.headers.get('content-disposition'), /control-helper-setup\.exe/i);
+      const bytes = Buffer.from(await res.arrayBuffer());
+      assert.equal(bytes.subarray(0, 2).toString('latin1'), 'MZ');
+      assert.ok(bytes.length > 500000);
+    }
   } finally {
     await new Promise((resolve) => httpServer.close(resolve));
   }

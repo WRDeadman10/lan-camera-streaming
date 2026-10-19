@@ -27,6 +27,7 @@ test('Discovery endpoint /api/discover returns service info and hostname', async
     assert.equal(data.service, 'lan-camera-streaming');
     assert.equal(typeof data.hostname, 'string');
     assert.equal(data.protocol, 'http');
+    assert.equal(data.version, '1.0.36');
   } finally {
     mdnsBeacon?.stop();
     await new Promise((resolve) => httpServer.close(resolve));

@@ -611,8 +611,9 @@ export function parseUrlStreamParams() {
   const roomId = urlParams.get('room') || urlParams.get('roomId') || '';
   const pin = urlParams.get('pin') || '';
   const mode = urlParams.get('mode') || '';
+  const controlPin = urlParams.get('controlPin') || urlParams.get('control') || '';
   const autostart = urlParams.get('autostart') === '1' || urlParams.get('autostart') === 'true';
-  return { roomId, pin, mode, autostart };
+  return { roomId, pin, mode, controlPin, autostart };
 }
 
 /**
@@ -630,5 +631,48 @@ export function buildShareUrl(targetPath, { roomId, pin, autostart = true }) {
     url.searchParams.set('autostart', '1');
   }
   return url.toString();
+}
+
+/**
+ * Dynamically loads and sets the application version from the server into all version badges.
+ * @returns {Promise<string|null>}
+ */
+export async function initializeVersionBadge() {
+  if (typeof document === 'undefined') {
+    return null;
+  }
+  const badges = document.querySelectorAll('.brand-version, #appVersionBadge');
+  if (!badges || badges.length === 0) {
+    return null;
+  }
+
+  try {
+    const res = await fetch('/api/version');
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.version) {
+        const versionText = `v${data.version}`;
+        badges.forEach((badge) => {
+          badge.textContent = versionText;
+          badge.setAttribute('title', `LAN Camera Streaming ${versionText}`);
+        });
+        return data.version;
+      }
+    }
+  } catch (err) {
+    // Graceful fallback if network is unreachable
+  }
+  return null;
+}
+
+// Auto-run badge initialization on document readiness
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      initializeVersionBadge();
+    });
+  } else {
+    initializeVersionBadge();
+  }
 }
 

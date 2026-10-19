@@ -203,3 +203,16 @@ Delivered: Inno Setup installer `lan-camera-setupv<version>.exe` (install, upgra
 1. Verify virtual camera and RTSP bridge on hardware with external surveillance clients (OBS Media Source, VLC, Milestone).
 2. Clean-machine VM verification of the Inno Setup installer.
 3. Code-sign installer and executables when releasing public distribution builds.
+
+## Phase 15 — Remote Desktop Control Integration (ADR-031)
+
+**Objective:** Enable an authorized viewer to control a Windows desktop host with mouse and keyboard during screen sharing.
+
+Tasks:
+- Establish the native C++ `remote-control-helper` Git submodule with `SendInput` OS injection on loopback `127.0.0.1:8765`.
+- Implement `RemoteControlManager` in Node.js server managing permanent password verification, 6-digit session PIN generation, rate limiting, and single-controller lease lifecycle.
+- Add reconnection grace period (60s) for interrupted controllers to resume without re-authenticating.
+- Integrate WebRTC DataChannel (`lancam-control`) for low-latency input transport with Socket.IO relay fallback.
+- Implement normalized coordinate mapping in viewer accounting for letterboxing and aspect ratio.
+- Implement sender controls: session PIN display with copy button, control enable/disable toggle, and immediate revocation.
+- Add automated unit tests for credential verification, lease transitions, rate-limiting, and native input mapping.

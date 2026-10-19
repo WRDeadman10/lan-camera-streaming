@@ -15,7 +15,7 @@
     <header class="app-header">
       <div class="header-brand">
         <img src="/favicon.png" alt="LAN Camera Logo" class="brand-logo">
-        <span class="brand-title">LAN Camera <span class="brand-sub">Hub</span></span>
+        <span class="brand-title">LAN Camera <span class="brand-sub">Hub</span> <span class="brand-version" id="appVersionBadge"></span></span>
       </div>
       <div class="header-status">
         <span class="hub-pill">P2P WebRTC Ready</span>
@@ -208,6 +208,18 @@
           const netData = await netRes.json();
           if (localViewerInline) {
             localViewerInline.textContent = `${netData.protocol}://localhost:${netData.port}/viewer`;
+          }
+        }
+      } catch (e) {}
+
+      try {
+        const verRes = await fetch('/api/version');
+        if (verRes.ok) {
+          const verData = await verRes.json();
+          const badge = document.getElementById('appVersionBadge') || document.querySelector('.brand-version');
+          if (badge && verData && verData.version) {
+            badge.textContent = `v${verData.version}`;
+            badge.setAttribute('title', `LAN Camera Streaming v${verData.version}`);
           }
         }
       } catch (e) {}
