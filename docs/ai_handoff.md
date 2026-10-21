@@ -40,6 +40,7 @@ The project is feature-complete across all 16 proposed ecosystem phases and veri
 | Ubuntu 24.04 & POSIX Linux Hosting Supervisor (`start.sh`, ADR-039) | **Delivered**: `start.sh` mirroring `start.ps1` with bash shebang, strict LF line endings, `--local-only` / `-LocalOnly` / `-l` flags, Ubuntu network discovery (`hostname -I`, `ip -4 addr`), safe `.env` loading, zrok tunnel management, terminal QR codes, and process cleanup traps |
 | Mobile Viewport Gesture Isolation & Feed Panning (ADR-040) | **Delivered**: CSS `touch-action: none` on `.video-container`, `#videoWrapper`, `#remoteVideo`, and `#remoteCanvas`; active gesture listeners (`{ passive: false }`); `e.preventDefault()` on 2-finger pinch and drag; single-finger feed panning when `scale > 1.0`; touchpad pointer drag isolation; Safari gesture suppression |
 | WebRTC mDNS Local IP Concealment Detection & Multi-Browser Guidance (ADR-041) | **Delivered**: Automatic detection of Windows mDNS local IP concealment; browser vendor & flag scheme detection (Comet, Edge, Brave, Opera, Vivaldi, Arc, Chrome); dismissible warning banner; interactive guidance modal with copyable flag URL & live retest; 233/233 tests passing |
+| Viewport Controls Ribbon & Mobile Swipe Ribbon (ADR-043) | **Delivered**: Relocated `.video-hud` outside video wrapper to eliminate obstruction of Windows window controls; horizontal touch-scrollable ribbon on mobile (`overflow-x: auto; flex-shrink: 0`); eliminated duplicate charging icon (`⚡ 100%`); 237/237 tests passing |
 | Mobile Touchpad Edge Auto-Pan & Gesture Disambiguation (ADR-042) | **Delivered**: Zoom-aware edge auto-pan ("push-to-pan") dragging viewport when cursor reaches screen boundary until host screen edges are reached; single-tap click in mouse mode without coordinate jumping; two-finger parallel vertical scroll isolated from pinch-to-zoom; browser double-tap viewport zoom suppression; 237/237 tests passing |
 | Automated tests | 237/237 pass (`node --test`) |
 
@@ -96,7 +97,13 @@ Version: `package.json` is 1.0.36.
 
 ## Modified files (last iteration, 2026-10-21)
 
-- `src/public/js/mobile-control.js`: Implemented edge auto-pan when zoomed in (`scale > 1.01`), tap click without pointer jump in mouse mode, two-finger wheel scroll disambiguation, and cursor overlay screen clamping.
-- `src/public/js/zoom-controller.js`: Implemented two-finger gesture disambiguation (`pending`, `pinch`, `scroll`) when remote control is active.
-- `src/public/js/viewer.js`: Updated `bindDesktopPointerControls` to reject synthetic/touch events (`isTouchOrSynthetic`) and guarded `videoWrapper` `dblclick` fullscreen toggle.
-- `tests/mobile-control-ui.test.js`: Added 4 automated unit test cases (tap coordinate preservation, edge auto-pan triggering and boundary stop, two-finger parallel scroll isolation, and pinch zoom isolation).
+- `src/public/viewer.html`: Moved `.video-hud` outside `#videoWrapper` into `.viewport-pane` so remote desktop top-right controls (Minimize, Maximize, Close) are completely unobstructed.
+- `src/public/css/style.css`: Added responsive horizontal ribbon styling for `.viewport-pane > .video-hud` with touch-scrolling (`overflow-x: auto; -webkit-overflow-scrolling: touch`), non-shrinking action buttons, and mobile padding.
+- `src/public/js/viewer.js`: Fixed duplicate charging lightning bolt symbol in `socket.on('sender:battery')`.
+- `tests/viewer-layout-reconnect.test.js`: Updated layout test to assert `.video-hud` is in `.viewport-pane` as a direct child and strictly absent from `#videoWrapper`.
+- `docs/decisions.md`: Documented ADR-043.
+- `docs/tasks.md`: Added and marked P4.17 complete.
+- `docs/roadmap.md`: Added Phase 21.
+- `docs/architecture.md`: Added Section 21 detailing Viewport Controls Ribbon architecture.
+- `docs/project-overview.md`: Added Viewport Controls Ribbon and Mobile Swipe Action Bar overview.
+- `docs/ai_handoff.md`: Updated current status and modified files log.

@@ -604,3 +604,17 @@ When zoomed in (`scale > 1.0`), the mobile viewport renders a localized sub-regi
 - Multi-touch starts in `twoFingerMode = 'pending'`.
 - If finger separation delta `|currentDist - initialDist| > 20px`, locks to `pinch` (`ZoomController` scales feed; wheel events suppressed).
 - If fingers travel vertically in parallel in the same direction (`> 10px`, distance variation `< 18px`), locks to `scroll` (`MobileRemoteController` dispatches `mouse_wheel` packets while zoom scale remains constant).
+
+## 21. Viewport Controls Ribbon & Mobile Action Bar Architecture (ADR-043)
+
+### 21.1 Unobstructed Remote Desktop Feed Placement
+Previous iterations positioned the floating `.video-hud` within `#videoWrapper` at `top: 10px; right: 10px`. When streaming a Windows desktop or controlling windows remotely, the floating HUD directly covered the Windows window control buttons (Close `X`, Maximize, Minimize), impeding remote window operations. In ADR-043, `.video-hud` is relocated outside `#videoWrapper` directly into `.viewport-pane` as an independent ribbon underneath the video display.
+
+### 21.2 Mobile Horizontal Ribbon Scrolling
+With up to 10 action buttons (flip horizontal/vertical, rotate, grid, torch, zoom, focus, snapshot, record, audio) plus sender battery status and remote control status pills, the toolbar exceeds 470px in width. On mobile displays (360px–412px viewport width):
+- `.viewport-pane > .video-hud` is configured with `overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; scrollbar-width: none; flex-shrink: 0; width: 100%;`.
+- Every button and pill enforces `flex-shrink: 0; white-space: nowrap;` to prevent deformation or multi-row distortion.
+- On mobile (`max-width: 768px`), `justify-content: flex-start; padding: 6px 10px; gap: 6px;` enables smooth horizontal touch swiping.
+
+### 21.3 Single Charging Symbol Normalization
+In `src/public/js/viewer.js`, `socket.on('sender:battery')` previously appended `${chargingIcon}` to `hudBatteryText` while `#hudBatteryIcon` also rendered `⚡`. This produced duplicate lightning symbols (`⚡ 100% ⚡`). Removing redundant symbol appending ensures clean single-icon rendering (`⚡ 100%`).

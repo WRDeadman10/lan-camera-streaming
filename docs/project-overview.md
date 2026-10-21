@@ -97,3 +97,6 @@ Browser camera access generally requires a secure context. `localhost` is treate
 - The media path has been verified to be direct on the test LAN where possible; any TURN relay use is visible in diagnostics or test notes.
 - A pairing code/token prevents an arbitrary visitor from joining a stream merely by discovering the public URL.
 - The limitations and setup steps are documented.
+
+### Viewport Controls Ribbon & Mobile Swipe Action Bar (ADR-043)
+The viewer viewport features a dedicated non-intrusive stream controls ribbon situated directly below the video canvas (outside the video container). This completely unblocks the top-right corner of the video feed so Windows desktop controls (Close, Minimize, Maximize) are fully visible and clickable during remote control. On mobile devices, the ribbon provides smooth inertia horizontal scrolling with zero wrapping or off-screen clipping.

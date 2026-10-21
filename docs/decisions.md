@@ -907,6 +907,34 @@ During mobile remote desktop control in TeamViewer-style touchpad (`mouse`) mode
 **Consequences:**
 Mobile remote control provides a professional TeamViewer-grade experience: dragging to the edge smoothly auto-scrolls across the entire multi-monitor or widescreen Windows desktop, tapping clicks precisely where the pointer is positioned without jumping, two-finger scrolling scrolls documents without zooming, and pinch zooming remains fluid and isolated.
 
+## ADR-043: Viewport Controls Ribbon Relocation, Mobile Horizontal Ribbon Scrolling, and Single Charging Icon Fix
+
+**Status:** Accepted (2026-10-21)
+
+**Context:**
+1. In the viewer interface, the floating controls panel (`.video-hud`) was positioned at `top: 10px; right: 10px` within `#videoWrapper`. When viewing or remotely controlling a Windows desktop, this floating overlay sat directly over critical OS UI elements (the window close `X`, minimize, and maximize buttons), preventing remote desktop interactions and obscuring the feed.
+2. On mobile viewports (e.g., 360px-412px wide screens), the controls panel contained up to 10 action buttons plus battery and remote control pills (> 470px wide). As a consequence, it extended beyond the right edge of the screen, got clipped, or wrapped into erratic multi-line layouts with misaligned buttons.
+3. When the streaming sender device was plugged in and charging, the viewer displayed duplicate charging lightning bolt symbols (e.g. `⚡ 100% ⚡`), caused by `#hudBatteryIcon` rendering `⚡` and `#hudBatteryText` concurrently appending `${chargingIcon}`.
+
+**Decision:**
+1. **Ribbon Architecture Relocation (`src/public/viewer.html`):**
+   - Moved `.video-hud` out of `#videoWrapper` to become a dedicated direct child of `.viewport-pane`, positioned cleanly between the video feed and the bottom switcher/vitals bars.
+   - `#videoWrapper` now has a 100% unobstructed, edge-to-edge view of the remote desktop or camera feed.
+2. **Horizontal Ribbon Scrolling & Mobile Layout (`src/public/css/style.css`):**
+   - Styled `.viewport-pane > .video-hud` as a dedicated horizontal ribbon (`width: 100%; box-sizing: border-box; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; scrollbar-width: none; flex-shrink: 0;`).
+   - Added `flex-shrink: 0; white-space: nowrap;` to `.hud-btn`, `.hud-pill`, and `.control-active-pill` to guarantee buttons never shrink, deform, or break onto multiple lines.
+   - At mobile screen widths (`@media (max-width: 768px)`), configured `justify-content: flex-start; padding: 6px 10px; gap: 6px;`, creating a smooth, touch-scrollable swipe ribbon on small displays.
+   - Preserved fullscreen styling (`:fullscreen .video-hud`, `:-webkit-full-screen .video-hud`, `.is-fullscreen .video-hud { display: none !important; }`) to maintain full immersion.
+3. **Single Charging Icon Fix (`src/public/js/viewer.js`):**
+   - Updated `socket.on('sender:battery')` line 732 to format `hudBatteryText.textContent = \`${data.level}%\`;` without appending `${chargingIcon}`.
+   - `#hudBatteryIcon` displays `⚡` when charging (or `🪫`/`🔋` on battery), resulting in a clean `⚡ 100%` display.
+4. **Verification & Regression Testing (`tests/viewer-layout-reconnect.test.js`):**
+   - Updated layout tests to assert `.video-hud` resides in `.viewport-pane` and is strictly absent from `#videoWrapper`.
+   - Verified all 237 test cases pass cleanly across all 25 test suites.
+
+**Consequences:**
+The remote desktop feed is completely unobstructed for precise mouse and window management, mobile devices smoothly swipe across all stream controls without layout breaks or horizontal viewport clipping, and battery charging indicators render cleanly with a single symbol.
+
 ## Open decisions to revisit after the first working stream
 
 - Whether to code-sign the installer and executables (ADR-024).

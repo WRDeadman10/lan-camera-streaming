@@ -22,8 +22,10 @@ describe('Viewer Layout and Reconnect Memory Verification', () => {
     const videoWrapper = doc.getElementById('videoWrapper');
     assert.ok(videoWrapper, 'videoWrapper must exist');
 
-    const videoHud = videoWrapper.querySelector('.video-hud');
-    assert.ok(videoHud, 'video-hud must be inside videoWrapper');
+    // video-hud is placed outside videoWrapper in viewport-pane to avoid obstructing video content
+    const videoHud = viewportPane.querySelector('.video-hud');
+    assert.ok(videoHud, 'video-hud must exist inside viewport-pane');
+    assert.strictEqual(videoWrapper.querySelector('.video-hud'), null, 'video-hud must NOT be inside videoWrapper so it never blocks video content');
 
     // Only HUD icon buttons should be inside video-hud
     const hudButtons = videoHud.querySelectorAll('button.hud-btn');
@@ -33,13 +35,15 @@ describe('Viewer Layout and Reconnect Memory Verification', () => {
     assert.strictEqual(videoHud.querySelector('#studioSwitcherBar'), null, 'studioSwitcherBar must not be inside video-hud');
     assert.strictEqual(videoHud.querySelector('#streamVitalsBar'), null, 'streamVitalsBar must not be inside video-hud');
 
-    // studioSwitcherBar and streamVitalsBar must NOT be inside videoWrapper
+    // studioSwitcherBar, streamVitalsBar, and video-hud must NOT be inside videoWrapper
     assert.strictEqual(videoWrapper.querySelector('#studioSwitcherBar'), null, 'studioSwitcherBar must not be inside videoWrapper');
     assert.strictEqual(videoWrapper.querySelector('#streamVitalsBar'), null, 'streamVitalsBar must not be inside videoWrapper');
 
-    // studioSwitcherBar and streamVitalsBar must be direct children of viewportPane (footer area)
+    // video-hud, studioSwitcherBar, and streamVitalsBar must be direct children of viewportPane (outside video feed)
+    const directHud = viewportPane.querySelector(':scope > .video-hud');
     const directStudio = viewportPane.querySelector(':scope > #studioSwitcherBar');
     const directVitals = viewportPane.querySelector(':scope > #streamVitalsBar');
+    assert.ok(directHud, 'video-hud must sit directly inside viewport-pane outside videoWrapper');
     assert.ok(directStudio, 'studioSwitcherBar must sit directly inside viewport-pane footer');
     assert.ok(directVitals, 'streamVitalsBar must sit directly inside viewport-pane footer');
   });

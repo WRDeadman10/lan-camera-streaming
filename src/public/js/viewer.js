@@ -729,7 +729,7 @@ function createViewerPeer(iceServers) {
 
     if (hudBatteryPill && hudBatteryText) {
       hudBatteryPill.style.display = 'inline-flex';
-      hudBatteryText.textContent = `${data.level}%${chargingIcon}`;
+      hudBatteryText.textContent = `${data.level}%`;
       hudBatteryText.style.color = color;
       if (hudBatteryIcon) {
         hudBatteryIcon.textContent = data.charging ? '⚡' : (data.level <= 20 ? '🪫' : '🔋');

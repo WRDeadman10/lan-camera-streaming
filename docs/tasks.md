@@ -574,3 +574,15 @@ Decision: **ADR-025**.
 - [x] Add automated unit tests in `tests/mobile-control-ui.test.js` (4 new test cases, 237/237 tests passing across all 25 suites).
 - [x] Rebuild embedded fallback assets via `node scripts/build-embedded-assets.js`.
 - [x] Update all 6 documentation files (`project-overview.md`, `architecture.md`, `decisions.md`, `roadmap.md`, `tasks.md`, `ai_handoff.md`).
+
+## P4.17 — Viewport Controls Ribbon Relocation, Mobile Ribbon Overflow Scroll & Duplicate Charging Icon Fix (ADR-043)
+
+- [x] Relocate `.video-hud` out of `#videoWrapper` to become a direct child of `.viewport-pane` in `src/public/viewer.html`, completely unblocking the top-right of the video feed (Windows window controls: Close, Minimize, Maximize).
+- [x] Style `.viewport-pane > .video-hud` as a dedicated horizontal ribbon in `src/public/css/style.css` with `overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; flex-shrink: 0; width: 100%;`.
+- [x] Enforce `flex-shrink: 0; white-space: nowrap;` on `.hud-btn`, `.hud-pill`, and `.control-active-pill` to prevent button deformation or multi-line wrap on mobile screens.
+- [x] Add mobile media query (`@media (max-width: 768px)`) with `justify-content: flex-start; padding: 6px 10px; gap: 6px;` providing smooth inertia horizontal touch swipe.
+- [x] Fix duplicate charging lightning bolt symbol in `src/public/js/viewer.js` line 732 by displaying `${data.level}%` instead of appending `${chargingIcon}` when `#hudBatteryIcon` already shows `⚡`.
+- [x] Update layout verification test `tests/viewer-layout-reconnect.test.js` to assert `.video-hud` is in `.viewport-pane` outside `#videoWrapper`.
+- [x] Rebuild embedded fallback assets via `node scripts/build-embedded-assets.js`.
+- [x] Verify full automated test suite (237/237 tests passing across all 25 suites).
+- [x] Update all 6 documentation files (`project-overview.md`, `architecture.md`, `decisions.md`, `roadmap.md`, `tasks.md`, `ai_handoff.md`).

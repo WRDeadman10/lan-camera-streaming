@@ -413,6 +413,69 @@ video {
   display: none !important;
 }
 
+/* Viewport Controls Ribbon / Action Toolbar (Outside Video Feed) */
+.viewport-pane > .video-hud {
+  position: relative;
+  top: auto;
+  right: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background-color: var(--bg-surface);
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  border-left: none;
+  border-right: none;
+  border-radius: 0;
+  padding: 6px 14px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  flex-shrink: 0;
+  z-index: 5;
+  user-select: none;
+}
+
+.viewport-pane > .video-hud::-webkit-scrollbar {
+  display: none;
+}
+
+.viewport-pane > .video-hud .hud-btn {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.viewport-pane > .video-hud .hud-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--text-primary);
+}
+
+.viewport-pane > .video-hud .hud-pill,
+.viewport-pane > .video-hud .control-active-pill {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .viewport-pane > .video-hud {
+    justify-content: flex-start;
+    padding: 6px 10px;
+    gap: 6px;
+  }
+}
+
 .hud-btn {
   background: transparent;
   border: none;

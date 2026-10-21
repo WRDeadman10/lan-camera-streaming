@@ -276,3 +276,14 @@ Tasks:
 - **Edge Auto-Pan Engine**: Viewport slides smoothly when touchpad cursor approaches screen edges while zoomed in (`scale > 1.0`), stopping at host screen boundaries (`normX/normY` [0.0, 1.0]).
 - **Tap Click Precision**: Single tap in touchpad mouse mode clicks at current pointer position with zero coordinate jumping, eliminating synthetic mousedown/mouseup leaks.
 - **Pinch vs Two-Finger Scroll Disambiguation**: Two-finger parallel vertical swiping triggers smooth mouse wheel scrolling; radial finger distance expansion triggers pinch-to-zoom; suppresses browser viewport double-tap zoom.
+
+## Phase 21 — Viewport Controls Ribbon Relocation, Mobile Scroll Ribbon & Battery Symbol Fix (ADR-043) [Completed]
+
+**Objective:** Relocate the top-right floating HUD controls from inside the video feed container to a dedicated horizontal ribbon below the video, implement touch-scrollable ribbon behavior on mobile viewports to prevent clipping and broken button layouts, and fix duplicate charging lightning bolt symbols.
+
+Tasks:
+- [x] Move `.video-hud` from `#videoWrapper` to `.viewport-pane` as a sibling ribbon below the video in `src/public/viewer.html`.
+- [x] Implement responsive horizontal scroll styling (`overflow-x: auto; flex-shrink: 0; white-space: nowrap`) in `src/public/css/style.css` so mobile devices (360px-412px) enjoy a swipeable ribbon without element clipping.
+- [x] Fix duplicate lightning bolt charging icon in `src/public/js/viewer.js` line 732.
+- [x] Update layout test in `tests/viewer-layout-reconnect.test.js` to assert `.video-hud` is inside `.viewport-pane` and not `#videoWrapper`.
+- [x] Automated Test Coverage: 237 tests passing across 25 test suites.
