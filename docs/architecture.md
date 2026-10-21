@@ -281,7 +281,7 @@ The server writes the delimiter as `--frame` while the header declares `boundary
 
 - Camera access requires a secure context in supported browsers. Use a trusted HTTPS origin for the sender page.
 - For quick development, run one HTTPS tunnel to the local web server. The public URL is internet-reachable unless the tunnel provider/access configuration restricts it; pairing authorization is still required.
-- For deployment restricted to a LAN, use a stable private IP or local DNS name and a certificate trusted by every client device. Installing a local CA on mobile devices requires device-specific steps. The server serves HTTPS directly when `HTTPS_CERT_PATH` and `HTTPS_KEY_PATH` are set; `start.ps1 -LocalOnly` runs with no zrok involvement over plain HTTP (phone uses the Chrome "treat insecure origin as secure" flag) or over HTTPS when the user supplies a certificate; no certificate tooling is bundled.
+- For deployment restricted to a LAN, use a stable private IP or local DNS name and a certificate trusted by every client device. Installing a local CA on mobile devices requires device-specific steps. The server serves HTTPS directly when `HTTPS_CERT_PATH` and `HTTPS_KEY_PATH` are set; `start.ps1 -LocalOnly` (Windows) or `./start.sh --local-only` (Ubuntu / Linux) runs with no zrok involvement over plain HTTP (phone uses the Chrome "treat insecure origin as secure" flag) or over HTTPS when the user supplies a certificate; no certificate tooling is bundled.
 - Recommended viewer placement: the Windows PC opens `/viewer` on `localhost` (a secure context, no camera needed) so only the phone's page load and signaling use the tunnel; WebRTC media stays on the LAN as a host-to-host UDP path.
 - A host firewall rule may be needed for local access. Do not disable the firewall globally.
 - Wi-Fi client isolation, guest networks, VPN routing, browser privacy policies, and restrictive NAT can prevent direct media connectivity even when the web page loads.
@@ -333,7 +333,8 @@ lan-camera-streaming/
 ├── vcam/                   # git submodule: Windows virtual camera driver + Inno Setup installer (own docs/)
 ├── assets/                 # icon.ico / icon.png
 ├── dist/                   # build output (git-ignored): exe, driver installer, .env
-├── start.ps1               # development supervisor (zrok mode)
+├── start.ps1               # development supervisor (Windows PowerShell)
+├── start.sh                # development supervisor (Ubuntu 24.04 / Linux bash)
 ├── build.bat               # version bump + vcam driver/installer + exe
 ├── .env.example            # non-secret configuration template
 └── package.json
@@ -402,7 +403,7 @@ flowchart LR
 
 ## 13. Build and distribution
 
-- `npm start` / `npm run dev`: source server (`src/server/index.js`). `npm run cli -- --local|--zrok`: console app (`src/server/cli.js`). `start.ps1`: development supervisor for zrok mode.
+- `npm start` / `npm run dev`: source server (`src/server/index.js`). `npm run cli -- --local|--zrok`: console app (`src/server/cli.js`). `start.ps1` (Windows PowerShell) / `start.sh` (Ubuntu 24.04 / Linux bash): development supervisor for zrok and local modes.
 - `build.bat` (repo root): bumps the patch version, builds the vcam driver and installer (`vcam/build.bat`), then runs `npm run build:exe`.
 - `npm run build:exe`: embeds `src/public`, the Socket.IO browser client (`/vendor/socket.io.js`) and the newest driver installer into `src/server/embedded-assets.js`, bundles with esbuild, and produces the Node SEA executable `dist/lan-camera-streaming.exe` with icon and version resources.
 - `postinstall` regenerates the git-ignored `embedded-assets.js`, so a fresh clone can start.

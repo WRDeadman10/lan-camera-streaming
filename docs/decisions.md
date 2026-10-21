@@ -795,6 +795,31 @@ Any version bump in `package.json` immediately and automatically reflects across
 **Consequences:**
 Mobile viewers gain an intuitive, production-grade remote control experience matching TeamViewer, allowing detailed inspection of Windows desktops via pinch-to-zoom, responsive touchpad and direct touch control, accurate clicks across all zoom levels, complete keyboard and modifier entry, and zero impact on view-only streaming.
 
+## ADR-039: Ubuntu 24.04 and POSIX Linux Hosting Supervisor (`start.sh`)
+
+**Status:** Accepted (2026-10-21)
+
+**Context:**
+The application was previously supervised primarily via PowerShell on Windows (`start.ps1`). Users hosting the signaling and streaming server on Ubuntu 24.04 LTS (and other POSIX Linux distributions) required an equivalent automated startup script providing:
+1. Automatic dependency installation (`npm install`) on first run.
+2. Safe `.env` loading and `.env.example` copying without overwriting shell-exported environment variables.
+3. Linux networking discovery using `hostname -I` and `ip -4 addr` to surface private LAN IP addresses (`10.x`, `192.168.x`, `172.16-31.x`).
+4. Dual operation: public HTTPS zrok tunnel mode and `--local-only` LAN direct mode.
+5. Automated zrok environment verification, authentication (`zrok enable $ZROK_TOKEN --headless`), share reservation, and dynamic fallback matching `start.ps1` and `zrok-helper.js`.
+6. Node.js server background lifecycle monitoring and `/health` polling.
+7. Terminal ASCII QR code rendering for immediate mobile phone camera connection.
+8. Signal trapping (`SIGINT`, `SIGTERM`, `EXIT`) to release dynamic zrok shares and stop child background processes cleanly without orphaned ports.
+9. Ubuntu firewall instructions (`sudo ufw allow $PORT/tcp`).
+
+**Decision:**
+1. Author `start.sh` with bash shebang (`#!/usr/bin/env bash`), strict LF line endings, colorized console banners, and complete feature parity with `start.ps1`.
+2. Support `--local-only`, `-LocalOnly`, `-l`, and `--help` flags.
+3. Update `src/server/zrok-helper.js` cross-platform binary discovery to check `command -v zrok || which zrok` on non-Windows platforms alongside Linux standard binary paths (`/usr/local/bin/zrok`, `/usr/bin/zrok`, `/opt/zrok/bin/zrok`, etc.).
+4. Add automated test suite `tests/start-script.test.js` verifying LF line endings, arguments, environment parsing, health checks, zrok cleanup traps, and runtime `--help` execution.
+
+**Consequences:**
+Users can run `./start.sh` or `./start.sh --local-only` out of the box on Ubuntu 24.04 with zero Windows or PowerShell dependencies. Cleanup, background process management, terminal QR codes, and zrok share reservations behave identically across Linux and Windows.
+
 ## Open decisions to revisit after the first working stream
 
 - Whether to code-sign the installer and executables (ADR-024).

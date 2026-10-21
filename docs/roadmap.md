@@ -231,3 +231,16 @@ Tasks:
 - [x] Mobile Remote-Control Toolbar & Drawers: compact collapsible bottom toolbar with Exit, Keyboard, Mouse/Touch mode, Shortcuts, Special Keys, Settings, and Collapse/Expand.
 - [x] Mobile Virtual Keyboard & Modifier Bar: invisible text input surface for mobile virtual keyboard, auxiliary modifier row (`Shift`, `Ctrl`, `Alt`, `Win`, `...`), special keys matrix, and shortcut sequences.
 - [x] Automated Test Coverage: 219 tests passing (`tests/zoom-and-coords.test.js`, `tests/mobile-control-ui.test.js`, `tests/viewer-control.test.js`).
+
+## Phase 17 — Ubuntu 24.04 and POSIX Linux Hosting Supervisor (ADR-039) [Completed]
+
+**Objective:** Provide first-class Linux hosting support with `start.sh` mirroring `start.ps1` for Ubuntu 24.04 LTS and other POSIX Linux distributions.
+
+Tasks:
+- [x] Author `start.sh` with bash shebang, strict LF line endings, and complete feature parity with `start.ps1`.
+- [x] Support `--local-only` / `-LocalOnly` / `-l` and `--help` CLI arguments.
+- [x] Automatic dependency installation (`npm install`) on first run and `.env` creation from `.env.example`.
+- [x] Ubuntu network discovery using `hostname -I` and `ip -4 addr`.
+- [x] Process supervisor, `/health` polling, and clean signal teardown traps (`SIGINT`, `SIGTERM`, `EXIT`).
+- [x] Terminal QR code rendering via `qrcode-terminal`.
+- [x] Automated Test Coverage: 224 tests passing across 24 test suites (`tests/start-script.test.js`).

@@ -515,3 +515,16 @@ Decision: **ADR-025**.
 - [x] Add unit and integration tests in `tests/mobile-control-ui.test.js`.
 - [x] Rebuild embedded assets via `node scripts/build-embedded-assets.js` and verify full test suite.
 - [x] Update all documentation files (`project-overview.md`, `architecture.md`, `decisions.md`, `roadmap.md`, `tasks.md`, `ai_handoff.md`).
+
+## P4.13 — Ubuntu 24.04 and POSIX Linux Hosting Supervisor (ADR-039)
+
+- [x] Author `start.sh` with bash shebang, strict LF line endings, and complete feature parity with `start.ps1`.
+- [x] Implement `--local-only` / `-LocalOnly` / `-l` and `--help` CLI arguments.
+- [x] Support automatic `npm install` on first run and safe `.env` loading from `.env.example`.
+- [x] Implement Ubuntu network discovery via `hostname -I` and `ip -4 addr`.
+- [x] Implement `/health` polling and server health verification via `curl`, `wget`, or `/dev/tcp`.
+- [x] Integrate zrok discovery and headless token enrollment (`zrok enable $ZROK_TOKEN --headless`).
+- [x] Update `src/server/zrok-helper.js` cross-platform binary discovery for Linux environments.
+- [x] Add process supervisor and cleanup traps for `SIGINT`, `SIGTERM`, `EXIT` with dynamic share release.
+- [x] Add automated test suite `tests/start-script.test.js` (5/5 tests passing).
+- [x] Update all 6 documentation files (`project-overview.md`, `architecture.md`, `decisions.md`, `roadmap.md`, `tasks.md`, `ai_handoff.md`).

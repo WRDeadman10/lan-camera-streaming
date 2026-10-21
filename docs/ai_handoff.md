@@ -37,7 +37,8 @@ The project is feature-complete across all 16 proposed ecosystem phases and veri
 | In-Room Real-Time WhatsApp-Style Chat (ADR-036) | **Delivered**: Auto-generated & persistent display names (`lancam_chat_username`), editable in header; mute/unmute control (`lancam_chat_muted`); slide-out drawer with floating action button & unread notification badge dot; WhatsApp dark theme message bubbles (green/slate, tails, timestamps, checkmarks, sender color tags); dimmed atmospheric Unsplash wallpaper with dark obsidian overlay & shuffle button; Web Audio chime; full mobile responsive viewport (`100dvh`, VisualViewport keyboard pinning, swipe-to-dismiss); rejoin message deduplication & persistent client identity (`senderUserId`) |
 | Dynamic Server-Derived Application Versioning (ADR-037) | **Delivered**: Dynamic single-source versioning via `getAppVersion()` reading `package.json` / `__APP_VERSION__`; exposed via `/api/version`, `/api/config`, `/api/discover`, `/health`; dynamic frontend badge hydration (`initializeVersionBadge()`) across sender, viewer, and hub |
 | Mobile Zoom, Touch Interaction & TeamViewer-Style Remote Control (ADR-038) | **Delivered**: Universal pinch-to-zoom (1x-4x) and pan across all media sources, zoom-aware letterbox coordinate translation, touchpad Mouse mode, direct Touch mode, adaptive cursor overlay, collapsible mobile control toolbar, virtual keyboard IME text input, auxiliary modifier keys bar, special keys grid, and shortcuts |
-| Automated tests | 219/219 pass (`node --test`) |
+| Ubuntu 24.04 & POSIX Linux Hosting Supervisor (`start.sh`, ADR-039) | **Delivered**: `start.sh` mirroring `start.ps1` with bash shebang, strict LF line endings, `--local-only` / `-LocalOnly` / `-l` flags, Ubuntu network discovery (`hostname -I`, `ip -4 addr`), safe `.env` loading, zrok tunnel management, terminal QR codes, and process cleanup traps |
+| Automated tests | 224/224 pass (`node --test`) |
 
 Version: `package.json` is 1.0.36.
 
@@ -161,6 +162,19 @@ Version: `package.json` is 1.0.36.
   - Problem & Cause: Browser CSP violations blocked loopback health checks (`http://127.0.0.1:8765/health`) and protocol deeplink framing (`lancam-control:`). Chrome PNA rejected requests from public zrok HTTPS tunnels to `127.0.0.1` without PNA response headers. Signaling socket was only connected on "Start Streaming", preventing pre-stream PIN generation and permanent password setting. Tab switching triggered `rejoinRoomAsSender()` repeatedly when viewer count was 0.
   - Solution: Added loopback addresses and `frame-src lancam-control: lancam:` to CSP in `src/server/server.js`. Added `Access-Control-Allow-Private-Network: true` to CORS preflight, GET, and POST in `LoopbackServer.cpp`. Allowed pre-stream control configuration in `signaling.js` with access PIN verification, and initialized Socket.IO on page load (`ensureSocket()`). Added user-gesture anchor fallback to deeplink launcher. Refined `visibilitychange` to guard rejoining behind `!hasJoinedRoom`.
   - Verification: Rebuilt embedded assets and native helper executable. All 176 Node.js unit/integration tests and native helper test suite passing with 0 errors.
+- **2026-10-21 — Ubuntu 24.04 and POSIX Linux Hosting Supervisor (start.sh, ADR-039).**
+  - Problem: Users hosting the application on Ubuntu 24.04 LTS (and POSIX Linux) lacked an automated startup supervisor equivalent to `start.ps1`, requiring manual node invocations, manual .env loading, manual zrok reservations, and leaving orphaned background processes or occupied ports upon exit.
+  - Solution:
+    1. Authored `start.sh` with bash shebang, strict LF line endings, and complete functional parity with `start.ps1`.
+    2. Implemented CLI arguments `--local-only` / `-LocalOnly` / `-l` (LAN-only without zrok) and `--help` / `-h`.
+    3. Automated first-run dependencies (`npm install`) and `.env` setup from `.env.example`.
+    4. Implemented Linux LAN IP discovery using `hostname -I` and `ip -4 addr`.
+    5. Implemented server health polling (`/health`) via `curl`, `wget`, or `/dev/tcp`.
+    6. Updated `src/server/zrok-helper.js` cross-platform binary discovery using `command -v zrok || which zrok` and Linux standard directories (`/usr/local/bin/zrok`, `/usr/bin/zrok`, `/opt/zrok/bin/zrok`, `~/.zrok/bin/zrok`).
+    7. Automated zrok token verification, headless authorization, share reservation, and dynamic fallback.
+    8. Implemented trap handlers (`SIGINT`, `SIGTERM`, `EXIT`) to cleanly stop child processes and release dynamic zrok endpoints.
+    9. Rendered ASCII terminal QR codes via `qrcode-terminal` and added Ubuntu `ufw` firewall instructions.
+  - Verification: Added test suite `tests/start-script.test.js` (5/5 tests passing). Full test suite passes (224/224 tests passing).
 - **2026-10-21 — Mobile Pinch-to-Zoom, Touch Interaction and TeamViewer-Style Remote Desktop Control (ADR-038).**
   - Problem: Mobile viewers could not pinch to zoom or pan camera/screen-share feeds to inspect fine desktop details, and when granted remote desktop control, lacked a touch-first interface for controlling the remote Windows computer (no touchpad, no direct touch mode, no adaptive cursor overlay, no mobile keyboard input, no modifier keys, and no desktop shortcuts).
   - Solution:

@@ -16,7 +16,8 @@ export function findZrokBinary() {
   const possibleCommands = ['zrok', 'zrok2'];
   for (const cmd of possibleCommands) {
     try {
-      execSync(`where ${cmd}`, { stdio: 'ignore' });
+      const checkCmd = process.platform === 'win32' ? `where ${cmd}` : `command -v ${cmd} || which ${cmd}`;
+      execSync(checkCmd, { stdio: 'ignore' });
       return cmd;
     } catch {
       // Continue search
@@ -24,10 +25,16 @@ export function findZrokBinary() {
   }
 
   const localAppData = process.env.LOCALAPPDATA || '';
+  const homeDir = process.env.HOME || '';
   const possiblePaths = [
     'C:\\scrcpy-win64-v2.4\\zrok2.exe',
     path.join(localAppData, 'Programs', 'zrok', 'zrok.exe'),
-    'C:\\Program Files\\zrok\\zrok.exe'
+    'C:\\Program Files\\zrok\\zrok.exe',
+    '/usr/local/bin/zrok',
+    '/usr/bin/zrok',
+    '/opt/zrok/bin/zrok',
+    '/opt/zrok/zrok',
+    path.join(homeDir, '.zrok', 'bin', 'zrok')
   ];
 
   for (const p of possiblePaths) {
