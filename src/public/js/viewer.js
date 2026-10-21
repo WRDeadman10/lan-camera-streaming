@@ -1033,6 +1033,10 @@ if (videoWrapper) {
     if (e.target && e.target.closest('button, a, input, select')) {
       return;
     }
+    if (isControlActive) {
+      e.preventDefault();
+      return;
+    }
     btnFullscreen.click();
   });
 }
@@ -1478,8 +1482,18 @@ function setupRemoteControlHandlers() {
       return;
     }
 
-    targetEl.addEventListener('mousemove', (e) => {
-      if (!isControlActive || e.pointerType === 'touch') {
+    const isTouchOrSynthetic = (e) => {
+      if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+        return true;
+      }
+      if (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) {
+        return true;
+      }
+      return false;
+    };
+
+    targetEl.addEventListener('pointermove', (e) => {
+      if (!isControlActive || isTouchOrSynthetic(e)) {
         return;
       }
       const rect = targetEl.getBoundingClientRect();
@@ -1509,8 +1523,8 @@ function setupRemoteControlHandlers() {
       }
     });
 
-    targetEl.addEventListener('mousedown', (e) => {
-      if (!isControlActive || e.pointerType === 'touch') {
+    targetEl.addEventListener('pointerdown', (e) => {
+      if (!isControlActive || isTouchOrSynthetic(e)) {
         return;
       }
       e.preventDefault();
@@ -1551,8 +1565,8 @@ function setupRemoteControlHandlers() {
       });
     });
 
-    targetEl.addEventListener('mouseup', (e) => {
-      if (!isControlActive || e.pointerType === 'touch') {
+    targetEl.addEventListener('pointerup', (e) => {
+      if (!isControlActive || isTouchOrSynthetic(e)) {
         return;
       }
       e.preventDefault();

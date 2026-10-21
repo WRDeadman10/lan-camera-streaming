@@ -585,3 +585,22 @@ Browsers enforce security barriers preventing web applications from directly nav
 - **Visual Warning Banner (`#mdnsWarningBanner`):** Surfaced above the session setup card, presenting the detected browser name, one-click "Copy Flag URL" action, and interactive guidance trigger.
 - **Interactive Guidance Modal (`#mdnsGuidanceModal`):** Provides step-by-step instructions matching the browser flags UI and a live "Test Setting Again" button that re-runs the probe to verify settings without restarting the server.
 - **Reactive Stream Detection:** If candidate gathering during a live streaming session detects `.local` candidates on connection failure, diagnostic logs and the warning banner are dynamically surfaced with the exact browser flag URL.
+
+## 20. Mobile Touchpad Edge Auto-Pan & Gesture Disambiguation
+
+### 20.1 Edge Auto-Pan (Push-to-Pan) Architecture
+When zoomed in (`scale > 1.0`), the mobile viewport renders a localized sub-region of the remote Windows desktop. When the user navigates in touchpad Mouse mode (`MobileRemoteController`):
+1. Cursor coordinates are translated to container-relative screen pixels via `getScreenCoordinatesFromNormalized`.
+2. An edge margin boundary (`28px`) monitors proximity to left, right, top, and bottom viewport borders.
+3. If the cursor approaches a border in the direction of finger travel AND the underlying host screen has unrevealed area in that direction (`normX < 1.0`, `normX > 0.0`, `normY < 1.0`, `normY > 0.0`), `zoomController.panBy(panDeltaX, panDeltaY)` shifts the content smoothly.
+4. When the remote desktop edge is reached, panning halts. Visual cursor overlay coordinates are clamped (`clampedRelX, clampedRelY`) to maintain pointer visibility on screen edges.
+
+### 20.2 Tap Click Disambiguation (Zero Pointer Jump)
+- To prevent mobile browser synthetic mouse event leaks (`mousedown`, `mouseup`), `touchstart` and `touchend` handlers invoke `e.preventDefault()` on non-interactive regions.
+- On tap release in Mouse mode, `{ type: 'mouse_click', button: 'left' }` is dispatched without altering `normX`/`normY`.
+- Desktop pointer listeners in `viewer.js` inspect `isTouchOrSynthetic(e)`, discarding events where `pointerType === 'touch'`, `pointerType === 'pen'`, or `firesTouchEvents === true`.
+
+### 20.3 Pinch vs Two-Finger Scroll Disambiguation
+- Multi-touch starts in `twoFingerMode = 'pending'`.
+- If finger separation delta `|currentDist - initialDist| > 20px`, locks to `pinch` (`ZoomController` scales feed; wheel events suppressed).
+- If fingers travel vertically in parallel in the same direction (`> 10px`, distance variation `< 18px`), locks to `scroll` (`MobileRemoteController` dispatches `mouse_wheel` packets while zoom scale remains constant).

@@ -442,4 +442,269 @@ describe('Mobile Remote Control UI and Interaction Engine Verification', () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
     assert.ok(dispatchedEvents.some((e) => e.type === 'mouse_move'), 'touchpad drag must emit mouse_move');
   });
+
+  test('Tap in mouse mode clicks at current cursor position without jumping coordinates', () => {
+    const dom = new JSDOM(viewerHtmlContent, { url: 'http://localhost/' });
+    const doc = dom.window.document;
+    global.window = dom.window;
+    global.document = doc;
+
+    const dispatchedEvents = [];
+    const videoWrapper = doc.getElementById('videoWrapper');
+    const remoteVideo = doc.getElementById('remoteVideo');
+
+    videoWrapper.getBoundingClientRect = () => ({
+      left: 0,
+      top: 0,
+      width: 1000,
+      height: 600,
+      right: 1000,
+      bottom: 600
+    });
+    Object.defineProperty(remoteVideo, 'videoWidth', { value: 1920, configurable: true });
+    Object.defineProperty(remoteVideo, 'videoHeight', { value: 1080, configurable: true });
+
+    const mobileCtrl = new MobileRemoteController({
+      containerElement: videoWrapper,
+      videoElement: remoteVideo,
+      zoomController: null,
+      sendControlInput: (event) => dispatchedEvents.push(event),
+      isControlActive: () => true,
+      releaseControl: () => {}
+    });
+
+    mobileCtrl.setMode('mouse');
+    // Position cursor at specific location via dragging
+    mobileCtrl.normX = 0.85;
+    mobileCtrl.normY = 0.25;
+
+    dispatchedEvents.length = 0;
+
+    // User taps at completely different screen coordinates (e.g. 150, 500)
+    const tapStart = new dom.window.Event('touchstart', { bubbles: true, cancelable: true });
+    tapStart.touches = [{ clientX: 150, clientY: 500 }];
+    videoWrapper.dispatchEvent(tapStart);
+
+    const tapEnd = new dom.window.Event('touchend', { bubbles: true, cancelable: true });
+    tapEnd.touches = [];
+    tapEnd.changedTouches = [{ clientX: 150, clientY: 500 }];
+    videoWrapper.dispatchEvent(tapEnd);
+
+    // The cursor position must NOT have jumped
+    assert.strictEqual(mobileCtrl.normX, 0.85, 'normX must remain unchanged after tap in mouse mode');
+    assert.strictEqual(mobileCtrl.normY, 0.25, 'normY must remain unchanged after tap in mouse mode');
+
+    // Only mouse_click must be emitted, no mouse_move
+    assert.strictEqual(dispatchedEvents.length, 1);
+    assert.strictEqual(dispatchedEvents[0].type, 'mouse_click');
+    assert.strictEqual(dispatchedEvents[0].button, 'left');
+  });
+
+  test('Edge auto-pan drags zoomed-in view when cursor hits edge and screen edge has not been reached', () => {
+    const dom = new JSDOM(viewerHtmlContent, { url: 'http://localhost/' });
+    const doc = dom.window.document;
+    global.window = dom.window;
+    global.document = doc;
+
+    const dispatchedEvents = [];
+    const videoWrapper = doc.getElementById('videoWrapper');
+    const remoteVideo = doc.getElementById('remoteVideo');
+
+    videoWrapper.getBoundingClientRect = () => ({
+      left: 0,
+      top: 0,
+      width: 1000,
+      height: 600,
+      right: 1000,
+      bottom: 600
+    });
+    Object.defineProperty(remoteVideo, 'videoWidth', { value: 1000, configurable: true });
+    Object.defineProperty(remoteVideo, 'videoHeight', { value: 600, configurable: true });
+
+    let controlActive = true;
+    const zoomCtrl = new ZoomController({
+      containerElement: videoWrapper,
+      targetElements: [remoteVideo],
+      minScale: 1.0,
+      maxScale: 4.0,
+      isControlActive: () => controlActive
+    });
+
+    const mobileCtrl = new MobileRemoteController({
+      containerElement: videoWrapper,
+      videoElement: remoteVideo,
+      zoomController: zoomCtrl,
+      sendControlInput: (event) => dispatchedEvents.push(event),
+      isControlActive: () => controlActive,
+      releaseControl: () => {}
+    });
+
+    mobileCtrl.setMode('mouse');
+    // Zoom in 2.0x
+    zoomCtrl.setZoom(2.0, 500, 300);
+    assert.strictEqual(zoomCtrl.scale, 2.0);
+
+    // Initial state: panX is 0
+    assert.strictEqual(zoomCtrl.panX, 0);
+
+    // Position cursor near right edge of the visible container (e.g. screenRelX = 980)
+    // At scale 2.0 and panX = 0, center is 500. normX = 0.95 gives screenRelX = 500 + (0.95 - 0.5)*1000*2 = 1400 (clamped/offscreen)
+    mobileCtrl.normX = 0.95;
+    mobileCtrl.normY = 0.5;
+
+    // Simulate drag further to the right
+    mobileCtrl.lastTouchX = 300;
+    mobileCtrl.lastTouchY = 300;
+
+    const dragMove = new dom.window.Event('touchmove', { bubbles: true, cancelable: true });
+    dragMove.touches = [{ clientX: 320, clientY: 300 }]; // deltaX = +20 (moving right)
+    videoWrapper.dispatchEvent(dragMove);
+
+    // View must pan to the left (panX < 0) to pull right content into view
+    assert.ok(zoomCtrl.panX < 0, `panX must be negative to reveal right content, got ${zoomCtrl.panX}`);
+
+    // If normX is already 1.0 (screen edge of remote host has been reached)
+    mobileCtrl.normX = 1.0;
+    const prevPanX = zoomCtrl.panX;
+
+    mobileCtrl.lastTouchX = 300;
+    const dragAtEdge = new dom.window.Event('touchmove', { bubbles: true, cancelable: true });
+    dragAtEdge.touches = [{ clientX: 320, clientY: 300 }]; // deltaX = +20
+    videoWrapper.dispatchEvent(dragAtEdge);
+
+    // Edge panning must not pan further because normX is at maximum (1.0)
+    assert.strictEqual(zoomCtrl.panX, prevPanX, 'must not pan further right when remote desktop edge is reached');
+  });
+
+  test('Two-finger parallel vertical swipe scrolls remote desktop via mouse_wheel and keeps zoom scale unchanged', () => {
+    const dom = new JSDOM(viewerHtmlContent, { url: 'http://localhost/' });
+    const doc = dom.window.document;
+    global.window = dom.window;
+    global.document = doc;
+
+    const dispatchedEvents = [];
+    const videoWrapper = doc.getElementById('videoWrapper');
+    const remoteVideo = doc.getElementById('remoteVideo');
+
+    videoWrapper.getBoundingClientRect = () => ({
+      left: 0,
+      top: 0,
+      width: 1000,
+      height: 600,
+      right: 1000,
+      bottom: 600
+    });
+
+    let controlActive = true;
+    const zoomCtrl = new ZoomController({
+      containerElement: videoWrapper,
+      targetElements: [remoteVideo],
+      minScale: 1.0,
+      maxScale: 4.0,
+      isControlActive: () => controlActive
+    });
+
+    const mobileCtrl = new MobileRemoteController({
+      containerElement: videoWrapper,
+      videoElement: remoteVideo,
+      zoomController: zoomCtrl,
+      sendControlInput: (event) => dispatchedEvents.push(event),
+      isControlActive: () => controlActive,
+      releaseControl: () => {}
+    });
+
+    mobileCtrl.setMode('mouse');
+    assert.strictEqual(zoomCtrl.scale, 1.0);
+
+    // Two fingers touch down with 50px distance
+    const startEvent = new dom.window.Event('touchstart', { bubbles: true, cancelable: true });
+    startEvent.touches = [
+      { clientX: 200, clientY: 200 },
+      { clientX: 250, clientY: 200 }
+    ];
+    videoWrapper.dispatchEvent(startEvent);
+
+    // Two fingers swipe DOWN together by 30px (parallel movement, distance stays ~50px)
+    dispatchedEvents.length = 0;
+    const moveEvent = new dom.window.Event('touchmove', { bubbles: true, cancelable: true });
+    moveEvent.touches = [
+      { clientX: 200, clientY: 230 },
+      { clientX: 250, clientY: 230 }
+    ];
+    videoWrapper.dispatchEvent(moveEvent);
+
+    // Must emit mouse_wheel event
+    assert.ok(dispatchedEvents.some((e) => e.type === 'mouse_wheel'), 'parallel vertical swipe must emit mouse_wheel');
+
+    // Zoom scale must remain at 1.0 (did NOT zoom in!)
+    assert.strictEqual(zoomCtrl.scale, 1.0, 'parallel two-finger swipe must NOT change zoom scale');
+  });
+
+  test('Two-finger pinch with changing finger distance zooms view and does not dispatch mouse_wheel', () => {
+    const dom = new JSDOM(viewerHtmlContent, { url: 'http://localhost/' });
+    const doc = dom.window.document;
+    global.window = dom.window;
+    global.document = doc;
+
+    const dispatchedEvents = [];
+    const videoWrapper = doc.getElementById('videoWrapper');
+    const remoteVideo = doc.getElementById('remoteVideo');
+
+    videoWrapper.getBoundingClientRect = () => ({
+      left: 0,
+      top: 0,
+      width: 1000,
+      height: 600,
+      right: 1000,
+      bottom: 600
+    });
+
+    let controlActive = true;
+    const zoomCtrl = new ZoomController({
+      containerElement: videoWrapper,
+      targetElements: [remoteVideo],
+      minScale: 1.0,
+      maxScale: 4.0,
+      isControlActive: () => controlActive
+    });
+
+    const mobileCtrl = new MobileRemoteController({
+      containerElement: videoWrapper,
+      videoElement: remoteVideo,
+      zoomController: zoomCtrl,
+      sendControlInput: (event) => dispatchedEvents.push(event),
+      isControlActive: () => controlActive,
+      releaseControl: () => {}
+    });
+
+    mobileCtrl.setMode('mouse');
+    assert.strictEqual(zoomCtrl.scale, 1.0);
+
+    // Two fingers touch down with 50px distance
+    const startEvent = new dom.window.Event('touchstart', { bubbles: true, cancelable: true });
+    startEvent.touches = [
+      { clientX: 200, clientY: 200 },
+      { clientX: 250, clientY: 200 }
+    ];
+    videoWrapper.dispatchEvent(startEvent);
+
+    // Two fingers spread apart significantly (distance increases from 50 to 110px)
+    dispatchedEvents.length = 0;
+    const moveEvent = new dom.window.Event('touchmove', { bubbles: true, cancelable: true });
+    moveEvent.touches = [
+      { clientX: 170, clientY: 200 },
+      { clientX: 280, clientY: 200 }
+    ];
+    videoWrapper.dispatchEvent(moveEvent);
+
+    // Must pinch zoom in (scale > 1.0)
+    assert.ok(zoomCtrl.scale > 1.2, `pinch gesture must increase scale, got ${zoomCtrl.scale}`);
+
+    // Must NOT emit mouse_wheel events
+    assert.strictEqual(
+      dispatchedEvents.filter((e) => e.type === 'mouse_wheel').length,
+      0,
+      'pinch-to-zoom must not emit mouse_wheel events'
+    );
+  });
 });

@@ -554,3 +554,23 @@ Decision: **ADR-025**.
 - [x] Add comprehensive unit test suite `tests/mdns-detector.test.js` (7/7 tests passing, 233 total tests passing across all 25 suites).
 - [x] Rebuild embedded fallback assets via `node scripts/build-embedded-assets.js`.
 - [x] Update all documentation files (`project-overview.md`, `architecture.md`, `decisions.md`, `roadmap.md`, `tasks.md`, `ai_handoff.md`).
+
+## P4.16 — Mobile Touchpad Edge Auto-Pan, Tap Click Disambiguation & Pinch-vs-Scroll Isolation (ADR-042)
+
+- [x] Implement Zoom-aware Edge Auto-Pan ("push-to-pan") in `src/public/js/mobile-control.js` when zoomed in (`scale > 1.01`) in touchpad `mouse` mode:
+  - [x] Evaluate cursor screen position against 28px boundary margin.
+  - [x] Auto-pan viewport (`panBy(panDeltaX, panDeltaY)`) in drag direction if remote desktop extends further (`normX < 1.0`, `normX > 0.0`, `normY < 1.0`, `normY > 0.0`).
+  - [x] Stop edge panning when the remote desktop boundary is reached (`normX === 1.0` or `0.0`).
+  - [x] Clamp visual cursor overlay rendering (`clampedRelX, clampedRelY`) to maintain visible pointer arrow on screen border during panning.
+- [x] Implement Tap Click Disambiguation (Zero Pointer Jump):
+  - [x] Call `e.preventDefault()` on `touchstart` and `touchend` in `MobileRemoteController` for non-interactive targets to suppress synthetic `mousedown`/`mouseup` events.
+  - [x] Dispatch `{ type: 'mouse_click', button: 'left' }` on tap in `mouse` mode at existing cursor position without modifying coordinates or dispatching `mouse_move`.
+  - [x] Update `bindDesktopPointerControls` in `src/public/js/viewer.js` with Pointer Events and explicit touch rejection (`e.pointerType === 'touch' || e.sourceCapabilities?.firesTouchEvents`).
+- [x] Implement Pinch vs Two-Finger Scroll Disambiguation:
+  - [x] State-based disambiguation in `src/public/js/zoom-controller.js` and `src/public/js/mobile-control.js` (`twoFingerMode = 'pending'`).
+  - [x] Lock to `pinch` when distance delta between fingers exceeds 20px (zooming feed, suppressing wheel).
+  - [x] Lock to `scroll` when both fingers move in parallel in the same vertical direction (> 10px travel, < 18px distance variation), dispatching `mouse_wheel` while keeping zoom scale constant.
+  - [x] Guard `videoWrapper`'s `dblclick` listener against fullscreen toggling during active remote control.
+- [x] Add automated unit tests in `tests/mobile-control-ui.test.js` (4 new test cases, 237/237 tests passing across all 25 suites).
+- [x] Rebuild embedded fallback assets via `node scripts/build-embedded-assets.js`.
+- [x] Update all 6 documentation files (`project-overview.md`, `architecture.md`, `decisions.md`, `roadmap.md`, `tasks.md`, `ai_handoff.md`).

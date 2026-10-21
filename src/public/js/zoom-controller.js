@@ -35,10 +35,13 @@ export class ZoomController {
     // Gesture tracking state
     this.isPinching = false;
     this.isPanning = false;
+    this.twoFingerMode = null;
     this.initialPinchDistance = 0;
     this.initialScale = 1.0;
     this.pinchMidpoint = { x: 0, y: 0 };
     this.lastTouchPosition = { x: 0, y: 0 };
+    this.initialTouchY1 = 0;
+    this.initialTouchY2 = 0;
     this.activeTouchCount = 0;
     this.ignoreNextClick = false;
 
@@ -248,9 +251,8 @@ export class ZoomController {
 
       this.activeTouchCount = e.touches.length;
       if (e.touches.length === 2) {
-        // Two fingers: initialize pinch gesture and prevent browser viewport scaling
+        // Two fingers: initialize gesture tracking and prevent browser viewport scaling
         e.preventDefault();
-        this.isPinching = true;
         this.ignoreNextClick = true;
         const t1 = e.touches[0];
         const t2 = e.touches[1];
@@ -261,6 +263,18 @@ export class ZoomController {
           y: (t1.clientY + t2.clientY) / 2
         };
         this.lastTouchPosition = { ...this.pinchMidpoint };
+        this.initialTouchY1 = t1.clientY;
+        this.initialTouchY2 = t2.clientY;
+
+        const isControlling = (typeof this.isControlActive === 'function' && this.isControlActive());
+        if (isControlling) {
+          // When remote control is active, disambiguate between pinch-to-zoom and two-finger scroll
+          this.twoFingerMode = 'pending';
+          this.isPinching = false;
+        } else {
+          this.twoFingerMode = 'pinch';
+          this.isPinching = true;
+        }
       } else if (e.touches.length === 1) {
         this.lastTouchPosition = {
           x: e.touches[0].clientX,
@@ -275,7 +289,7 @@ export class ZoomController {
         return;
       }
 
-      if (e.touches.length === 2 && this.isPinching) {
+      if (e.touches.length === 2) {
         e.preventDefault();
         const t1 = e.touches[0];
         const t2 = e.touches[1];
@@ -285,21 +299,41 @@ export class ZoomController {
           y: (t1.clientY + t2.clientY) / 2
         };
 
-        if (this.initialPinchDistance > 10) {
-          const scaleDelta = currentDistance / this.initialPinchDistance;
-          const targetScale = Math.max(this.minScale, Math.min(this.maxScale, this.initialScale * scaleDelta));
+        const isControlling = (typeof this.isControlActive === 'function' && this.isControlActive());
+        if (isControlling && this.twoFingerMode === 'pending') {
+          const distDelta = Math.abs(currentDistance - this.initialPinchDistance);
+          const deltaY1 = t1.clientY - this.initialTouchY1;
+          const deltaY2 = t2.clientY - this.initialTouchY2;
+          const sameDirection = (deltaY1 * deltaY2 > 0);
+          const avgDeltaY = (Math.abs(deltaY1) + Math.abs(deltaY2)) / 2;
 
-          // Also account for two-finger panning translation while pinching
-          const panDeltaX = currentMidpoint.x - this.lastTouchPosition.x;
-          const panDeltaY = currentMidpoint.y - this.lastTouchPosition.y;
-
-          this.setZoom(targetScale, currentMidpoint.x, currentMidpoint.y);
-          if (this.scale > 1.0) {
-            this.panBy(panDeltaX, panDeltaY);
+          if (distDelta > 20) {
+            this.twoFingerMode = 'pinch';
+            this.isPinching = true;
+          } else if (sameDirection && avgDeltaY > 10 && distDelta < 18) {
+            this.twoFingerMode = 'scroll';
+            this.isPinching = false;
           }
         }
 
-        this.lastTouchPosition = currentMidpoint;
+        if (this.twoFingerMode === 'pinch' || (!isControlling && this.isPinching)) {
+          this.isPinching = true;
+          if (this.initialPinchDistance > 10) {
+            const scaleDelta = currentDistance / this.initialPinchDistance;
+            const targetScale = Math.max(this.minScale, Math.min(this.maxScale, this.initialScale * scaleDelta));
+
+            // Also account for two-finger panning translation while pinching
+            const panDeltaX = currentMidpoint.x - this.lastTouchPosition.x;
+            const panDeltaY = currentMidpoint.y - this.lastTouchPosition.y;
+
+            this.setZoom(targetScale, currentMidpoint.x, currentMidpoint.y);
+            if (this.scale > 1.0) {
+              this.panBy(panDeltaX, panDeltaY);
+            }
+          }
+
+          this.lastTouchPosition = currentMidpoint;
+        }
       } else if (e.touches.length === 1) {
         // Prevent default browser page scrolling when dragging on the video feed
         e.preventDefault();
@@ -322,9 +356,11 @@ export class ZoomController {
       this.activeTouchCount = e.touches.length;
       if (e.touches.length < 2) {
         this.isPinching = false;
+        this.twoFingerMode = null;
       }
       if (e.touches.length === 0) {
         this.isPanning = false;
+        this.twoFingerMode = null;
         // Suppress phantom clicks after pinch gesture
         setTimeout(() => {
           this.ignoreNextClick = false;

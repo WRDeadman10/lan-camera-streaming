@@ -184,8 +184,10 @@ export class MobileRemoteController {
     );
 
     if (screenPos) {
+      const clampedRelX = Math.max(0, Math.min(rect.width - 16, screenPos.screenRelX));
+      const clampedRelY = Math.max(0, Math.min(rect.height - 16, screenPos.screenRelY));
       this.cursorOverlay.style.display = 'block';
-      this.cursorOverlay.style.transform = `translate(${screenPos.screenRelX.toFixed(2)}px, ${screenPos.screenRelY.toFixed(2)}px)`;
+      this.cursorOverlay.style.transform = `translate(${clampedRelX.toFixed(2)}px, ${clampedRelY.toFixed(2)}px)`;
     }
   }
 
@@ -657,6 +659,9 @@ export class MobileRemoteController {
         return;
       }
 
+      // Prevent default to suppress synthesized mouse events and browser double-tap viewport zoom
+      e.preventDefault();
+
       if (e.touches.length === 1) {
         const touch = e.touches[0];
         this.touchStartTime = Date.now();
@@ -695,7 +700,6 @@ export class MobileRemoteController {
         }
         this.isTwoFingerScrolling = true;
         this.lastTwoFingerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-        e.preventDefault();
       }
     }, { passive: false });
 
@@ -732,18 +736,65 @@ export class MobileRemoteController {
         if (this.mode === 'mouse') {
           // Touchpad relative pointer movement
           const rect = this.containerElement.getBoundingClientRect();
-          const scale = this.zoomController ? this.zoomController.scale : 1.0;
+          const scale = (this.zoomController && this.zoomController.scale > 0) ? this.zoomController.scale : 1.0;
           const adjustedSens = (this.sensitivity / (rect.width * scale));
 
           this.normX = Math.max(0, Math.min(1, this.normX + deltaX * adjustedSens));
           this.normY = Math.max(0, Math.min(1, this.normY + deltaY * adjustedSens));
 
+          // Edge auto-pan when zoomed in: if the arrow reaches the visible container edge,
+          // but the remote screen edge has not been reached yet (normX/normY still has room),
+          // drag the zoomed-in view in that direction.
+          if (this.zoomController && scale > 1.01) {
+            const { vw, vh } = this._getMediaDimensions(rect);
+            const zoomState = this.zoomController.getState();
+            const screenPos = getScreenCoordinatesFromNormalized(
+              this.normX,
+              this.normY,
+              rect,
+              vw,
+              vh,
+              zoomState.scale,
+              zoomState.panX,
+              zoomState.panY
+            );
+
+            if (screenPos) {
+              const edgeMargin = 28;
+              let panDeltaX = 0;
+              let panDeltaY = 0;
+
+              // Right edge: cursor near/at right border, user moving right, remote content extends further right
+              if (screenPos.screenRelX >= (rect.width - edgeMargin) && deltaX > 0 && this.normX < 1.0) {
+                panDeltaX = -Math.abs(deltaX) * this.sensitivity * 1.25;
+              }
+              // Left edge: cursor near/at left border, user moving left, remote content extends further left
+              else if (screenPos.screenRelX <= edgeMargin && deltaX < 0 && this.normX > 0.0) {
+                panDeltaX = Math.abs(deltaX) * this.sensitivity * 1.25;
+              }
+
+              // Bottom edge: cursor near/at bottom border, user moving down, remote content extends further down
+              if (screenPos.screenRelY >= (rect.height - edgeMargin) && deltaY > 0 && this.normY < 1.0) {
+                panDeltaY = -Math.abs(deltaY) * this.sensitivity * 1.25;
+              }
+              // Top edge: cursor near/at top border, user moving up, remote content extends further up
+              else if (screenPos.screenRelY <= edgeMargin && deltaY < 0 && this.normY > 0.0) {
+                panDeltaY = Math.abs(deltaY) * this.sensitivity * 1.25;
+              }
+
+              if (panDeltaX !== 0 || panDeltaY !== 0) {
+                this.zoomController.panBy(panDeltaX, panDeltaY);
+              }
+            }
+          }
+
           this.updateCursorOverlay(this.normX, this.normY);
           this._throttledMouseMove(this.normX, this.normY);
         }
-      } else if (e.touches.length === 2 && this.isTwoFingerScrolling) {
-        // If zooming is happening, let ZoomController handle it
-        if (this.zoomController && this.zoomController.isPinching) {
+      } else if (e.touches.length === 2) {
+        // Disambiguate with ZoomController: if clearly pinching, ZoomController handles zoom
+        const isPinching = (this.zoomController && (this.zoomController.twoFingerMode === 'pinch' || this.zoomController.isPinching));
+        if (isPinching) {
           return;
         }
 
@@ -751,10 +802,11 @@ export class MobileRemoteController {
         const deltaScrollY = midY - this.lastTwoFingerY;
         this.lastTwoFingerY = midY;
 
-        if (Math.abs(deltaScrollY) > 2) {
+        const isScrollMode = (this.zoomController && this.zoomController.twoFingerMode === 'scroll') || this.isTwoFingerScrolling;
+        if (isScrollMode && Math.abs(deltaScrollY) > 2) {
           this.sendControlInput({
             type: 'mouse_wheel',
-            deltaY: -deltaScrollY * 4,
+            deltaY: -deltaScrollY * 3.5,
             deltaX: 0
           });
         }
@@ -769,6 +821,9 @@ export class MobileRemoteController {
       if (isInteractiveUI(e.target)) {
         return;
       }
+
+      // Prevent default to suppress synthesized mouse events
+      e.preventDefault();
 
       if (this.longPressTimer) {
         clearTimeout(this.longPressTimer);
@@ -791,10 +846,10 @@ export class MobileRemoteController {
         const elapsed = Date.now() - this.touchStartTime;
         const dist = Math.hypot(touch.clientX - this.touchStartX, touch.clientY - this.touchStartY);
 
-        if (elapsed < 300 && dist < 12) {
+        if (elapsed < 320 && dist < 12) {
           this.lastTapTime = Date.now();
           if (this.mode === 'mouse') {
-            // Touchpad tap -> Left Click
+            // Touchpad tap -> Left Click AT CURRENT CURSOR POSITION (do not jump)
             this.sendControlInput({ type: 'mouse_click', button: 'left' });
           } else {
             // Touch mode tap -> Map to host screen and Click

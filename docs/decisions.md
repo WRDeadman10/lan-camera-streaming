@@ -875,6 +875,38 @@ On Windows Chromium browsers (Google Chrome, Microsoft Edge, Comet, Brave, Opera
 **Consequences:**
 Windows users on Comet, Chrome, Edge, and other Chromium browsers receive immediate, automated, browser-tailored instructions to disable mDNS anonymization with one-click URL copying, allowing effortless LAN WebRTC streaming to mobile devices.
 
+## ADR-042: Mobile Touchpad Edge Auto-Pan, Tap-Without-Jump Disambiguation, and Pinch-vs-Scroll Isolation
+
+**Status:** Accepted (2026-10-21)
+
+**Context:**
+During mobile remote desktop control in TeamViewer-style touchpad (`mouse`) mode:
+1. When zoomed in, dragging the cursor to the visible boundary of the mobile viewport caused the pointer to stop at the edge even though the remote Windows desktop extended much further in that direction. Users expect the viewport to auto-pan in the direction of the drag ("edge push-to-pan") until the actual remote desktop edge is reached.
+2. Tapping anywhere on the mobile screen caused the pointer to jump to the tap location instead of executing a click at the cursor's current position that the user had navigated to. This was caused by synthesized mouse events (`mousedown`, `mouseup`) escaping touch handlers and triggering desktop pointer coordinate translation in `viewer.js`.
+3. Swiping with two fingers to scroll (wheel scroll) unintentionally triggered pinch-to-zoom because `ZoomController` unconditionally treated any two-finger touch as a pinch gesture without disambiguating parallel movement. Additionally, double-tapping triggered mobile browser viewport zoom and desktop fullscreen toggles.
+
+**Decision:**
+1. **Edge Auto-Pan Engine (`src/public/js/mobile-control.js`):**
+   - When zoomed in (`scale > 1.01`) in `mouse` mode:
+   - Evaluates cursor screen position via `getScreenCoordinatesFromNormalized` against an edge margin threshold (28px).
+   - If cursor reaches an edge moving in that direction and the remote screen boundary is not yet reached (`normX < 1.0` right, `normX > 0.0` left, `normY < 1.0` bottom, `normY > 0.0` top), smoothly pans the zoomed viewport in that direction via `zoomController.panBy(panDeltaX, panDeltaY)`.
+   - When the physical remote desktop edge is reached, panning stops cleanly.
+   - Clamped visual overlay positioning (`clampedRelX, clampedRelY`) keeps the cursor arrow visibly pinned at the screen border while the desktop slides underneath.
+2. **Tap Click Disambiguation (Zero Pointer Jump):**
+   - Active touch prevention: `touchstart` and `touchend` call `e.preventDefault()` on non-interactive targets, instructing the browser to suppress synthesized `mousedown`/`mouseup` events.
+   - Tap in `mouse` mode dispatches `{ type: 'mouse_click', button: 'left' }` strictly at the cursor's existing normalized position without modifying `normX`/`normY` or sending `mouse_move`.
+   - Updated `bindDesktopPointerControls` in `src/public/js/viewer.js` to utilize Pointer Events with strict touch/pen exclusion (`e.pointerType === 'touch' || e.sourceCapabilities?.firesTouchEvents`), preventing any synthetic event from moving the remote cursor.
+3. **Pinch vs Two-Finger Scroll Disambiguation (`src/public/js/zoom-controller.js`):**
+   - When `isControlActive()` is true, two-finger gestures initialize in a `'pending'` mode.
+   - If distance delta between fingers exceeds 20px, locks to `'pinch'` (scaling feed, suppressing wheel events).
+   - If both fingers move in parallel in the same vertical direction (> 10px travel, < 18px distance variation), locks to `'scroll'` (sending `mouse_wheel` packets via `MobileRemoteController` while preserving exact zoom scale).
+   - Guarded `videoWrapper`'s `dblclick` listener to prevent full-screen toggling during active remote control sessions.
+4. **Verification:**
+   - Added 4 comprehensive unit test cases in `tests/mobile-control-ui.test.js` covering tap coordinate preservation, edge auto-pan triggering and stopping at desktop boundaries, parallel two-finger scroll isolation, and pinch zoom isolation (237/237 tests passing).
+
+**Consequences:**
+Mobile remote control provides a professional TeamViewer-grade experience: dragging to the edge smoothly auto-scrolls across the entire multi-monitor or widescreen Windows desktop, tapping clicks precisely where the pointer is positioned without jumping, two-finger scrolling scrolls documents without zooming, and pinch zooming remains fluid and isolated.
+
 ## Open decisions to revisit after the first working stream
 
 - Whether to code-sign the installer and executables (ADR-024).

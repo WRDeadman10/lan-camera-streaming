@@ -270,3 +270,9 @@ Tasks:
 - [x] Add a persistent `🌐 LAN Guide` shortcut button in the Session Setup card header.
 - [x] Integrate probe and reactive banner unhiding on connection failure into `src/public/js/sender.js`.
 - [x] Automated Test Coverage: 233 tests passing across 25 test suites (`tests/mdns-detector.test.js`).
+
+## Phase 20: Mobile Touchpad Edge Auto-Pan & Gesture Disambiguation [Completed]
+
+- **Edge Auto-Pan Engine**: Viewport slides smoothly when touchpad cursor approaches screen edges while zoomed in (`scale > 1.0`), stopping at host screen boundaries (`normX/normY` [0.0, 1.0]).
+- **Tap Click Precision**: Single tap in touchpad mouse mode clicks at current pointer position with zero coordinate jumping, eliminating synthetic mousedown/mouseup leaks.
+- **Pinch vs Two-Finger Scroll Disambiguation**: Two-finger parallel vertical swiping triggers smooth mouse wheel scrolling; radial finger distance expansion triggers pinch-to-zoom; suppresses browser viewport double-tap zoom.
