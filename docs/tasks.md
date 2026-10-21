@@ -488,3 +488,30 @@ Decision: **ADR-025**.
 - [x] Add `.brand-version:empty { display: none; }` in `src/public/css/style.css` to prevent empty layout shifts.
 - [x] Add automated unit tests in `tests/server.test.js`, `tests/phase-b-features.test.js`, and `tests/viewer-layout-reconnect.test.js`.
 - [x] Rebuild embedded assets via `node scripts/build-embedded-assets.js`.
+
+
+## P4.12 — Mobile Zoom, Touch Interaction and TeamViewer-Style Remote Control (ADR-038)
+
+- [x] Implement `ZoomController` in `src/public/js/zoom-controller.js` supporting two-finger pinch-to-zoom (1x-4x) centered on pinch midpoint, pan boundary constraints, Fit Screen reset, and floating `+`/`-` buttons.
+- [x] Extend coordinate mapping in `src/public/js/control-coords.js` to support zoom scale and pan translation offsets in `translateScreenCoordinates` and add `getScreenCoordinatesFromNormalized`.
+- [x] Add unit tests in `tests/zoom-and-coords.test.js` validating zoom/pan coordinate transformation round-trips and aspect ratio handling.
+- [ ] Extend `remote-control-helper` native C++ daemon:
+  - [ ] Add `PrintScreen` -> `VK_SNAPSHOT` in `KeycodeMapper`.
+  - [ ] Add `InjectText(const std::wstring& text)` with `KEYEVENTF_UNICODE` in `InputInjector`.
+  - [ ] Add `text` message handling in `LoopbackServer`.
+  - [ ] Add native unit tests in `remote-control-helper/tests/test_main.cpp`.
+  - [ ] Build and verify `remote-control-helper`.
+- [ ] Implement adaptive cursor overlay (`#remoteCursorOverlay`) with stable CSS pixel sizing and accurate host hotspot positioning.
+- [ ] Implement Mouse Mode (touchpad relative movement, tap left click, long-press right click, two-finger scroll, double-tap & drag) and Touch Mode (direct screen tap) with gesture disambiguation.
+- [ ] Implement mobile remote-control toolbar:
+  - [ ] Exit / Release control button.
+  - [ ] Keyboard toggle button.
+  - [ ] Mouse / Touch mode toggle button and interaction method bottom sheet with gesture guide.
+  - [ ] Shortcuts panel button and bottom sheet (Copy, Paste, Print Screen, Switch Apps, Save).
+  - [ ] Special keys panel button and grid (`Esc`, `F1`-`F12`, `Tab`, `PrtSc`, `ScrLk`, `Pause`, `Ins`, `Home`, `PgUp`, `Del`, `End`, `PgDn`, arrow keys).
+  - [ ] Settings button for pointer sensitivity.
+  - [ ] Expand / Collapse toggle.
+- [ ] Implement mobile keyboard integration with hidden text input layer, auxiliary modifier keys bar (`Shift`, `Ctrl`, `Alt`, `Win`, `...`), and keyboard dismissal.
+- [ ] Add unit and integration tests in `tests/mobile-control-ui.test.js`.
+- [ ] Rebuild embedded assets via `node scripts/build-embedded-assets.js` and verify full test suite.
+- [ ] Update all documentation files (`project-overview.md`, `architecture.md`, `decisions.md`, `roadmap.md`, `tasks.md`, `ai_handoff.md`).

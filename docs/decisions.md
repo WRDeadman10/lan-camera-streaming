@@ -746,6 +746,55 @@ The header brand badges across sender, viewer, and discovery pages previously ha
 **Consequences:**
 Any version bump in `package.json` immediately and automatically reflects across the server, API endpoints, CLI, sender header, viewer header, and hub page without requiring manual string updates across frontend files or server templates. Standalone executables, development runs, and LAN discovery beacons remain consistently synchronized.
 
+## ADR-038: Mobile Pinch-to-Zoom, Touch Interaction and TeamViewer-Style Remote Desktop Control
+
+**Status:** Accepted (2026-10-21)
+
+**Context:**
+1. Mobile viewers previously could not pinch-to-zoom or pan camera feeds or screen-sharing feeds, limiting inspection of fine UI elements, documents, or small desktop text.
+2. Mobile viewers that obtained remote desktop control lacked a functional mobile touch control surface: standard mouse events relied on physical desktop mice, clicks did not account for display scaling, zoom, or letterboxing, mobile virtual keyboards could not type into the remote Windows desktop, modifier keys (Shift, Ctrl, Alt, Win) were inaccessible, and there was no touchpad or adaptive cursor overlay matching industry-standard remote access applications (TeamViewer).
+
+**Decision:**
+1. **Universal Pinch-to-Zoom and Pan (`src/public/js/zoom-controller.js`):**
+   - Manage local scale (1.0x to 4.0x) and translation (panX, panY) through hardware-accelerated CSS transforms applied to the active media element (`remoteVideo` or `remoteCanvas`).
+   - Center pinch-to-zoom at the exact midpoint between the user's two fingers.
+   - Enforce boundary clamping so content cannot be panned beyond viewable viewport boundaries.
+   - Provide floating `+` and `-` zoom buttons docked on the right side of the video viewport, along with double-tap or button Fit Screen reset.
+   - Ensure media stream playback, WebRTC peer connections, and video decoders are never interrupted or renegotiated during zoom.
+2. **Zoom-Aware Coordinate Mapping (`src/public/js/control-coords.js`):**
+   - Extend coordinate transformation functions (`translateScreenCoordinates` and `getScreenCoordinatesFromNormalized`) to account for:
+     1. Viewport bounding client rectangle.
+     2. Intrinsic video dimensions (`videoWidth`, `videoHeight`).
+     3. Aspect ratio letterbox/pillarbox geometry (`calculateVideoRenderBox`).
+     4. Current zoom scale factor.
+     5. Current pan translation offsets (`panX`, `panY`).
+   - Guarantees 1:1 pixel accuracy when tapping remote controls while zoomed in.
+3. **Adaptive Cursor Overlay (`#remoteCursorOverlay`):**
+   - Render a high-visibility pointer overlay positioned via `getScreenCoordinatesFromNormalized`.
+   - Maintain stable physical size in mobile CSS pixels regardless of zoom scale.
+   - Keep overlay pointer hotspot aligned with the native host cursor coordinates.
+4. **Dual Interaction Modes:**
+   - **Mouse Mode (Touchpad):** The mobile screen acts as a relative touchpad. Drag moves the pointer via accumulated sensitivity; single tap performs left-click; long-press triggers right-click; two-finger drag scrolls vertically/horizontally; double-tap-and-drag performs click-and-drag (text selection, window moving).
+   - **Touch Mode (Direct Tap):** Taps map directly to host screen coordinates.
+   - **Gesture Disambiguation:** Two-finger pinch gestures are reserved for local zoom and strictly suppressed from sending remote mouse movements or clicks.
+5. **Mobile Remote-Control Toolbar & Drawers:**
+   - Implement responsive, collapsible bottom toolbar matching TeamViewer mobile patterns:
+     - Exit / Release control.
+     - Keyboard toggle.
+     - Mouse / Touch mode toggle and gesture guide bottom sheet.
+     - Shortcuts panel (Copy, Paste, Print Screen, Switch Apps, Save).
+     - Special keys pad (`Esc`, `F1`-`F12`, `Tab`, `PrtSc`, `ScrLk`, `Pause`, `Ins`, `Home`, `PgUp`, `Del`, `End`, `PgDn`, arrow keys).
+     - Settings (pointer sensitivity).
+     - Collapse/Expand chevron toggle.
+6. **Mobile Keyboard & Unicode Native Input:**
+   - Provide an invisible text entry layer to invoke the native mobile virtual keyboard.
+   - Support Unicode text input via `KEYEVENTF_UNICODE` in `remote-control-helper` (`InjectText`), plus backspace, enter, and composition events.
+   - Provide an auxiliary modifier key bar (`Shift`, `Ctrl`, `Alt`, `Win`, `...`) with held-state indicators.
+   - Map `VK_SNAPSHOT` for PrintScreen.
+
+**Consequences:**
+Mobile viewers gain an intuitive, production-grade remote control experience matching TeamViewer, allowing detailed inspection of Windows desktops via pinch-to-zoom, responsive touchpad and direct touch control, accurate clicks across all zoom levels, complete keyboard and modifier entry, and zero impact on view-only streaming.
+
 ## Open decisions to revisit after the first working stream
 
 - Whether to code-sign the installer and executables (ADR-024).

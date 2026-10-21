@@ -89,7 +89,30 @@ Version: `package.json` is 1.0.36.
   - Verified embedded asset generation with 23 embedded files (`npm run build:assets`).
 - **Not verified:** Live manual end-to-end chat across two physical devices on separate Wi-Fi networks.
 
-## Modified files (last iteration, 2026-10-18)
+## Modified files (last iteration, 2026-10-21)
+
+- Frontend Modules: `src/public/js/zoom-controller.js` (universal pinch-to-zoom 1x-4x, pan constraints, midpoint zoom center, Fit Screen reset), `src/public/js/control-coords.js` (zoom-scale & pan-offset aware coordinate translation and round-trip normalized-to-screen projection).
+- Tests: `tests/zoom-and-coords.test.js` (letterbox/pillarbox calculation, zoom/pan coordinate inverse, round-trip fidelity, zoom controller state & CSS transform verification).
+- Documentation: `docs/project-overview.md`, `docs/architecture.md` (§18), `docs/decisions.md` (ADR-038), `docs/roadmap.md` (§Phase 16), `docs/tasks.md` (§P4.12), `docs/ai_handoff.md`.
+
+## Next recommended task
+
+1. Phase 2: Extend native remote-control helper (`remote-control-helper`) with Unicode text injection (`KEYEVENTF_UNICODE`), `PrintScreen` keycode mapping (`VK_SNAPSHOT`), and native unit tests.
+2. Phase 3: Implement adaptive cursor overlay, touchpad Mouse mode and direct Touch mode in viewer.
+
+## Commands run and results (latest)
+
+- `node --test tests/zoom-and-coords.test.js`: 5/5 tests passed in 83ms.
+- `npm test`: 213/213 tests passed across 22 suites in 3.65s.
+
+## Change log (newest first)
+
+- **2026-10-21 — Universal Pinch-to-Zoom, Pan Engine & Zoom-Aware Coordinate Mapping (ADR-038, Phase 1).**
+  - Problem & Requirements: Mobile viewers watching streams or desktop shares could not zoom or inspect small details. In addition, existing coordinate translation (`control-coords.js`) assumed unzoomed 1:1 viewports, which would cause remote clicks to land on completely wrong desktop coordinates when zoomed or panned.
+  - Solution: (1) Implemented `ZoomController` in `src/public/js/zoom-controller.js` supporting two-finger pinch-to-zoom (1.0x to 4.0x) centered at the midpoint between fingers, pan translation boundary constraints, Fit Screen reset, external transform composition, and touch gesture handling; (2) Extended `translateScreenCoordinates` and authored `getScreenCoordinatesFromNormalized` in `src/public/js/control-coords.js` integrating zoom scale, pan translation, letterbox/pillarbox display geometry, and viewport bounding rectangles with exact mathematical round-trip fidelity; (3) Added unit test suite `tests/zoom-and-coords.test.js` validating render box aspect ratio calculations, zoomed coordinate inversion, scale/pan round-trips, and zoom controller lifecycle.
+  - Verification: 213/213 automated tests passing across 22 test suites.
+
+## Previous Iteration (2026-10-18)
 
 - Frontend Chat Module & UI: `src/public/js/chat.js` (auto-name, persistence, drawer, WhatsApp bubbles, Unsplash background, audio chime, swipe gesture, VisualViewport keyboard adaptation), `src/public/css/style.css` (drawer, badge, bubbles, header, input, mobile responsive portrait & landscape rules), `src/public/sender.html`, `src/public/viewer.html`.
 - Client Controllers: `src/public/js/sender.js` (chat socket/room wiring), `src/public/js/viewer.js` (chat socket/room wiring).

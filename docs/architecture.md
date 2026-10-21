@@ -490,3 +490,66 @@ A standalone C++ Windows desktop application mounted as a Git submodule:
 - **Normalized Video Mapping:** The viewer translates mouse coordinates relative to the actual rendered video content rectangle (compensating for letterboxing, aspect ratios, and CSS scaling) into normalized `[0.0, 1.0]` floats.
 - **WebRTC DataChannel (`lancam-control`):** Input messages (movement, clicks, drags, key presses) travel directly between controller viewer and sender peer via an ordered, low-latency DataChannel with Socket.IO relay fallback.
 
+
+
+## 18. Mobile Zoom, Touch Interaction & TeamViewer-Style Remote Architecture
+
+```mermaid
+flowchart TB
+    subgraph Mobile Viewer
+        Gestures[Gesture Recognizer\nPinch / Pan / Tap / LongPress / 2-Finger Scroll]
+        ZoomEngine[ZoomController\n1x-4x Smooth CSS Transform + Boundary Clamping]
+        CoordEngine[control-coords.js\nZoom & Letterbox Aware Matrix]
+        CursorOverlay[Adaptive Cursor Overlay\nStable CSS Pixels + Inverse Hotspot Position]
+        Toolbar[Mobile Control Toolbar\nCollapsible Bottom Dock + Modals]
+        InputLayer[Mobile Keyboard Input Layer\nIME Text + Auxiliary Modifiers + Special Keys]
+    end
+
+    subgraph Transports
+        DataChannel[WebRTC DataChannel: lancam-control]
+        SocketRelay[Socket.IO Signaling Fallback: control:input]
+    end
+
+    subgraph Host Machine
+        SenderClient[Browser Sender]
+        NativeHelper[remote-control-helper\nC++17 SendInput Daemon]
+        WinOS[Windows OS Desktop]
+    end
+
+    Gestures -->|Pinch / Pan| ZoomEngine
+    Gestures -->|Mouse / Touch Actions| CoordEngine
+    CoordEngine -->|Normalized Coordinates [0, 1]| CursorOverlay
+    CoordEngine -->|Input Events| DataChannel
+    Toolbar -->|Modifier / Special / Shortcuts| DataChannel
+    InputLayer -->|Committed Unicode Text| DataChannel
+    DataChannel -.->|Fallback if DC closed| SocketRelay
+    DataChannel --> SenderClient
+    SocketRelay --> SenderClient
+    SenderClient -->|ws://127.0.0.1:8765| NativeHelper
+    NativeHelper -->|SendInput + KEYEVENTF_UNICODE| WinOS
+```
+
+### 18.1 Universal Viewport Zoom and Pan Engine
+- **Independent Local Presentation:** Zoom operates strictly locally on the viewer canvas or video element using CSS `transform: translate(panX, panY) scale(scale)`. WebRTC peer connections, bitrates, resolutions, and video decoders remain uninterrupted.
+- **Midpoint Pinch Geometry:** When a two-finger pinch occurs, the zoom transformation updates around the dynamic midpoint between the two touches, keeping the focal point steady under the user's fingers.
+- **Pan Clamping:** Translation is bounded so that content cannot drift completely outside the visible viewport: `maxPanX = (renderWidth * (scale - 1)) / 2 + ...`.
+- **Floating Controls:** Floating circular `+` and `-` zoom buttons on the viewport right margin provide one-touch zooming and Fit Screen resetting without obstructing video controls.
+
+### 18.2 Zoom-Aware Coordinate Mapping Pipeline
+Coordinate translation maps from mobile viewport client pixels `(clientX, clientY)` to normalized host coordinates `(normX, normY) in [0.0, 1.0]`:
+1. Calculate letterbox/pillarbox offset and dimension `(box.left, box.top, box.width, box.height)` inside the container.
+2. Calculate local touch position relative to the centered box.
+3. Invert current zoom and pan: `contentX = (touchX - panX - box.left - box.width / 2) / scale + box.width / 2`.
+4. Normalize against `box.width` and `box.height` and clamp to `[0.0, 1.0]`.
+5. Reverse calculation positions the adaptive cursor overlay `#remoteCursorOverlay` at the exact screen pixel corresponding to the remote pointer location.
+
+### 18.3 Mouse Mode vs Touch Mode
+- **Mouse Mode (Touchpad):** The entire viewer surface acts as a trackpad. Relative pointer movements with sensitivity accumulation move the cursor overlay and host pointer. Single tap left-clicks; long press (>500ms) right-clicks; two-finger vertical dragging scrolls; double-tap-and-drag performs click-and-drag.
+- **Touch Mode (Direct Tap):** Tapping any point on the video translates directly to the corresponding host coordinate and performs an immediate left-click.
+- **Gesture Disambiguation:** Multi-finger pinch gestures are dedicated to zoom and pan, completely suppressing mouse injection events to prevent unintended clicks while navigating.
+
+### 18.4 Mobile Remote-Control Toolbar & Special Input
+- **Collapsible Bottom Dock:** Modeled on TeamViewer's mobile UI, featuring Exit, Keyboard, Mode Switcher, Shortcuts, Special Keys, Sensitivity Settings, and Collapse/Expand actions.
+- **Auxiliary Modifier Row:** Positioned above the mobile keyboard with `Shift`, `Ctrl`, `Alt`, and `Win` keys with latching/held visual states.
+- **Special Keys & Shortcuts:** Matrix grid with function keys (`F1`-`F12`), navigation (`Ins`, `Del`, `Home`, `End`, `PgUp`, `PgDn`), arrows, and working shortcuts (`Ctrl+C`, `Ctrl+V`, `Win+PrtScn`, `Win+Tab`, `Ctrl+S`).
+- **Unicode Text Injection:** An invisible mobile `<input>` captures committed IME text, sending `{"type":"text", "text":"..."}` packets executed via Windows `KEYEVENTF_UNICODE`.

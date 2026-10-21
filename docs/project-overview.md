@@ -31,6 +31,7 @@ The first milestone was one sender and one viewer. Since ADR-018 a room accepts 
 - Distribute the server as a standalone Windows executable (`lan-camera-streaming.exe`) that needs no Node.js on the target PC.
 - Offer a Windows **virtual webcam** ("LAN Phone Camera") so any Windows application can use the phone camera: a Media Foundation camera for the Windows Camera app, Teams, Zoom, Chrome and Unity (Windows 11), and a DirectShow camera for OBS, ffmpeg and older software. It ships as one Inno Setup installer (`lan-camera-setupv<version>.exe`) built from the `vcam` submodule.
 - Offer **remote desktop control** for Windows desktop screen sharing: an authorized viewer can control the host mouse and keyboard via permanent password or temporary session PIN, using the native `remote-control-helper` submodule and WebRTC DataChannel / loopback IPC.
+- Offer **mobile-optimized viewing & TeamViewer-style remote control**: universal pinch-to-zoom (1x-4x) and pan across all media sources, zoom-aware coordinate translation, touchpad-style Mouse mode and direct Touch mode, adaptive cursor overlay, mobile control toolbar, on-screen keyboard text input, modifier keys, and special shortcuts (ADR-038).
 - Avoid recording, storing, or uploading video to a cloud service.
 
 ## 4. Non-goals for the MVP
