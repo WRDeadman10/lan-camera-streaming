@@ -542,3 +542,15 @@ Decision: **ADR-025**.
 - [x] Add automated unit tests in tests/zoom-and-coords.test.js and tests/mobile-control-ui.test.js (226/226 tests passing).
 - [x] Rebuild embedded fallback assets via node scripts/build-embedded-assets.js.
 - [x] Update all 6 documentation files (project-overview.md, architecture.md, decisions.md, roadmap.md, tasks.md, ai_handoff.md).
+
+## P4.15 — WebRTC mDNS Local IP Concealment Detection & Multi-Browser Guidance (ADR-041)
+
+- [x] Create `src/public/js/mdns-detector.js` with multi-browser flag scheme resolution (Comet, Edge, Brave, Opera, Vivaldi, Arc, Chrome).
+- [x] Implement Windows platform detection (`isWindowsPlatform`).
+- [x] Implement zero-server local ICE candidate probe (`probeMdnsLocalIpHiding`) to detect active mDNS hostname anonymization.
+- [x] Add `#mdnsWarningBanner` and `#mdnsGuidanceModal` to `src/public/sender.html` with step-by-step instructions, copy button, and live retest button.
+- [x] Add persistent `🌐 LAN Guide` shortcut button in Session Setup card header.
+- [x] Integrate probe and reactive banner unhiding on connection failure into `src/public/js/sender.js`.
+- [x] Add comprehensive unit test suite `tests/mdns-detector.test.js` (7/7 tests passing, 233 total tests passing across all 25 suites).
+- [x] Rebuild embedded fallback assets via `node scripts/build-embedded-assets.js`.
+- [x] Update all documentation files (`project-overview.md`, `architecture.md`, `decisions.md`, `roadmap.md`, `tasks.md`, `ai_handoff.md`).

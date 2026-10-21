@@ -39,7 +39,8 @@ The project is feature-complete across all 16 proposed ecosystem phases and veri
 | Mobile Zoom, Touch Interaction & TeamViewer-Style Remote Control (ADR-038) | **Delivered**: Universal pinch-to-zoom (1x-4x) and pan across all media sources, zoom-aware letterbox coordinate translation, touchpad Mouse mode, direct Touch mode, adaptive cursor overlay, collapsible mobile control toolbar, virtual keyboard IME text input, auxiliary modifier keys bar, special keys grid, and shortcuts |
 | Ubuntu 24.04 & POSIX Linux Hosting Supervisor (`start.sh`, ADR-039) | **Delivered**: `start.sh` mirroring `start.ps1` with bash shebang, strict LF line endings, `--local-only` / `-LocalOnly` / `-l` flags, Ubuntu network discovery (`hostname -I`, `ip -4 addr`), safe `.env` loading, zrok tunnel management, terminal QR codes, and process cleanup traps |
 | Mobile Viewport Gesture Isolation & Feed Panning (ADR-040) | **Delivered**: CSS `touch-action: none` on `.video-container`, `#videoWrapper`, `#remoteVideo`, and `#remoteCanvas`; active gesture listeners (`{ passive: false }`); `e.preventDefault()` on 2-finger pinch and drag; single-finger feed panning when `scale > 1.0`; touchpad pointer drag isolation; Safari gesture suppression |
-| Automated tests | 226/226 pass (`node --test`) |
+| WebRTC mDNS Local IP Concealment Detection & Multi-Browser Guidance (ADR-041) | **Delivered**: Automatic detection of Windows mDNS local IP concealment; browser vendor & flag scheme detection (Comet, Edge, Brave, Opera, Vivaldi, Arc, Chrome); dismissible warning banner; interactive guidance modal with copyable flag URL & live retest; 233/233 tests passing |
+| Automated tests | 233/233 pass (`node --test`) |
 
 Version: `package.json` is 1.0.36.
 
@@ -94,26 +95,35 @@ Version: `package.json` is 1.0.36.
 
 ## Modified files (last iteration, 2026-10-21)
 
-- `src/public/css/style.css`: Added `touch-action: none` and `overscroll-behavior: none` to `.video-container`, `#videoWrapper`, `#remoteVideo`, `#remoteCanvas`; added `touch-action: pan-y` and `overscroll-behavior: contain` to `.control-bottom-sheet`; added `touch-action: manipulation` to `.video-hud`, `.floating-zoom-controls`, `.mobile-control-toolbar`, `.mobile-modifier-bar`.
-- `src/public/js/zoom-controller.js`: Active gesture listeners (`{ passive: false }`); `e.preventDefault()` on 2-finger touchstart and pinch touchmove; single-finger feed panning (`panBy(deltaX, deltaY)`) when `scale > 1.0` and remote control inactive; Safari iOS gesture suppression; interactive UI filtering.
-- `src/public/js/mobile-control.js`: Active gesture listeners (`{ passive: false }`); `e.preventDefault()` on touchmove during mouse pointer and touch drag to prevent mobile page scroll; resilient `requestAnimationFrame` fallback in `_throttledMouseMove`.
-- `src/public/js/viewer.js`: Passed `isControlActive: () => isControlActive` to `ZoomController`.
-- `tests/zoom-and-coords.test.js`: Added tests for CSS touch-action isolation, ZoomController gesture isolation, and single-finger feed panning.
-- `tests/mobile-control-ui.test.js`: Added tests verifying touchpad drag `e.preventDefault()` and relative pointer movement.
-- Documentation: `docs/tasks.md`, `docs/decisions.md`, `docs/ai_handoff.md`.
+- `src/public/js/mdns-detector.js`: Created module with `detectBrowserFlagInfo` (Comet, Edge, Brave, Opera, Vivaldi, Arc, Chrome), `isWindowsPlatform`, `isPrivateIpv4`, `probeMdnsLocalIpHiding`, and `setupMdnsWarningAndGuidance`.
+- `src/public/sender.html`: Added `#mdnsWarningBanner`, `#mdnsGuidanceModal`, and persistent `🌐 LAN Guide` shortcut in Session Setup card header.
+- `src/public/js/sender.js`: Integrated startup probe and reactive warning unhiding and diagnostics logging on ICE connection failure.
+- `tests/mdns-detector.test.js`: Comprehensive unit test suite with 7 test cases covering browser detection, OS checks, candidate parsing, probe logic, and DOM events.
+- Documentation: `docs/project-overview.md`, `docs/architecture.md`, `docs/decisions.md`, `docs/roadmap.md`, `docs/tasks.md`, `docs/ai_handoff.md`.
 
 ## Next recommended task
 
-1. Deploy or test on real mobile devices (Android Chrome and iOS Safari) on the local LAN network.
-2. Monitor real-world touch performance and user feedback during remote desktop control sessions.
+1. Test with mobile Android/iOS viewer devices over local LAN Wi-Fi with and without mDNS anonymization.
+2. Verify direct P2P LAN ICE connection establishment with raw IPv4 host candidates.
 
 ## Commands run and results (latest)
 
-- `npm test`: 226/226 tests passed across 24 suites in ~6.2s.
-- `node scripts/build-embedded-assets.js`: 26 files embedded successfully.
+- `npm test`: 233/233 tests passed across 25 suites in ~4.2s.
+- `node scripts/build-embedded-assets.js`: 27 files embedded successfully.
 - `git diff --check`: 0 errors.
 
 ## Change log (newest first)
+
+- **2026-10-21 — WebRTC mDNS Local IP Concealment Detection & Multi-Browser Guidance (ADR-041).**
+  - Problem: Chromium browsers on Windows (Comet, Chrome, Edge, Brave, Opera, Vivaldi, Arc) by default conceal private LAN IPv4 addresses with temporary mDNS `.local` hostnames, preventing Android/iOS mobile viewers from connecting directly over LAN. Browsers restrict web applications from directly hyperlinking to internal `://flags` URLs, and different Chromium forks use distinct URL schemes (e.g. `comet://flags`, `edge://flags`, `chrome://flags`).
+  - Solution:
+    1. Created `src/public/js/mdns-detector.js` implementing `detectBrowserFlagInfo()` (resolving exact scheme such as `comet://flags/#enable-webrtc-hide-local-ips-with-mdns`), `isWindowsPlatform()`, `isPrivateIpv4()`, zero-server ICE probe `probeMdnsLocalIpHiding()`, and DOM coordinator `setupMdnsWarningAndGuidance()`.
+    2. Added `#mdnsWarningBanner` on `sender.html` with one-click "Copy Flag URL", "Step-by-Step Guide", and dismiss actions.
+    3. Added interactive `#mdnsGuidanceModal` on `sender.html` with numbered instructions, copyable flag URL box, note explaining browser link security policies, and a live "Test Setting Again" re-probe button.
+    4. Added persistent `🌐 LAN Guide` button in Session Setup card header.
+    5. Updated `sender.js` to run the probe on Windows startup, and reactively unhide the banner and log browser-specific flag URLs if ICE connection fails during a stream session.
+    6. Added test suite `tests/mdns-detector.test.js` (7/7 tests passing, 233 total tests passing).
+
 
 - **2026-10-21 — Mobile Viewport Gesture Isolation and Feed Panning (ADR-040).**
   - Problem: On mobile devices, two-finger pinch-to-zoom was zooming the entire web application viewport (header, sidebar, text, page) instead of scaling only the video feed, and dragging on the video feed was scrolling the web page instead of panning the zoomed feed or moving the remote desktop pointer.

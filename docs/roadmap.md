@@ -257,3 +257,16 @@ Tasks:
 - [x] Implement single-finger video feed panning (panBy(deltaX, deltaY)) in ZoomController when scale > 1.0 and remote control is inactive.
 - [x] Suppress iOS Safari proprietary gesture events (gesturestart, gesturechange, gestureend) on the container.
 - [x] Automated Test Coverage: 226 tests passing across 24 test suites (tests/zoom-and-coords.test.js, tests/mobile-control-ui.test.js).
+
+## Phase 19 — WebRTC mDNS Local IP Concealment Detection & Multi-Browser Guidance (ADR-041) [Completed]
+
+**Objective:** Automatically detect when a Windows sender is concealing its LAN IP address behind mDNS `.local` hostnames, detect the specific browser vendor and internal flag scheme (`comet://flags`, `edge://flags`, `chrome://flags`, etc.), and provide clear step-by-step guidance to set "Anonymize local IPs exposed by WebRTC" to Disabled for direct LAN streaming.
+
+Tasks:
+- [x] Create `src/public/js/mdns-detector.js` with browser flag scheme resolution across Comet, Edge, Brave, Opera, Vivaldi, Arc, and Chrome/Chromium.
+- [x] Implement Windows platform check (`isWindowsPlatform`) and zero-server local ICE candidate gathering probe (`probeMdnsLocalIpHiding`).
+- [x] Add prominent, dismissible warning banner (`#mdnsWarningBanner`) on `src/public/sender.html` with one-click "Copy Flag URL" and "Step-by-Step Guide" actions.
+- [x] Add interactive guidance modal (`#mdnsGuidanceModal`) explaining the technical requirement, displaying the copyable flag URL, step-by-step instructions, and a live "Test Setting Again" probe button.
+- [x] Add a persistent `🌐 LAN Guide` shortcut button in the Session Setup card header.
+- [x] Integrate probe and reactive banner unhiding on connection failure into `src/public/js/sender.js`.
+- [x] Automated Test Coverage: 233 tests passing across 25 test suites (`tests/mdns-detector.test.js`).

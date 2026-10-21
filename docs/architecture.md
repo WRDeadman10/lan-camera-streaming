@@ -560,3 +560,28 @@ Coordinate translation maps from mobile viewport client pixels `(clientX, client
 - **Active Gesture Event Model:** Event listeners for 	ouchstart and 	ouchmove in ZoomController and MobileRemoteController operate with { passive: false }, calling .preventDefault() on two-finger pinches and feed drag movements.
 - **Feed Panning (View Mode):** When remote control is inactive and scale > 1.0, single-finger drags pan the zoomed video feed smoothly within boundary clamps (panBy(deltaX, deltaY)).
 - **Subordinate Scroll Surfaces:** .control-bottom-sheet explicitly defines 	ouch-action: pan-y; overscroll-behavior: contain;, guaranteeing smooth internal vertical scrolling of shortcuts and keys without leaking gestures to the document.
+
+## 19. WebRTC mDNS Local IP Concealment Detection & Browser Flag Guidance (ADR-041)
+
+### 19.1 Background & mDNS Anonymization Problem
+Chromium-based desktop browsers (Chrome, Edge, Comet, Brave, Opera, Vivaldi, Arc) anonymize private LAN IPv4 addresses by default, replacing WebRTC host candidates with UUID mDNS hostnames (`<uuid>.local`). While beneficial on public networks, in local LAN peer-to-peer streaming:
+- Mobile phones (Android, iOS) typically lack local mDNS resolvers capable of resolving ephemeral Chromium UUIDs.
+- Without STUN/TURN traversal over LAN, peer-to-peer connection establishment between the Windows sender and mobile viewer fails or reverts to high-latency relays.
+- Setting `#enable-webrtc-hide-local-ips-with-mdns` to **Disabled** in the browser flags immediately restores direct LAN IPv4 host candidate publication (`192.168.x.x`, `10.x.x.x`).
+
+### 19.2 Multi-Browser Flag Scheme Resolution
+Browsers enforce security barriers preventing web applications from directly navigating or hyperlinking to internal flag pages. The application dynamically inspects the host user agent and resolves the exact vendor scheme:
+- **Comet:** `comet://flags/#enable-webrtc-hide-local-ips-with-mdns`
+- **Microsoft Edge:** `edge://flags/#enable-webrtc-hide-local-ips-with-mdns`
+- **Brave:** `brave://flags/#enable-webrtc-hide-local-ips-with-mdns`
+- **Opera / Opera GX:** `opera://flags/#enable-webrtc-hide-local-ips-with-mdns`
+- **Vivaldi:** `vivaldi://flags/#enable-webrtc-hide-local-ips-with-mdns`
+- **Yandex:** `ybrowser://flags/#enable-webrtc-hide-local-ips-with-mdns`
+- **Arc:** `arc://flags/#enable-webrtc-hide-local-ips-with-mdns`
+- **Google Chrome / Chromium:** `chrome://flags/#enable-webrtc-hide-local-ips-with-mdns`
+
+### 19.3 Automated Probing & Guidance Architecture
+- **Proactive Probe (`probeMdnsLocalIpHiding`):** A zero-server local `RTCPeerConnection` probe with a loopback data channel evaluates gathered host candidates on Windows sender startup in ~50ms. If candidates end with `.local` and no private IPv4 is gathered, concealment is flagged as active.
+- **Visual Warning Banner (`#mdnsWarningBanner`):** Surfaced above the session setup card, presenting the detected browser name, one-click "Copy Flag URL" action, and interactive guidance trigger.
+- **Interactive Guidance Modal (`#mdnsGuidanceModal`):** Provides step-by-step instructions matching the browser flags UI and a live "Test Setting Again" button that re-runs the probe to verify settings without restarting the server.
+- **Reactive Stream Detection:** If candidate gathering during a live streaming session detects `.local` candidates on connection failure, diagnostic logs and the warning banner are dynamically surfaced with the exact browser flag URL.

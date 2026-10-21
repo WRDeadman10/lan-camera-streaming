@@ -850,6 +850,31 @@ On mobile devices (Android Chrome, iOS Safari), viewing or remotely controlling 
 **Consequences:**
 Pinch-to-zoom strictly zooms the video feed element (1x to 4x) without resizing the website header or page layout. Dragging on the video feed pans the zoomed video feed when zoomed in (view mode) or moves the remote cursor (mouse mode) without scrolling the web page. Scrolling outside the video feed and inside bottom sheets remains fully functional.
 
+## ADR-041: WebRTC mDNS Local IP Concealment Detection & Multi-Browser Flag Guidance
+
+**Status:** Accepted (2026-10-21)
+
+**Context:**
+On Windows Chromium browsers (Google Chrome, Microsoft Edge, Comet, Brave, Opera, Vivaldi, Arc), WebRTC by default anonymizes private LAN IPv4 addresses by replacing host candidates with temporary mDNS `.local` hostnames (e.g. `9b2d86f7-...local`). When streaming camera feeds or screen sharing to Android phones, iOS devices, or other LAN endpoints, the receiver cannot resolve the host machine's mDNS hostname without a local mDNS responder, causing WebRTC direct P2P connections to fail. Disabling the browser flag `enable-webrtc-hide-local-ips-with-mdns` immediately exposes the private LAN IP address and allows instant LAN streaming. Different Chromium forks use distinct internal URL schemes (`comet://flags`, `edge://flags`, `chrome://flags`, `brave://flags`, etc.) and browsers block web pages from directly navigating to internal `://flags` URLs for security.
+
+**Decision:**
+1. **Multi-Browser Detection & Scheme Resolution (`src/public/js/mdns-detector.js`):**
+   - Implemented `detectBrowserFlagInfo()` detecting Comet, Edge, Brave, Opera, Vivaldi, Yandex, Arc, and Chrome/Chromium, resolving exact internal schemes (`comet://flags/#enable-webrtc-hide-local-ips-with-mdns`, `edge://flags/...`, etc.).
+   - Implemented `isWindowsPlatform()` detecting Windows environments via `navigator.userAgentData.platform`, `navigator.platform`, and user agent strings.
+   - Implemented `probeMdnsLocalIpHiding()` creating a fast, zero-server local `RTCPeerConnection` probe to gather host candidates. If candidates contain `.local` and no private LAN IPv4 address is emitted, mDNS concealment is detected as active.
+2. **Interactive Warning & Guidance UI (`src/public/sender.html`):**
+   - Added `#mdnsWarningBanner` above the setup card, surfacing the detected browser name, one-click `Copy Flag URL` button, `Step-by-Step Guide` launcher, and session dismissal.
+   - Added `#mdnsGuidanceModal` featuring detailed step-by-step instructions matching browser flags UI, copyable flag URL box, note explaining browser link restrictions, and a live `Test Setting Again` re-probe button.
+   - Added a persistent `🌐 LAN Guide` button in the Session Setup card header to access guidance at any time.
+3. **Sender Lifecycle Integration (`src/public/js/sender.js`):**
+   - Automated startup evaluation for Windows senders.
+   - Reactively unhides the warning banner and logs browser-specific flag URLs if ICE connection fails during a stream session.
+4. **Verification:**
+   - Added unit test suite `tests/mdns-detector.test.js` verifying browser flag URLs, Windows platform checks, candidate parsing, probe gathering, and DOM event wiring (233/233 tests passing).
+
+**Consequences:**
+Windows users on Comet, Chrome, Edge, and other Chromium browsers receive immediate, automated, browser-tailored instructions to disable mDNS anonymization with one-click URL copying, allowing effortless LAN WebRTC streaming to mobile devices.
+
 ## Open decisions to revisit after the first working stream
 
 - Whether to code-sign the installer and executables (ADR-024).

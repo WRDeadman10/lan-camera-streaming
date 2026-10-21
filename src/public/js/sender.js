@@ -13,6 +13,9 @@ import { getRecommendedBitrateHints, isQualityMode, readVideoBitrateParams } fro
 import { classifyEncoder } from './encoder-info.js';
 import { formatSenderStats } from './sender-stats.js';
 import { getChatManager } from './chat.js';
+import { setupMdnsWarningAndGuidance } from './mdns-detector.js';
+
+let mdnsController = null;
 
 const cameraManager = new CameraManager();
 let socket = null;
@@ -2187,7 +2190,12 @@ function createSenderPeerForViewer(viewerId, iceServers) {
       } else if (state === 'failed') {
         logDiagnostic(`[P2P:${viewerId}] Connection failed.`, 'ERROR');
         if (viewerPeerHidesLanAddress.has(viewerId)) {
-          logDiagnostic(`[DIAGNOSIS:${viewerId}] THIS browser hides its LAN IP behind an mDNS name (xxxx.local) because the page has no camera/mic permission, so viewers on other devices often cannot reach it. Fix: allow Camera or Microphone for this site (site settings), or set chrome://flags/#enable-webrtc-hide-local-ips-with-mdns to Disabled and restart Chrome.`, 'WARN');
+          const flagUrl = mdnsController ? mdnsController.browserInfo.flagUrl : 'chrome://flags/#enable-webrtc-hide-local-ips-with-mdns';
+          logDiagnostic(`[DIAGNOSIS:${viewerId}] Browser conceals its LAN IP behind an mDNS name (*.local). Viewers on mobile phones cannot reach this stream. Fix: Open ${flagUrl}, set "Anonymize local IPs exposed by WebRTC" to Disabled, and relaunch your browser.`, 'WARN');
+          const banner = document.getElementById('mdnsWarningBanner');
+          if (banner) {
+            banner.style.display = 'block';
+          }
         }
       }
     },
@@ -2956,6 +2964,14 @@ if (roomIdInput) {
 }
 populateCameraDevices();
 fetchIceServers().catch(() => {});
+
+mdnsController = setupMdnsWarningAndGuidance();
+const btnOpenMdnsGuideFromCard = document.getElementById('btnOpenMdnsGuideFromCard');
+if (btnOpenMdnsGuideFromCard && mdnsController) {
+  btnOpenMdnsGuideFromCard.addEventListener('click', () => {
+    mdnsController.openModal();
+  });
+}
 
 // URL query parameters parsing for auto-connect & prefilling
 const streamParams = parseUrlStreamParams();
