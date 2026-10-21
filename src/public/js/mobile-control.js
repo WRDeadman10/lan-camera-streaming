@@ -640,13 +640,20 @@ export class MobileRemoteController {
       return;
     }
 
+    const isInteractiveUI = (target) => {
+      if (!target || typeof target.closest !== 'function') {
+        return false;
+      }
+      return Boolean(target.closest('#mobileControlToolbar, .control-bottom-sheet, #mobileModifierBar, .floating-zoom-controls, .video-hud, button, a, input, select, textarea'));
+    };
+
     this.containerElement.addEventListener('touchstart', (e) => {
       if (!this.isControlActive()) {
         return;
       }
 
       // Ignore touches if interacting with toolbar or bottom sheets
-      if (e.target.closest('#mobileControlToolbar, .control-bottom-sheet, #mobileModifierBar, .floating-zoom-controls, .video-hud')) {
+      if (isInteractiveUI(e.target)) {
         return;
       }
 
@@ -680,25 +687,29 @@ export class MobileRemoteController {
             }
           }, 500);
         }
-      } else if (e.touches.length === 2) {
-        // Cancel single-finger gesture timers
+      } else if (e.touches.length >= 2) {
+        // Cancel single-finger gesture timers and prevent page zoom
         if (this.longPressTimer) {
           clearTimeout(this.longPressTimer);
           this.longPressTimer = null;
         }
         this.isTwoFingerScrolling = true;
         this.lastTwoFingerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        e.preventDefault();
       }
-    }, { passive: true });
+    }, { passive: false });
 
     this.containerElement.addEventListener('touchmove', (e) => {
       if (!this.isControlActive()) {
         return;
       }
 
-      if (e.target.closest('#mobileControlToolbar, .control-bottom-sheet, #mobileModifierBar, .floating-zoom-controls, .video-hud')) {
+      if (isInteractiveUI(e.target)) {
         return;
       }
+
+      // Prevent mobile page scroll while actively interacting with the remote desktop
+      e.preventDefault();
 
       if (e.touches.length === 1) {
         const touch = e.touches[0];
@@ -748,10 +759,14 @@ export class MobileRemoteController {
           });
         }
       }
-    }, { passive: true });
+    }, { passive: false });
 
     this.containerElement.addEventListener('touchend', (e) => {
       if (!this.isControlActive()) {
+        return;
+      }
+
+      if (isInteractiveUI(e.target)) {
         return;
       }
 
@@ -792,7 +807,7 @@ export class MobileRemoteController {
         this.isTwoFingerScrolling = false;
         this.isLongPressed = false;
       }
-    }, { passive: true });
+    }, { passive: false });
   }
 
   /**
@@ -832,7 +847,11 @@ export class MobileRemoteController {
   _throttledMouseMove(x, y) {
     this.pendingMoveCoords = { x, y };
     if (!this.moveThrottleTimer) {
-      this.moveThrottleTimer = requestAnimationFrame(() => {
+      const raf = (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function')
+        ? window.requestAnimationFrame
+        : (typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (cb) => setTimeout(cb, 16));
+
+      this.moveThrottleTimer = raf(() => {
         if (this.pendingMoveCoords) {
           this.sendControlInput({
             type: 'mouse_move',

@@ -244,3 +244,16 @@ Tasks:
 - [x] Process supervisor, `/health` polling, and clean signal teardown traps (`SIGINT`, `SIGTERM`, `EXIT`).
 - [x] Terminal QR code rendering via `qrcode-terminal`.
 - [x] Automated Test Coverage: 224 tests passing across 24 test suites (`tests/start-script.test.js`).
+
+## Phase 18 — Mobile Viewport Gesture Isolation and Feed Panning (ADR-040) [Completed]
+
+**Objective:** Eliminate mobile browser gesture conflicts so that pinch-to-zoom strictly zooms the video feed element (not the browser viewport/web app layout) and dragging on the video feed does not scroll the web page.
+
+Tasks:
+- [x] Configure CSS touch-action: none and overscroll-behavior: none on .video-container, #videoWrapper, #remoteVideo, and #remoteCanvas to prevent mobile browser viewport zoom and document scroll leak.
+- [x] Configure CSS touch-action: pan-y and overscroll-behavior: contain on .control-bottom-sheet for smooth sheet scrolling without document scroll-chaining.
+- [x] Configure CSS touch-action: manipulation on toolbars and HUD buttons to support responsive taps while disabling double-tap browser viewport zoom.
+- [x] Refactor ZoomController and MobileRemoteController touch event listeners to active ({ passive: false }) and prevent default browser gestures.
+- [x] Implement single-finger video feed panning (panBy(deltaX, deltaY)) in ZoomController when scale > 1.0 and remote control is inactive.
+- [x] Suppress iOS Safari proprietary gesture events (gesturestart, gesturechange, gestureend) on the container.
+- [x] Automated Test Coverage: 226 tests passing across 24 test suites (tests/zoom-and-coords.test.js, tests/mobile-control-ui.test.js).

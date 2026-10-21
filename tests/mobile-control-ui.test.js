@@ -336,7 +336,7 @@ describe('Mobile Remote Control UI and Interaction Engine Verification', () => {
     assert.strictEqual(modifierBar.style.display, 'none');
   });
 
-  test('Touch gestures handle single tap in mouse mode, two-finger scroll, and direct touch clicks', () => {
+  test('Touch gestures handle single tap in mouse mode, two-finger scroll, and direct touch clicks', async () => {
     const dom = new JSDOM(viewerHtmlContent, { url: 'http://localhost/' });
     const doc = dom.window.document;
     global.window = dom.window;
@@ -403,21 +403,43 @@ describe('Mobile Remote Control UI and Interaction Engine Verification', () => {
     // 3. Two-finger scroll in mouse mode
     mobileCtrl.setMode('mouse');
     dispatchedEvents.length = 0;
-    const twoFingerStart = new dom.window.Event('touchstart');
+    const twoFingerStart = new dom.window.Event('touchstart', { bubbles: true, cancelable: true });
+    let twoFingerStartPrevented = false;
+    twoFingerStart.preventDefault = () => { twoFingerStartPrevented = true; };
     twoFingerStart.touches = [
       { clientX: 200, clientY: 200 },
       { clientX: 250, clientY: 200 }
     ];
     videoWrapper.dispatchEvent(twoFingerStart);
+    assert.strictEqual(twoFingerStartPrevented, true, 'two-finger touchstart must prevent browser zoom');
 
-    const twoFingerMove = new dom.window.Event('touchmove');
+    const twoFingerMove = new dom.window.Event('touchmove', { bubbles: true, cancelable: true });
+    let twoFingerMovePrevented = false;
+    twoFingerMove.preventDefault = () => { twoFingerMovePrevented = true; };
     twoFingerMove.touches = [
       { clientX: 200, clientY: 250 },
       { clientX: 250, clientY: 250 }
     ];
     videoWrapper.dispatchEvent(twoFingerMove);
 
+    assert.strictEqual(twoFingerMovePrevented, true, 'two-finger touchmove must prevent browser scroll');
     assert.ok(dispatchedEvents.length >= 1);
     assert.strictEqual(dispatchedEvents[0].type, 'mouse_wheel');
+
+    // 4. Mouse pointer touchpad movement calls preventDefault to stop page scroll
+    dispatchedEvents.length = 0;
+    const singleTouchStart = new dom.window.Event('touchstart', { bubbles: true, cancelable: true });
+    singleTouchStart.touches = [{ clientX: 300, clientY: 300 }];
+    videoWrapper.dispatchEvent(singleTouchStart);
+
+    const singleTouchMove = new dom.window.Event('touchmove', { bubbles: true, cancelable: true });
+    let singleMovePrevented = false;
+    singleTouchMove.preventDefault = () => { singleMovePrevented = true; };
+    singleTouchMove.touches = [{ clientX: 320, clientY: 310 }];
+    videoWrapper.dispatchEvent(singleTouchMove);
+
+    assert.strictEqual(singleMovePrevented, true, 'touchmove during remote mouse drag must call preventDefault()');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.ok(dispatchedEvents.some((e) => e.type === 'mouse_move'), 'touchpad drag must emit mouse_move');
   });
 });

@@ -528,3 +528,17 @@ Decision: **ADR-025**.
 - [x] Add process supervisor and cleanup traps for `SIGINT`, `SIGTERM`, `EXIT` with dynamic share release.
 - [x] Add automated test suite `tests/start-script.test.js` (5/5 tests passing).
 - [x] Update all 6 documentation files (`project-overview.md`, `architecture.md`, `decisions.md`, `roadmap.md`, `tasks.md`, `ai_handoff.md`).
+
+## P4.14 — Mobile Viewport Gesture Isolation and Feed Panning (ADR-040)
+
+- [x] Configure CSS touch-action: none, overscroll-behavior: none, user-select: none, and -webkit-touch-callout: none on .video-container, #videoWrapper, #remoteVideo, and #remoteCanvas.
+- [x] Configure CSS touch-action: pan-y and overscroll-behavior: contain on .control-bottom-sheet for smooth vertical sheet scrolling without document scroll-chaining.
+- [x] Configure CSS touch-action: manipulation on .video-hud, .floating-zoom-controls, .mobile-control-toolbar, and .mobile-modifier-bar.
+- [x] Convert touchstart and touchmove in ZoomController to { passive: false } and call e.preventDefault() on two-finger pinch to prevent browser viewport scaling.
+- [x] Add single-finger feed panning (panBy(deltaX, deltaY)) in ZoomController when scale > 1.0 and remote control is inactive.
+- [x] Add iOS Safari gesturestart, gesturechange, gestureend prevention on containerElement.
+- [x] Update MobileRemoteController touch gesture engine with { passive: false } and e.preventDefault() on touchmove to prevent document scrolling while moving touchpad pointer.
+- [x] Pass isControlActive: () => isControlActive to ZoomController in viewer.js.
+- [x] Add automated unit tests in tests/zoom-and-coords.test.js and tests/mobile-control-ui.test.js (226/226 tests passing).
+- [x] Rebuild embedded fallback assets via node scripts/build-embedded-assets.js.
+- [x] Update all 6 documentation files (project-overview.md, architecture.md, decisions.md, roadmap.md, tasks.md, ai_handoff.md).

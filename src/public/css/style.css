@@ -308,6 +308,16 @@ html, body {
   position: relative;
   background-color: #000;
   overflow: hidden;
+  touch-action: none;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+#videoWrapper {
+  touch-action: none;
+  overscroll-behavior: none;
 }
 
 video {
@@ -315,6 +325,20 @@ video {
   height: 100%;
   object-fit: contain;
   display: block;
+  touch-action: none;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+#remoteVideo,
+#remoteCanvas {
+  touch-action: none;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .video-overlay-msg {
@@ -2854,6 +2878,8 @@ body.chat-drawer-open {
   transform: translateY(100%);
   transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  overscroll-behavior: contain;
 }
 
 .control-bottom-sheet.open {
@@ -3044,4 +3070,12 @@ body.chat-drawer-open {
   .special-keys-grid {
     grid-template-columns: repeat(4, 1fr);
   }
+}
+
+
+.video-hud,
+.floating-zoom-controls,
+.mobile-control-toolbar,
+.mobile-modifier-bar {
+  touch-action: manipulation;
 }

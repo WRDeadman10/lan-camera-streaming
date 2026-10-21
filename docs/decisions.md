@@ -820,6 +820,36 @@ The application was previously supervised primarily via PowerShell on Windows (`
 **Consequences:**
 Users can run `./start.sh` or `./start.sh --local-only` out of the box on Ubuntu 24.04 with zero Windows or PowerShell dependencies. Cleanup, background process management, terminal QR codes, and zrok share reservations behave identically across Linux and Windows.
 
+## ADR-040: Mobile Viewport Gesture Isolation and Touch Feed Panning
+
+**Status:** Accepted (2026-10-21)
+
+**Context:**
+On mobile devices (Android Chrome, iOS Safari), viewing or remotely controlling the stream encountered gesture conflicts:
+1. Two-finger pinch gestures zoomed the entire web page/viewport (header, status badges, sidebar, text) instead of scaling only the video feed.
+2. Dragging on the video feed scrolled the entire web application page rather than panning the zoomed video or moving the remote desktop pointer.
+3. Passive touch event listeners in ZoomController and MobileRemoteController prevented calling preventDefault(), allowing browser viewport gesture actions to take precedence.
+4. Missing CSS touch-action: none and overscroll-behavior: none on the video container and media elements allowed touch panning and pinch-to-zoom to leak to the document body.
+
+**Decision:**
+1. **CSS Viewport Isolation:**
+   - Configured touch-action: none, overscroll-behavior: none, user-select: none, and -webkit-touch-callout: none on .video-container, #videoWrapper, #remoteVideo, and #remoteCanvas.
+   - Configured touch-action: pan-y and overscroll-behavior: contain on .control-bottom-sheet so bottom sheets retain smooth vertical scrolling without scroll-chaining to the document body.
+   - Configured touch-action: manipulation on .video-hud, .floating-zoom-controls, .mobile-control-toolbar, and .mobile-modifier-bar to permit responsive taps while disabling double-tap viewport zoom.
+2. **ZoomController Gesture Refinement:**
+   - Converted touchstart and touchmove listeners from passive to active ({ passive: false }).
+   - On 2-finger touchstart, call preventDefault() immediately to halt browser viewport scaling before the browser locks into page zoom.
+   - In touchmove, always call preventDefault() on the feed to eliminate page scroll. When remote control is inactive and scale > 1.0, smoothly pan the zoomed feed by touch delta (panBy(deltaX, deltaY)).
+   - Added iOS Safari gesturestart, gesturechange, gestureend prevention (preventDefault()) on the container.
+   - Filtered interactive UI targets (buttons, hud, toolbar, bottom sheets) via isInteractiveTarget() so controls remain clickable.
+3. **MobileRemoteController Pointer Isolation:**
+   - Converted touch event listeners from passive to active ({ passive: false }).
+   - Called preventDefault() on touchmove during remote mouse trackpad movement and remote desktop touch, preventing website page scroll.
+   - Added resilient requestAnimationFrame fallback in _throttledMouseMove for environments where RAF is absent.
+
+**Consequences:**
+Pinch-to-zoom strictly zooms the video feed element (1x to 4x) without resizing the website header or page layout. Dragging on the video feed pans the zoomed video feed when zoomed in (view mode) or moves the remote cursor (mouse mode) without scrolling the web page. Scrolling outside the video feed and inside bottom sheets remains fully functional.
+
 ## Open decisions to revisit after the first working stream
 
 - Whether to code-sign the installer and executables (ADR-024).

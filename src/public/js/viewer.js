@@ -1045,7 +1045,8 @@ if (videoWrapper) {
     containerElement: videoWrapper,
     targetElements: [remoteVideo, remoteCanvas],
     minScale: 1.0,
-    maxScale: 4.0
+    maxScale: 4.0,
+    isControlActive: () => isControlActive
   });
 
   mobileRemoteController = new MobileRemoteController({

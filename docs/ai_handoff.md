@@ -38,7 +38,8 @@ The project is feature-complete across all 16 proposed ecosystem phases and veri
 | Dynamic Server-Derived Application Versioning (ADR-037) | **Delivered**: Dynamic single-source versioning via `getAppVersion()` reading `package.json` / `__APP_VERSION__`; exposed via `/api/version`, `/api/config`, `/api/discover`, `/health`; dynamic frontend badge hydration (`initializeVersionBadge()`) across sender, viewer, and hub |
 | Mobile Zoom, Touch Interaction & TeamViewer-Style Remote Control (ADR-038) | **Delivered**: Universal pinch-to-zoom (1x-4x) and pan across all media sources, zoom-aware letterbox coordinate translation, touchpad Mouse mode, direct Touch mode, adaptive cursor overlay, collapsible mobile control toolbar, virtual keyboard IME text input, auxiliary modifier keys bar, special keys grid, and shortcuts |
 | Ubuntu 24.04 & POSIX Linux Hosting Supervisor (`start.sh`, ADR-039) | **Delivered**: `start.sh` mirroring `start.ps1` with bash shebang, strict LF line endings, `--local-only` / `-LocalOnly` / `-l` flags, Ubuntu network discovery (`hostname -I`, `ip -4 addr`), safe `.env` loading, zrok tunnel management, terminal QR codes, and process cleanup traps |
-| Automated tests | 224/224 pass (`node --test`) |
+| Mobile Viewport Gesture Isolation & Feed Panning (ADR-040) | **Delivered**: CSS `touch-action: none` on `.video-container`, `#videoWrapper`, `#remoteVideo`, and `#remoteCanvas`; active gesture listeners (`{ passive: false }`); `e.preventDefault()` on 2-finger pinch and drag; single-finger feed panning when `scale > 1.0`; touchpad pointer drag isolation; Safari gesture suppression |
+| Automated tests | 226/226 pass (`node --test`) |
 
 Version: `package.json` is 1.0.36.
 
@@ -93,20 +94,41 @@ Version: `package.json` is 1.0.36.
 
 ## Modified files (last iteration, 2026-10-21)
 
-- Submodule `remote-control-helper` (`e60c978`): `include/InputInjector.h`, `src/InputInjector.cpp` (`InjectText`, `InjectMouseMoveRelative`), `src/KeycodeMapper.cpp` (`PrintScreen` -> `VK_SNAPSHOT`), `src/LoopbackServer.cpp` (`text`, `mouse_move_relative`), `tests/test_main.cpp`.
-- Documentation: `docs/tasks.md`, `docs/ai_handoff.md`.
+- `src/public/css/style.css`: Added `touch-action: none` and `overscroll-behavior: none` to `.video-container`, `#videoWrapper`, `#remoteVideo`, `#remoteCanvas`; added `touch-action: pan-y` and `overscroll-behavior: contain` to `.control-bottom-sheet`; added `touch-action: manipulation` to `.video-hud`, `.floating-zoom-controls`, `.mobile-control-toolbar`, `.mobile-modifier-bar`.
+- `src/public/js/zoom-controller.js`: Active gesture listeners (`{ passive: false }`); `e.preventDefault()` on 2-finger touchstart and pinch touchmove; single-finger feed panning (`panBy(deltaX, deltaY)`) when `scale > 1.0` and remote control inactive; Safari iOS gesture suppression; interactive UI filtering.
+- `src/public/js/mobile-control.js`: Active gesture listeners (`{ passive: false }`); `e.preventDefault()` on touchmove during mouse pointer and touch drag to prevent mobile page scroll; resilient `requestAnimationFrame` fallback in `_throttledMouseMove`.
+- `src/public/js/viewer.js`: Passed `isControlActive: () => isControlActive` to `ZoomController`.
+- `tests/zoom-and-coords.test.js`: Added tests for CSS touch-action isolation, ZoomController gesture isolation, and single-finger feed panning.
+- `tests/mobile-control-ui.test.js`: Added tests verifying touchpad drag `e.preventDefault()` and relative pointer movement.
+- Documentation: `docs/tasks.md`, `docs/decisions.md`, `docs/ai_handoff.md`.
 
 ## Next recommended task
 
-1. Phase 3: Implement adaptive cursor overlay, touchpad Mouse mode (relative drag, tap left-click, long-press right-click, 2-finger scroll, double-tap & drag) and direct Touch mode in viewer.
-2. Phase 4: Implement TeamViewer-style mobile remote-control toolbar and drawers.
+1. Deploy or test on real mobile devices (Android Chrome and iOS Safari) on the local LAN network.
+2. Monitor real-world touch performance and user feedback during remote desktop control sessions.
 
 ## Commands run and results (latest)
 
-- `.\remote-control-helper\build\Release\helper-tests.exe`: 6/6 native tests passed.
-- `npm test`: 213/213 tests passed across 22 suites in 3.65s.
+- `npm test`: 226/226 tests passed across 24 suites in ~6.2s.
+- `node scripts/build-embedded-assets.js`: 26 files embedded successfully.
+- `git diff --check`: 0 errors.
 
 ## Change log (newest first)
+
+- **2026-10-21 — Mobile Viewport Gesture Isolation and Feed Panning (ADR-040).**
+  - Problem: On mobile devices, two-finger pinch-to-zoom was zooming the entire web application viewport (header, sidebar, text, page) instead of scaling only the video feed, and dragging on the video feed was scrolling the web page instead of panning the zoomed feed or moving the remote desktop pointer.
+  - Root Cause:
+    1. `.video-container`, `#videoWrapper`, `#remoteVideo`, and `#remoteCanvas` lacked CSS `touch-action: none; overscroll-behavior: none;`.
+    2. `ZoomController` and `MobileRemoteController` bound `touchstart` and `touchmove` with `{ passive: true }`, preventing them from calling `e.preventDefault()`.
+    3. `ZoomController` only handled 2-finger pinches and did not implement single-finger panning when `scale > 1.0`.
+    4. Mobile Safari proprietary gesture events (`gesturestart`, `gesturechange`, `gestureend`) were not suppressed on the container.
+  - Solution:
+    1. Configured CSS `touch-action: none; overscroll-behavior: none; user-select: none; -webkit-touch-callout: none;` on `.video-container`, `#videoWrapper`, `#remoteVideo`, and `#remoteCanvas`.
+    2. Configured CSS `touch-action: pan-y; overscroll-behavior: contain;` on `.control-bottom-sheet` for smooth sheet scrolling without document scroll-chaining.
+    3. Converted touch listeners in `ZoomController` and `MobileRemoteController` to `{ passive: false }`.
+    4. In `ZoomController`: called `e.preventDefault()` on 2-finger `touchstart` and `touchmove` to halt browser viewport zoom; added single-finger feed panning via `panBy(deltaX, deltaY)` when `scale > 1.0` and remote control is inactive; suppressed Safari gesture events.
+    5. In `MobileRemoteController`: called `e.preventDefault()` on `touchmove` while moving the touchpad cursor or sending remote desktop touches; added resilient `requestAnimationFrame` fallback in `_throttledMouseMove`.
+  - Verification: Added automated unit tests in `tests/zoom-and-coords.test.js` and `tests/mobile-control-ui.test.js`. Rebuilt embedded fallback assets. 226/226 tests passing across 24 test suites.
 
 - **2026-10-21 — Native Helper Unicode Text Entry, Relative Movement & PrintScreen (ADR-038, Phase 2).**
   - Problem & Requirements: Virtual keyboard typing on phones produced arbitrary strings and Unicode text that could not be mapped to single physical scancodes. Shortcuts panel needed `PrintScreen`. Touchpad mode required relative pointer movements.

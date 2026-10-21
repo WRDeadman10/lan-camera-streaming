@@ -26,6 +26,7 @@ export class ZoomController {
     this.minScale = (options && options.minScale) || 1.0;
     this.maxScale = (options && options.maxScale) || 4.0;
     this.onZoomChange = (options && options.onZoomChange) || null;
+    this.isControlActive = (options && typeof options.isControlActive === 'function') ? options.isControlActive : null;
 
     this.scale = 1.0;
     this.panX = 0;
@@ -63,6 +64,14 @@ export class ZoomController {
   setExternalTransform(transformStr) {
     this.externalTransform = transformStr ? transformStr.trim() : '';
     this.applyTransform();
+  }
+
+  /**
+   * Set callback to determine if remote control is active.
+   * @param {Function} callback
+   */
+  setControlActive(callback) {
+    this.isControlActive = typeof callback === 'function' ? callback : null;
   }
 
   /**
@@ -214,11 +223,33 @@ export class ZoomController {
       return;
     }
 
-    // Touch event handlers for pinch-to-zoom
+    const isInteractiveTarget = (target) => {
+      if (!target || typeof target.closest !== 'function') {
+        return false;
+      }
+      return Boolean(target.closest('button, input, select, textarea, a, .video-hud, .floating-zoom-controls, .video-overlay-msg, #mobileControlToolbar, .control-bottom-sheet, #mobileModifierBar'));
+    };
+
+    // Suppress Safari proprietary viewport zoom gestures on the media viewport
+    const preventSafariGesture = (e) => {
+      if (!isInteractiveTarget(e.target)) {
+        e.preventDefault();
+      }
+    };
+    this.containerElement.addEventListener('gesturestart', preventSafariGesture, { passive: false });
+    this.containerElement.addEventListener('gesturechange', preventSafariGesture, { passive: false });
+    this.containerElement.addEventListener('gestureend', preventSafariGesture, { passive: false });
+
+    // Touch event handlers for pinch-to-zoom and pan
     this.containerElement.addEventListener('touchstart', (e) => {
+      if (isInteractiveTarget(e.target)) {
+        return;
+      }
+
       this.activeTouchCount = e.touches.length;
       if (e.touches.length === 2) {
-        // Two fingers: initialize pinch gesture
+        // Two fingers: initialize pinch gesture and prevent browser viewport scaling
+        e.preventDefault();
         this.isPinching = true;
         this.ignoreNextClick = true;
         const t1 = e.touches[0];
@@ -235,10 +266,15 @@ export class ZoomController {
           x: e.touches[0].clientX,
           y: e.touches[0].clientY
         };
+        this.isPanning = (this.scale > 1.0);
       }
-    }, { passive: true });
+    }, { passive: false });
 
     this.containerElement.addEventListener('touchmove', (e) => {
+      if (isInteractiveTarget(e.target)) {
+        return;
+      }
+
       if (e.touches.length === 2 && this.isPinching) {
         e.preventDefault();
         const t1 = e.touches[0];
@@ -264,10 +300,25 @@ export class ZoomController {
         }
 
         this.lastTouchPosition = currentMidpoint;
+      } else if (e.touches.length === 1) {
+        // Prevent default browser page scrolling when dragging on the video feed
+        e.preventDefault();
+
+        const isControlling = (typeof this.isControlActive === 'function' && this.isControlActive());
+        if (!isControlling && this.scale > 1.0 && this.lastTouchPosition) {
+          const t = e.touches[0];
+          const deltaX = t.clientX - this.lastTouchPosition.x;
+          const deltaY = t.clientY - this.lastTouchPosition.y;
+          this.lastTouchPosition = { x: t.clientX, y: t.clientY };
+          this.panBy(deltaX, deltaY);
+        }
       }
     }, { passive: false });
 
     const endTouchHandler = (e) => {
+      if (isInteractiveTarget(e.target)) {
+        return;
+      }
       this.activeTouchCount = e.touches.length;
       if (e.touches.length < 2) {
         this.isPinching = false;

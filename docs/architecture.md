@@ -554,3 +554,9 @@ Coordinate translation maps from mobile viewport client pixels `(clientX, client
 - **Auxiliary Modifier Row:** Positioned above the mobile keyboard with `Shift`, `Ctrl`, `Alt`, and `Win` keys with latching/held visual states.
 - **Special Keys & Shortcuts:** Matrix grid with function keys (`F1`-`F12`), navigation (`Ins`, `Del`, `Home`, `End`, `PgUp`, `PgDn`), arrows, and working shortcuts (`Ctrl+C`, `Ctrl+V`, `Win+PrtScn`, `Win+Tab`, `Ctrl+S`).
 - **Unicode Text Injection:** An invisible mobile `<input>` captures committed IME text, sending `{"type":"text", "text":"..."}` packets executed via Windows `KEYEVENTF_UNICODE`.
+
+### 18.5 Mobile Viewport Gesture Isolation & Feed Panning (ADR-040)
+- **Touch Action & Boundary Isolation:** .video-container, #videoWrapper, #remoteVideo, and #remoteCanvas enforce 	ouch-action: none and overscroll-behavior: none, completely isolating user gestures on the feed from document body scroll and browser-level pinch-to-zoom.
+- **Active Gesture Event Model:** Event listeners for 	ouchstart and 	ouchmove in ZoomController and MobileRemoteController operate with { passive: false }, calling .preventDefault() on two-finger pinches and feed drag movements.
+- **Feed Panning (View Mode):** When remote control is inactive and scale > 1.0, single-finger drags pan the zoomed video feed smoothly within boundary clamps (panBy(deltaX, deltaY)).
+- **Subordinate Scroll Surfaces:** .control-bottom-sheet explicitly defines 	ouch-action: pan-y; overscroll-behavior: contain;, guaranteeing smooth internal vertical scrolling of shortcuts and keys without leaking gestures to the document.
