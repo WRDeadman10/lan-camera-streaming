@@ -244,6 +244,20 @@ export class ControlBridge {
         return this._sendRaw({ type: 'mouse_move', x, y });
       }
 
+      case 'mouse_move_relative': {
+        const dx = typeof event.dx === 'number' ? Math.round(event.dx) : 0;
+        const dy = typeof event.dy === 'number' ? Math.round(event.dy) : 0;
+        return this._sendRaw({ type: 'mouse_move_relative', dx, dy });
+      }
+
+      case 'text': {
+        const text = typeof event.text === 'string' ? event.text : '';
+        if (!text) {
+          return false;
+        }
+        return this._sendRaw({ type: 'text', text });
+      }
+
       case 'mouse_down':
       case 'mouse_up':
       case 'mouse_click': {

@@ -37,6 +37,31 @@
           <video id="remoteVideo" autoplay playsinline style="display: block;"></video>
           <canvas id="remoteCanvas" style="display: none; width: 100%; height: 100%; object-fit: contain;"></canvas>
 
+          <!-- Adaptive Remote Cursor Overlay -->
+          <div id="remoteCursorOverlay" class="remote-cursor-overlay" style="display: none;" aria-hidden="true">
+            <svg class="cursor-pointer-icon" viewBox="0 0 24 24">
+              <path d="M3 3l7.5 18 2.5-7 7-2.5L3 3z" fill="#ffffff" stroke="#0f172a" stroke-width="1.5" stroke-linejoin="round"/>
+            </svg>
+          </div>
+
+          <!-- Floating Zoom Controls (TeamViewer Style) -->
+          <div class="floating-zoom-controls" id="floatingZoomControls">
+            <button type="button" id="btnFloatingZoomIn" class="floating-zoom-btn" title="Zoom In" aria-label="Zoom In">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+            </button>
+            <button type="button" id="btnFloatingZoomReset" class="floating-zoom-btn floating-zoom-pill" title="Reset Zoom (Fit Screen)" aria-label="Fit Screen" style="display: none;">
+              <span id="zoomLevelIndicator">1.0x</span>
+            </button>
+            <button type="button" id="btnFloatingZoomOut" class="floating-zoom-btn" title="Zoom Out" aria-label="Zoom Out">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+            </button>
+          </div>
+
           <!-- Status & Message Overlay -->
           <div id="videoOverlay" class="video-overlay-msg">
             <svg class="overlay-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -331,6 +356,230 @@
         </details>
       </aside>
     </main>
+  </div>
+
+  <!-- Mobile Remote-Control Bottom Toolbar (TeamViewer Style) -->
+  <nav class="mobile-control-toolbar" id="mobileControlToolbar" style="display: none;" aria-label="Remote Control Actions">
+    <button type="button" id="btnToolbarExitControl" class="toolbar-btn danger" title="Release Remote Control" aria-label="Release Control">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="18" y1="6" x2="6" y2="18"/>
+        <line x1="6" y1="6" x2="18" y2="18"/>
+      </svg>
+    </button>
+    <button type="button" id="btnToolbarKeyboard" class="toolbar-btn" title="On-Screen Keyboard" aria-label="Keyboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2" y="4" width="20" height="16" rx="2" ry="2"/>
+        <line x1="6" y1="8" x2="6" y2="8"/>
+        <line x1="10" y1="8" x2="10" y2="8"/>
+        <line x1="14" y1="8" x2="14" y2="8"/>
+        <line x1="18" y1="8" x2="18" y2="8"/>
+        <line x1="6" y1="12" x2="6" y2="12"/>
+        <line x1="10" y1="12" x2="10" y2="12"/>
+        <line x1="14" y1="12" x2="14" y2="12"/>
+        <line x1="18" y1="12" x2="18" y2="12"/>
+        <line x1="7" y1="16" x2="17" y2="16"/>
+      </svg>
+    </button>
+    <button type="button" id="btnToolbarMode" class="toolbar-btn" title="Interaction Method" aria-label="Interaction Method">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 3l7 18 3-7 7-3L3 3z"/>
+      </svg>
+    </button>
+    <button type="button" id="btnToolbarShortcuts" class="toolbar-btn" title="Shortcuts" aria-label="Shortcuts">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+      </svg>
+    </button>
+    <button type="button" id="btnToolbarSpecialKeys" class="toolbar-btn" title="Special Keys" aria-label="Special Keys">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2" y="4" width="14" height="16" rx="2"/>
+        <polyline points="18 8 22 12 18 16"/>
+        <line x1="14" y1="12" x2="22" y2="12"/>
+      </svg>
+    </button>
+    <button type="button" id="btnToolbarSettings" class="toolbar-btn" title="Control Settings" aria-label="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+    </button>
+    <button type="button" id="btnToolbarCollapse" class="toolbar-btn" title="Collapse Toolbar" aria-label="Collapse Toolbar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="6 9 12 15 18 9"/>
+      </svg>
+    </button>
+  </nav>
+
+  <!-- Expand Toolbar Floating Pill -->
+  <button type="button" id="btnToolbarExpand" class="floating-expand-toolbar-pill" style="display: none;" title="Expand Remote Control Toolbar" aria-label="Expand Toolbar">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="18 15 12 9 6 15"/>
+    </svg>
+    <span>Controls</span>
+  </button>
+
+  <!-- Auxiliary Modifier Row & Mobile Keyboard Surface -->
+  <div id="mobileModifierBar" class="mobile-modifier-bar" style="display: none;">
+    <button type="button" id="btnDismissKeyboard" class="modifier-key-btn dismiss-btn" title="Dismiss Keyboard" aria-label="Dismiss Keyboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="6 9 12 15 18 9"/>
+      </svg>
+    </button>
+    <button type="button" id="btnModShift" class="modifier-key-btn">Shift</button>
+    <button type="button" id="btnModCtrl" class="modifier-key-btn">Ctrl</button>
+    <button type="button" id="btnModAlt" class="modifier-key-btn">Alt</button>
+    <button type="button" id="btnModWin" class="modifier-key-btn" title="Windows Key">Win</button>
+    <button type="button" id="btnToggleSpecialFromBar" class="modifier-key-btn" title="More Keys">• • •</button>
+    <input type="text" id="mobileKeyboardInput" class="mobile-keyboard-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-hidden="true">
+  </div>
+
+  <!-- Bottom Sheet: Interaction Method -->
+  <div id="interactionMethodSheet" class="control-bottom-sheet" aria-label="Interaction Method">
+    <div class="sheet-header">
+      <div class="sheet-title-group">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="sheet-header-icon"><path d="M3 3l7 18 3-7 7-3L3 3z"/></svg>
+        <span class="sheet-title">Interaction method</span>
+      </div>
+      <button type="button" class="sheet-close-btn" aria-label="Close">&times;</button>
+    </div>
+    <div class="sheet-body">
+      <div class="mode-segmented-control">
+        <button type="button" id="btnModeMouse" class="mode-segment-btn active">Mouse mode</button>
+        <button type="button" id="btnModeTouch" class="mode-segment-btn">Touch mode</button>
+      </div>
+      <p id="interactionMethodSubtitle" class="sheet-subtitle">Use your device as a touchpad to control the mouse.</p>
+      <div class="gesture-guide-grid">
+        <div class="gesture-guide-card">
+          <div class="gesture-icon">👆</div>
+          <div class="gesture-label">Tap to click</div>
+        </div>
+        <div class="gesture-guide-card">
+          <div class="gesture-icon">⏱️</div>
+          <div class="gesture-label">Long tap to right-click</div>
+        </div>
+        <div class="gesture-guide-card">
+          <div class="gesture-icon">🤏</div>
+          <div class="gesture-label">Pinch to zoom</div>
+        </div>
+        <div class="gesture-guide-card">
+          <div class="gesture-icon">👉</div>
+          <div class="gesture-label">Drag to move mouse</div>
+        </div>
+        <div class="gesture-guide-card">
+          <div class="gesture-icon">✌️</div>
+          <div class="gesture-label">Two fingers to scroll</div>
+        </div>
+        <div class="gesture-guide-card">
+          <div class="gesture-icon">👆👆</div>
+          <div class="gesture-label">Double-tap & drag</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom Sheet: Shortcuts -->
+  <div id="shortcutsSheet" class="control-bottom-sheet" aria-label="Shortcuts">
+    <div class="sheet-header">
+      <div class="sheet-title-group">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="sheet-header-icon"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        <span class="sheet-title">Shortcuts</span>
+      </div>
+      <button type="button" class="sheet-close-btn" aria-label="Close">&times;</button>
+    </div>
+    <div class="sheet-body">
+      <div class="shortcuts-list">
+        <button type="button" id="btnShortcutCopy" class="shortcut-list-item">
+          <span class="shortcut-icon">📄</span>
+          <span class="shortcut-text">Copy (Ctrl + C)</span>
+        </button>
+        <button type="button" id="btnShortcutPaste" class="shortcut-list-item">
+          <span class="shortcut-icon">📋</span>
+          <span class="shortcut-text">Paste (Ctrl + V)</span>
+        </button>
+        <button type="button" id="btnShortcutPrintScreen" class="shortcut-list-item">
+          <span class="shortcut-icon">📸</span>
+          <span class="shortcut-text">Print screen (PrtScn)</span>
+        </button>
+        <button type="button" id="btnShortcutSwitchApps" class="shortcut-list-item">
+          <span class="shortcut-icon">🔄</span>
+          <span class="shortcut-text">Switch between apps (Alt + Tab)</span>
+        </button>
+        <button type="button" id="btnShortcutSave" class="shortcut-list-item">
+          <span class="shortcut-icon">💾</span>
+          <span class="shortcut-text">Save (Ctrl + S)</span>
+        </button>
+        <button type="button" id="btnShortcutMore" class="shortcut-list-item">
+          <span class="shortcut-icon">⌨️</span>
+          <span class="shortcut-text">More Special Keys</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom Sheet: Special Keys -->
+  <div id="specialKeysSheet" class="control-bottom-sheet" aria-label="Special Keys">
+    <div class="sheet-header">
+      <div class="sheet-title-group">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="sheet-header-icon"><rect x="2" y="4" width="14" height="16" rx="2"/><polyline points="18 8 22 12 18 16"/></svg>
+        <span class="sheet-title">Special Keys</span>
+      </div>
+      <button type="button" class="sheet-close-btn" aria-label="Close">&times;</button>
+    </div>
+    <div class="sheet-body">
+      <div class="special-keys-grid">
+        <button type="button" class="key-pad-btn" data-special-key="Escape">Esc</button>
+        <button type="button" class="key-pad-btn" data-special-key="F1">F1</button>
+        <button type="button" class="key-pad-btn" data-special-key="F2">F2</button>
+        <button type="button" class="key-pad-btn" data-special-key="F3">F3</button>
+        <button type="button" class="key-pad-btn" data-special-key="F4">F4</button>
+        <button type="button" class="key-pad-btn" data-special-key="F5">F5</button>
+        <button type="button" class="key-pad-btn" data-special-key="F6">F6</button>
+
+        <button type="button" class="key-pad-btn" data-special-key="Tab">Tab</button>
+        <button type="button" class="key-pad-btn" data-special-key="F7">F7</button>
+        <button type="button" class="key-pad-btn" data-special-key="F8">F8</button>
+        <button type="button" class="key-pad-btn" data-special-key="F9">F9</button>
+        <button type="button" class="key-pad-btn" data-special-key="F10">F10</button>
+        <button type="button" class="key-pad-btn" data-special-key="F11">F11</button>
+        <button type="button" class="key-pad-btn" data-special-key="F12">F12</button>
+
+        <button type="button" class="key-pad-btn" data-special-key="PrintScreen">PrtSc</button>
+        <button type="button" class="key-pad-btn" data-special-key="ScrollLock">ScrLk</button>
+        <button type="button" class="key-pad-btn" data-special-key="Pause">Pause</button>
+        <button type="button" class="key-pad-btn" data-special-key="Insert">Ins</button>
+        <button type="button" class="key-pad-btn" data-special-key="Home">Home</button>
+        <button type="button" class="key-pad-btn" data-special-key="PageUp">PgUp</button>
+        <button type="button" class="key-pad-btn" data-special-key="ArrowUp">↑</button>
+
+        <button type="button" class="key-pad-btn" data-special-key="Delete">Del</button>
+        <button type="button" class="key-pad-btn" data-special-key="End">End</button>
+        <button type="button" class="key-pad-btn" data-special-key="PageDown">PgDn</button>
+        <button type="button" class="key-pad-btn" data-special-key="ArrowLeft">←</button>
+        <button type="button" class="key-pad-btn" data-special-key="ArrowDown">↓</button>
+        <button type="button" class="key-pad-btn" data-special-key="ArrowRight">→</button>
+        <button type="button" class="key-pad-btn" data-special-key="Enter">↵</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom Sheet: Control Settings -->
+  <div id="controlSettingsSheet" class="control-bottom-sheet" aria-label="Control Settings">
+    <div class="sheet-header">
+      <div class="sheet-title-group">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="sheet-header-icon"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83"/></svg>
+        <span class="sheet-title">Control Settings</span>
+      </div>
+      <button type="button" class="sheet-close-btn" aria-label="Close">&times;</button>
+    </div>
+    <div class="sheet-body">
+      <div class="form-group" style="margin-bottom: 16px;">
+        <label for="controlSensitivitySlider" style="display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 8px;">
+          <span>Touchpad Pointer Sensitivity</span>
+          <span id="controlSensitivityValue" style="color: #38bdf8; font-weight: 600;">1.5x</span>
+        </label>
+        <input type="range" id="controlSensitivitySlider" min="0.5" max="3.0" step="0.1" value="1.5" style="width: 100%;">
+      </div>
+    </div>
   </div>
 
   <!-- Remote Desktop Control Request Modal -->

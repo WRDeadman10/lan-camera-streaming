@@ -7,6 +7,8 @@
 import { showError, clearError, showInfo, clearInfo, updateStatus, logDiagnostic, parseCandidateSummary, setupDiagnosticsControls, setPathIndicator, describePath, isLocalHostname, fetchLocalServerOrigin, updateVitals, captureFrameSnapshot, copyTextToClipboard, setupCollapsibleDrawer, setupPasswordToggle, StreamRecorder, StreamTransformController, parseUrlStreamParams, buildShareUrl } from './ui-utils.js';
 import { WebRtcPeer } from './webrtc-peer.js';
 import { calculateVideoRenderBox, translateScreenCoordinates } from './control-coords.js';
+import { ZoomController } from './zoom-controller.js';
+import { MobileRemoteController } from './mobile-control.js';
 import { getChatManager } from './chat.js';
 
 let webrtcPeer = null;
@@ -19,6 +21,8 @@ let pendingRemoteCandidates = [];
 let lastLoggedPathKind = null;
 let isViewerSessionActive = false;
 let activeViewerPin = null;
+let zoomController = null;
+let mobileRemoteController = null;
 
 // Tunnel rendering state
 let tunnelIsRendering = false;
@@ -905,6 +909,12 @@ function stopStatsPolling() {
 
 function leaveRoom() {
   logDiagnostic('Leaving room...');
+  if (isControlActive) {
+    releaseControlLocally();
+  }
+  if (zoomController) {
+    zoomController.resetZoom();
+  }
   isViewerSessionActive = false;
   activeViewerPin = null;
   getChatManager().setRoom(null);
@@ -1029,6 +1039,39 @@ if (videoWrapper) {
 
 const gridOverlay = document.getElementById('gridOverlay');
 const transformController = new StreamTransformController(remoteVideo, gridOverlay);
+
+if (videoWrapper) {
+  zoomController = new ZoomController({
+    containerElement: videoWrapper,
+    targetElements: [remoteVideo, remoteCanvas],
+    minScale: 1.0,
+    maxScale: 4.0
+  });
+
+  mobileRemoteController = new MobileRemoteController({
+    containerElement: videoWrapper,
+    videoElement: remoteVideo,
+    getVideoElement: () => (currentMediaMode === 'tunnel-relay' ? remoteCanvas : remoteVideo),
+    zoomController,
+    sendControlInput,
+    isControlActive: () => isControlActive,
+    releaseControl
+  });
+}
+
+function syncVideoTransforms() {
+  if (!zoomController || !transformController) {
+    return;
+  }
+  const parts = [];
+  if (transformController.rotationDegrees !== 0) {
+    parts.push(`rotate(${transformController.rotationDegrees}deg)`);
+  }
+  if (transformController.isMirrored) {
+    parts.push('scaleX(-1)');
+  }
+  zoomController.setExternalTransform(parts.join(' '));
+}
 const btnHudFlipH = document.getElementById('btnHudFlipH');
 const btnHudRotate = document.getElementById('btnHudRotate');
 const btnHudGrid = document.getElementById('btnHudGrid');
@@ -1066,12 +1109,14 @@ if (btnHudFlipH) {
   btnHudFlipH.addEventListener('click', () => {
     const isMirrored = transformController.toggleMirror();
     btnHudFlipH.style.color = isMirrored ? 'var(--accent-cyan)' : 'inherit';
+    syncVideoTransforms();
   });
 }
 
 if (btnHudRotate) {
   btnHudRotate.addEventListener('click', () => {
     transformController.rotate();
+    syncVideoTransforms();
   });
 }
 
@@ -1182,6 +1227,14 @@ window.addEventListener('beforeunload', () => {
 });
 
 function updateControlUIState() {
+  if (mobileRemoteController) {
+    if (isControlActive) {
+      mobileRemoteController.onControlGranted();
+    } else {
+      mobileRemoteController.onControlReleased();
+    }
+  }
+
   if (viewerControlSidebarCard) {
     viewerControlSidebarCard.style.display = isViewerSessionActive ? 'block' : 'none';
   }
@@ -1419,33 +1472,62 @@ function setupRemoteControlHandlers() {
     });
   }
 
-  if (remoteVideo) {
-    remoteVideo.addEventListener('mousemove', (e) => {
-      if (!isControlActive) {
+  const bindDesktopPointerControls = (targetEl) => {
+    if (!targetEl) {
+      return;
+    }
+
+    targetEl.addEventListener('mousemove', (e) => {
+      if (!isControlActive || e.pointerType === 'touch') {
         return;
       }
-      const rect = remoteVideo.getBoundingClientRect();
-      const vw = remoteVideo.videoWidth || rect.width;
-      const vh = remoteVideo.videoHeight || rect.height;
-      const coords = translateScreenCoordinates(e.clientX, e.clientY, rect, vw, vh, true);
+      const rect = targetEl.getBoundingClientRect();
+      const vw = targetEl.videoWidth || targetEl.width || rect.width;
+      const vh = targetEl.videoHeight || targetEl.height || rect.height;
+      const zoomState = zoomController ? zoomController.getState() : { scale: 1.0, panX: 0, panY: 0 };
+      const coords = translateScreenCoordinates(
+        e.clientX,
+        e.clientY,
+        rect,
+        vw,
+        vh,
+        true,
+        zoomState.scale,
+        zoomState.panX,
+        zoomState.panY
+      );
       if (coords) {
         sendControlInput({
           type: 'mouse_move',
           x: coords.x,
           y: coords.y
         });
+        if (mobileRemoteController) {
+          mobileRemoteController.updateCursorOverlay(coords.x, coords.y);
+        }
       }
     });
 
-    remoteVideo.addEventListener('mousedown', (e) => {
-      if (!isControlActive) {
+    targetEl.addEventListener('mousedown', (e) => {
+      if (!isControlActive || e.pointerType === 'touch') {
         return;
       }
       e.preventDefault();
-      const rect = remoteVideo.getBoundingClientRect();
-      const vw = remoteVideo.videoWidth || rect.width;
-      const vh = remoteVideo.videoHeight || rect.height;
-      const coords = translateScreenCoordinates(e.clientX, e.clientY, rect, vw, vh, true);
+      const rect = targetEl.getBoundingClientRect();
+      const vw = targetEl.videoWidth || targetEl.width || rect.width;
+      const vh = targetEl.videoHeight || targetEl.height || rect.height;
+      const zoomState = zoomController ? zoomController.getState() : { scale: 1.0, panX: 0, panY: 0 };
+      const coords = translateScreenCoordinates(
+        e.clientX,
+        e.clientY,
+        rect,
+        vw,
+        vh,
+        true,
+        zoomState.scale,
+        zoomState.panX,
+        zoomState.panY
+      );
       let button = 'left';
       if (e.button === 1) {
         button = 'middle';
@@ -1458,6 +1540,9 @@ function setupRemoteControlHandlers() {
           x: coords.x,
           y: coords.y
         });
+        if (mobileRemoteController) {
+          mobileRemoteController.updateCursorOverlay(coords.x, coords.y);
+        }
       }
       sendControlInput({
         type: 'mouse_down',
@@ -1465,15 +1550,26 @@ function setupRemoteControlHandlers() {
       });
     });
 
-    remoteVideo.addEventListener('mouseup', (e) => {
-      if (!isControlActive) {
+    targetEl.addEventListener('mouseup', (e) => {
+      if (!isControlActive || e.pointerType === 'touch') {
         return;
       }
       e.preventDefault();
-      const rect = remoteVideo.getBoundingClientRect();
-      const vw = remoteVideo.videoWidth || rect.width;
-      const vh = remoteVideo.videoHeight || rect.height;
-      const coords = translateScreenCoordinates(e.clientX, e.clientY, rect, vw, vh, true);
+      const rect = targetEl.getBoundingClientRect();
+      const vw = targetEl.videoWidth || targetEl.width || rect.width;
+      const vh = targetEl.videoHeight || targetEl.height || rect.height;
+      const zoomState = zoomController ? zoomController.getState() : { scale: 1.0, panX: 0, panY: 0 };
+      const coords = translateScreenCoordinates(
+        e.clientX,
+        e.clientY,
+        rect,
+        vw,
+        vh,
+        true,
+        zoomState.scale,
+        zoomState.panX,
+        zoomState.panY
+      );
       let button = 'left';
       if (e.button === 1) {
         button = 'middle';
@@ -1486,6 +1582,9 @@ function setupRemoteControlHandlers() {
           x: coords.x,
           y: coords.y
         });
+        if (mobileRemoteController) {
+          mobileRemoteController.updateCursorOverlay(coords.x, coords.y);
+        }
       }
       sendControlInput({
         type: 'mouse_up',
@@ -1493,13 +1592,13 @@ function setupRemoteControlHandlers() {
       });
     });
 
-    remoteVideo.addEventListener('contextmenu', (e) => {
+    targetEl.addEventListener('contextmenu', (e) => {
       if (isControlActive) {
         e.preventDefault();
       }
     });
 
-    remoteVideo.addEventListener('wheel', (e) => {
+    targetEl.addEventListener('wheel', (e) => {
       if (!isControlActive) {
         return;
       }
@@ -1510,7 +1609,10 @@ function setupRemoteControlHandlers() {
         deltaY: e.deltaY
       });
     }, { passive: false });
-  }
+  };
+
+  bindDesktopPointerControls(remoteVideo);
+  bindDesktopPointerControls(remoteCanvas);
 
   window.addEventListener('keydown', (e) => {
     if (!isControlActive) {

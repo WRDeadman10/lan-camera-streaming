@@ -1,10 +1,10 @@
 # LAN Camera Streaming — AI Handoff
 
-Last updated: 2026-10-14. Another agent may continue from this file tomorrow: read it, then the docs listed under "Read before implementation". The Windows virtual camera driver is a separate repository mounted as the `vcam/` submodule; its handoff is `vcam/docs/ai_handoff.md`.
+Last updated: 2026-10-21. Another agent may continue from this file tomorrow: read it, then the docs listed under "Read before implementation". The Windows virtual camera driver is a separate repository mounted as the `vcam/` submodule; its handoff is `vcam/docs/ai_handoff.md`.
 
 ## Current status
 
-The project is feature-complete across all 14 proposed ecosystem features and verified on Windows with 50 automated tests passing without regression.
+The project is feature-complete across all 16 proposed ecosystem phases and verified on Windows with 219 automated tests passing without regression.
 
 | Area | State |
 |---|---|
@@ -36,7 +36,8 @@ The project is feature-complete across all 14 proposed ecosystem features and ve
 | zrok2 CLI Compatibility & Reserved Name Discovery (ADR-035) | **Delivered**: Dual-mode CLI detection (`isZrokV2`), `zrok2 overview --json` parsing, discovery of registered reserved names (`lan` -> `public:lan` / `https://lan.shares.zrok.io`), `share public <target> -n <nameSelection>` hosting, `create name` / `modify name -r` reservation, and `delete share <token>` teardown |
 | In-Room Real-Time WhatsApp-Style Chat (ADR-036) | **Delivered**: Auto-generated & persistent display names (`lancam_chat_username`), editable in header; mute/unmute control (`lancam_chat_muted`); slide-out drawer with floating action button & unread notification badge dot; WhatsApp dark theme message bubbles (green/slate, tails, timestamps, checkmarks, sender color tags); dimmed atmospheric Unsplash wallpaper with dark obsidian overlay & shuffle button; Web Audio chime; full mobile responsive viewport (`100dvh`, VisualViewport keyboard pinning, swipe-to-dismiss); rejoin message deduplication & persistent client identity (`senderUserId`) |
 | Dynamic Server-Derived Application Versioning (ADR-037) | **Delivered**: Dynamic single-source versioning via `getAppVersion()` reading `package.json` / `__APP_VERSION__`; exposed via `/api/version`, `/api/config`, `/api/discover`, `/health`; dynamic frontend badge hydration (`initializeVersionBadge()`) across sender, viewer, and hub |
-| Automated tests | 204/204 pass (`node --test`) |
+| Mobile Zoom, Touch Interaction & TeamViewer-Style Remote Control (ADR-038) | **Delivered**: Universal pinch-to-zoom (1x-4x) and pan across all media sources, zoom-aware letterbox coordinate translation, touchpad Mouse mode, direct Touch mode, adaptive cursor overlay, collapsible mobile control toolbar, virtual keyboard IME text input, auxiliary modifier keys bar, special keys grid, and shortcuts |
+| Automated tests | 219/219 pass (`node --test`) |
 
 Version: `package.json` is 1.0.36.
 
@@ -160,6 +161,15 @@ Version: `package.json` is 1.0.36.
   - Problem & Cause: Browser CSP violations blocked loopback health checks (`http://127.0.0.1:8765/health`) and protocol deeplink framing (`lancam-control:`). Chrome PNA rejected requests from public zrok HTTPS tunnels to `127.0.0.1` without PNA response headers. Signaling socket was only connected on "Start Streaming", preventing pre-stream PIN generation and permanent password setting. Tab switching triggered `rejoinRoomAsSender()` repeatedly when viewer count was 0.
   - Solution: Added loopback addresses and `frame-src lancam-control: lancam:` to CSP in `src/server/server.js`. Added `Access-Control-Allow-Private-Network: true` to CORS preflight, GET, and POST in `LoopbackServer.cpp`. Allowed pre-stream control configuration in `signaling.js` with access PIN verification, and initialized Socket.IO on page load (`ensureSocket()`). Added user-gesture anchor fallback to deeplink launcher. Refined `visibilitychange` to guard rejoining behind `!hasJoinedRoom`.
   - Verification: Rebuilt embedded assets and native helper executable. All 176 Node.js unit/integration tests and native helper test suite passing with 0 errors.
+- **2026-10-21 — Mobile Pinch-to-Zoom, Touch Interaction and TeamViewer-Style Remote Desktop Control (ADR-038).**
+  - Problem: Mobile viewers could not pinch to zoom or pan camera/screen-share feeds to inspect fine desktop details, and when granted remote desktop control, lacked a touch-first interface for controlling the remote Windows computer (no touchpad, no direct touch mode, no adaptive cursor overlay, no mobile keyboard input, no modifier keys, and no desktop shortcuts).
+  - Solution:
+    1. Universal Pinch-to-Zoom & Pan (`src/public/js/zoom-controller.js`): Two-finger pinch-to-zoom (1.0x to 4.0x) centered on pinch midpoint, pan boundary constraints, Fit Screen double-tap reset, and floating right-docked `+`/`-` zoom buttons.
+    2. Zoom-Aware Coordinate Mapping (`src/public/js/control-coords.js`): Extended `translateScreenCoordinates` and implemented `getScreenCoordinatesFromNormalized` accounting for viewport rect, intrinsic video dimensions, letterbox/pillarbox geometry, scale, and pan offsets with round-trip mathematical fidelity.
+    3. Native Remote Control Helper (`remote-control-helper` submodule at `e60c978`): Implemented `InjectText` with Windows `KEYEVENTF_UNICODE`, `InjectMouseMoveRelative` with `MOUSEEVENTF_MOVE`, mapped `PrintScreen` to `VK_SNAPSHOT`, and added loopback TCP server handlers for `text` and `mouse_move_relative`.
+    4. Mobile Interaction Engine (`src/public/js/mobile-control.js`): Implemented `MobileRemoteController` providing Touchpad Mouse Mode (relative movement, tap left click, long-press right click, two-finger scroll, double-tap & drag) and Touch Mode (direct screen tap mapping); adaptive cursor overlay (`#remoteCursorOverlay`); virtual keyboard integration with hidden text receiver; auxiliary modifier bar (`Shift`, `Ctrl`, `Alt`, `Win`, `...`) with held states; and TeamViewer-style bottom sheets (interaction modes, shortcuts, special keys, pointer sensitivity).
+    5. UI & Styling (`src/public/viewer.html`, `src/public/css/style.css`, `src/public/js/viewer.js`): Added responsive toolbar, floating zoom controls, auxiliary modifier bar, and bottom sheets; integrated lifecycle and gesture disambiguation into `viewer.js` across WebRTC video and canvas relay.
+  - Verification: Rebuilt embedded assets via `node scripts/build-embedded-assets.js`. Added unit test suites `tests/zoom-and-coords.test.js` and `tests/mobile-control-ui.test.js`. 6/6 native MSBuild tests pass, 219/219 Node tests pass.
 - **2026-10-18 — Dynamic Server-Derived Application Versioning (ADR-037).**
   - Problem: The version badge displayed `v1.0.23` in sender and viewer headers despite the project version being `1.0.36`. The version string was static in `sender.html`, `viewer.html`, and hardcoded in `/api/discover`.
   - Fix: Created `src/server/version.js` with `getAppVersion()` dynamically reading `package.json` (or `__APP_VERSION__` in standalone builds); exposed application version on `/api/version`, `/api/config`, `/api/discover`, and `/health`; updated `cli.js` to derive `APP_VERSION` from `getAppVersion()`; updated `scripts/build-embedded-assets.js` to compile `embeddedVersion`; created `initializeVersionBadge()` in `src/public/js/ui-utils.js` auto-hydrating `.brand-version` elements on DOM ready; updated `sender.js`, `viewer.js`, and `index.html` to dynamically set `v${data.version}`; added `.brand-version:empty { display: none; }` in `style.css` to prevent layout shifts.

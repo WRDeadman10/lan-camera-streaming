@@ -218,15 +218,16 @@ Tasks:
 - Add automated unit tests for credential verification, lease transitions, rate-limiting, and native input mapping.
 
 
-## Phase 16 — Mobile Zoom, Touch Interaction and TeamViewer-Style Remote Control (ADR-038)
+## Phase 16 — Mobile Zoom, Touch Interaction and TeamViewer-Style Remote Control (ADR-038) [Completed]
 
 **Objective:** Deliver a mobile-first remote control and viewing experience modeled after TeamViewer mobile app interaction patterns: universal pinch-to-zoom (1x-4x) and pan across all media sources, zoom-aware coordinate translation, touchpad-style Mouse mode and direct Touch mode, adaptive cursor overlay, mobile remote control toolbar, on-screen keyboard text input, auxiliary modifier bar, and special shortcuts.
 
 Tasks:
-- Universal Pinch-to-Zoom & Pan (`src/public/js/zoom-controller.js`): two-finger pinch centered on fingers' midpoint, pan boundary constraints, Fit Screen reset, and floating `+`/`-` buttons.
-- Zoom-Aware Coordinate Mapping (`src/public/js/control-coords.js`): account for viewport bounding rectangle, video dimensions, letterbox/pillarbox geometry, scale, and pan offsets; provide screen-to-norm and norm-to-screen transforms.
-- Native Helper Protocol & Unicode Text Entry (`remote-control-helper`): implement `InjectText` with `KEYEVENTF_UNICODE`, map `VK_SNAPSHOT` for PrintScreen, and update `LoopbackServer`.
-- Adaptive Cursor Overlay (`#remoteCursorOverlay`): high-visibility arrow pointer scaled independently of video zoom in CSS pixels and hotspot-aligned to host coordinates.
-- Mouse Mode & Touch Mode: relative touchpad dragging with sensitivity accumulation, tap-to-click, long-press right click, two-finger scroll, double-tap & drag, direct screen tap mapping, and gesture disambiguation.
-- Mobile Remote-Control Toolbar & Drawers: compact collapsible bottom toolbar with Exit, Keyboard, Mouse/Touch mode, Shortcuts, Special Keys, Settings, and Collapse/Expand.
-- Mobile Virtual Keyboard & Modifier Bar: invisible text input surface for mobile virtual keyboard, auxiliary modifier row (`Shift`, `Ctrl`, `Alt`, `Win`, `...`), special keys matrix, and shortcut sequences.
+- [x] Universal Pinch-to-Zoom & Pan (`src/public/js/zoom-controller.js`): two-finger pinch centered on fingers' midpoint, pan boundary constraints, Fit Screen reset, and floating `+`/`-` buttons.
+- [x] Zoom-Aware Coordinate Mapping (`src/public/js/control-coords.js`): account for viewport bounding rectangle, video dimensions, letterbox/pillarbox geometry, scale, and pan offsets; provide screen-to-norm and norm-to-screen transforms.
+- [x] Native Helper Protocol & Unicode Text Entry (`remote-control-helper`): implement `InjectText` with `KEYEVENTF_UNICODE`, map `VK_SNAPSHOT` for PrintScreen, and update `LoopbackServer`.
+- [x] Adaptive Cursor Overlay (`#remoteCursorOverlay`): high-visibility arrow pointer scaled independently of video zoom in CSS pixels and hotspot-aligned to host coordinates.
+- [x] Mouse Mode & Touch Mode: relative touchpad dragging with sensitivity accumulation, tap-to-click, long-press right click, two-finger scroll, double-tap & drag, direct screen tap mapping, and gesture disambiguation.
+- [x] Mobile Remote-Control Toolbar & Drawers: compact collapsible bottom toolbar with Exit, Keyboard, Mouse/Touch mode, Shortcuts, Special Keys, Settings, and Collapse/Expand.
+- [x] Mobile Virtual Keyboard & Modifier Bar: invisible text input surface for mobile virtual keyboard, auxiliary modifier row (`Shift`, `Ctrl`, `Alt`, `Win`, `...`), special keys matrix, and shortcut sequences.
+- [x] Automated Test Coverage: 219 tests passing (`tests/zoom-and-coords.test.js`, `tests/mobile-control-ui.test.js`, `tests/viewer-control.test.js`).

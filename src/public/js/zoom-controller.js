@@ -15,11 +15,17 @@ export class ZoomController {
    * @param {Function} [options.onZoomChange]
    */
   constructor(containerElement, targetElements, options = {}) {
+    if (containerElement && !containerElement.nodeType && typeof containerElement.addEventListener !== 'function') {
+      options = containerElement;
+      targetElements = options.targetElements;
+      containerElement = options.containerElement;
+    }
+
     this.containerElement = containerElement;
     this.targetElements = Array.isArray(targetElements) ? targetElements : [targetElements];
-    this.minScale = options.minScale || 1.0;
-    this.maxScale = options.maxScale || 4.0;
-    this.onZoomChange = options.onZoomChange || null;
+    this.minScale = (options && options.minScale) || 1.0;
+    this.maxScale = (options && options.maxScale) || 4.0;
+    this.onZoomChange = (options && options.onZoomChange) || null;
 
     this.scale = 1.0;
     this.panX = 0;

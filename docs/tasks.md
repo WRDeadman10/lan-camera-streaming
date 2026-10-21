@@ -501,17 +501,17 @@ Decision: **ADR-025**.
   - [x] Add `text` message handling in `LoopbackServer`.
   - [x] Add native unit tests in `remote-control-helper/tests/test_main.cpp`.
   - [x] Build and verify `remote-control-helper`.
-- [ ] Implement adaptive cursor overlay (`#remoteCursorOverlay`) with stable CSS pixel sizing and accurate host hotspot positioning.
-- [ ] Implement Mouse Mode (touchpad relative movement, tap left click, long-press right click, two-finger scroll, double-tap & drag) and Touch Mode (direct screen tap) with gesture disambiguation.
-- [ ] Implement mobile remote-control toolbar:
-  - [ ] Exit / Release control button.
-  - [ ] Keyboard toggle button.
-  - [ ] Mouse / Touch mode toggle button and interaction method bottom sheet with gesture guide.
-  - [ ] Shortcuts panel button and bottom sheet (Copy, Paste, Print Screen, Switch Apps, Save).
-  - [ ] Special keys panel button and grid (`Esc`, `F1`-`F12`, `Tab`, `PrtSc`, `ScrLk`, `Pause`, `Ins`, `Home`, `PgUp`, `Del`, `End`, `PgDn`, arrow keys).
-  - [ ] Settings button for pointer sensitivity.
-  - [ ] Expand / Collapse toggle.
-- [ ] Implement mobile keyboard integration with hidden text input layer, auxiliary modifier keys bar (`Shift`, `Ctrl`, `Alt`, `Win`, `...`), and keyboard dismissal.
-- [ ] Add unit and integration tests in `tests/mobile-control-ui.test.js`.
-- [ ] Rebuild embedded assets via `node scripts/build-embedded-assets.js` and verify full test suite.
-- [ ] Update all documentation files (`project-overview.md`, `architecture.md`, `decisions.md`, `roadmap.md`, `tasks.md`, `ai_handoff.md`).
+- [x] Implement adaptive cursor overlay (`#remoteCursorOverlay`) with stable CSS pixel sizing and accurate host hotspot positioning.
+- [x] Implement Mouse Mode (touchpad relative movement, tap left click, long-press right click, two-finger scroll, double-tap & drag) and Touch Mode (direct screen tap) with gesture disambiguation.
+- [x] Implement mobile remote-control toolbar:
+  - [x] Exit / Release control button.
+  - [x] Keyboard toggle button.
+  - [x] Mouse / Touch mode toggle button and interaction method bottom sheet with gesture guide.
+  - [x] Shortcuts panel button and bottom sheet (Copy, Paste, Print Screen, Switch Apps, Save).
+  - [x] Special keys panel button and grid (`Esc`, `F1`-`F12`, `Tab`, `PrtSc`, `ScrLk`, `Pause`, `Ins`, `Home`, `PgUp`, `Del`, `End`, `PgDn`, arrow keys).
+  - [x] Settings button for pointer sensitivity.
+  - [x] Expand / Collapse toggle.
+- [x] Implement mobile keyboard integration with hidden text input layer, auxiliary modifier keys bar (`Shift`, `Ctrl`, `Alt`, `Win`, `...`), and keyboard dismissal.
+- [x] Add unit and integration tests in `tests/mobile-control-ui.test.js`.
+- [x] Rebuild embedded assets via `node scripts/build-embedded-assets.js` and verify full test suite.
+- [x] Update all documentation files (`project-overview.md`, `architecture.md`, `decisions.md`, `roadmap.md`, `tasks.md`, `ai_handoff.md`).
