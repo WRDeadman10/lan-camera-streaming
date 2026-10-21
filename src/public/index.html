@@ -112,17 +112,25 @@
         <div class="card hub-qr-card">
           <div class="card-header">
             <h2 class="card-title">Connect Mobile Camera</h2>
-            <span class="hub-qr-badge">Instant Link</span>
+            <span class="hub-qr-badge" id="hubQrBadge">Instant Link</span>
           </div>
-          <p class="card-desc">Scan with your phone camera to launch the Sender interface directly:</p>
+          <p class="card-desc" id="hubQrDesc">Scan with your phone camera to launch the Sender interface directly:</p>
 
-          <div class="hub-qr-wrapper">
+          <div class="hub-qr-wrapper" id="hubQrWrapper">
             <div class="qr-frame">
               <img id="qrImage" alt="Scan QR Code to open sender on mobile">
             </div>
           </div>
 
-          <div class="share-input-row">
+          <!-- Reachable LAN unavailable block / fallback -->
+          <div id="hubQrUnavailable" style="display: none; padding: 12px 14px; background: rgba(239, 68, 68, 0.1); border: 1px solid var(--accent-red); border-radius: var(--radius-md); margin-bottom: 12px; font-size: 0.82rem; line-height: 1.45; color: #fca5a5;">
+            <strong style="display: block; margin-bottom: 4px;">⚠️ Mobile Pairing Unavailable via Localhost</strong>
+            <p style="margin: 0; color: var(--text-secondary); font-size: 0.78rem;">
+              Your browser is open on <code>localhost</code>, which cannot be reached by other devices on your Wi-Fi network. Connect this PC to Wi-Fi/Ethernet or launch with <code>start.ps1</code> / <code>start.sh</code> for a public tunnel link.
+            </p>
+          </div>
+
+          <div class="share-input-row" id="hubQrInputRow">
             <input type="text" id="qrLinkInput" readonly class="code-input" title="Sender Mobile URL">
             <button type="button" id="btnCopyIndexLink" class="btn btn-primary btn-sm">Copy Link</button>
           </div>
@@ -134,13 +142,50 @@
 
   <script>
     (async function initHub() {
-      const senderUrl = window.location.origin + '/sender';
       const qrLink = document.getElementById('qrLink');
       const qrImage = document.getElementById('qrImage');
       const qrLinkInput = document.getElementById('qrLinkInput');
       const btnCopy = document.getElementById('btnCopyIndexLink');
       const hubProtocolPort = document.getElementById('hubProtocolPort');
       const localViewerInline = document.getElementById('localViewerInline');
+      const hubQrBadge = document.getElementById('hubQrBadge');
+      const hubQrWrapper = document.getElementById('hubQrWrapper');
+      const hubQrUnavailable = document.getElementById('hubQrUnavailable');
+      const hubQrInputRow = document.getElementById('hubQrInputRow');
+      const hubQrDesc = document.getElementById('hubQrDesc');
+
+      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      let senderUrl = window.location.origin + '/sender';
+      let hasReachableEndpoint = !isLocalhost;
+
+      if (isLocalhost) {
+        try {
+          const lanRes = await fetch('/api/lan-info');
+          if (lanRes.ok) {
+            const lanData = await lanRes.json();
+            if (lanData && lanData.lanUrl) {
+              senderUrl = lanData.lanUrl + '/sender';
+              hasReachableEndpoint = true;
+              if (hubQrBadge && lanData.primaryLanIp) {
+                hubQrBadge.textContent = 'LAN: ' + lanData.primaryLanIp;
+                hubQrBadge.title = 'Reachable on local network at ' + lanData.primaryLanIp;
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (isLocalhost && !hasReachableEndpoint) {
+        if (hubQrWrapper) hubQrWrapper.style.display = 'none';
+        if (hubQrUnavailable) hubQrUnavailable.style.display = 'block';
+        if (hubQrInputRow) hubQrInputRow.style.display = 'none';
+        if (hubQrDesc) hubQrDesc.textContent = 'Mobile pairing requires a reachable network address:';
+        if (hubQrBadge) {
+          hubQrBadge.textContent = 'Offline';
+          hubQrBadge.style.background = 'rgba(239, 68, 68, 0.2)';
+          hubQrBadge.style.color = '#fca5a5';
+        }
+      }
 
       if (hubProtocolPort) {
         hubProtocolPort.textContent = window.location.host;

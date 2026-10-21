@@ -162,6 +162,17 @@ function showOverlay(title, subtitle, showReconnect = false) {
   if (btnOverlayReconnect) {
     btnOverlayReconnect.style.display = showReconnect ? 'inline-flex' : 'none';
   }
+  const overlayJoinForm = document.getElementById('overlayJoinForm');
+  if (overlayJoinForm) {
+    overlayJoinForm.style.display = showReconnect ? 'none' : 'block';
+  }
+  const videoHud = document.querySelector('.viewport-pane > .video-hud');
+  if (videoHud) {
+    videoHud.style.display = 'none';
+  }
+  if (streamVitalsBar) {
+    streamVitalsBar.style.display = 'none';
+  }
   videoOverlay.style.display = 'flex';
 }
 
@@ -175,6 +186,13 @@ function hideOverlay() {
   }
   if (btnOverlayReconnect) {
     btnOverlayReconnect.style.display = 'none';
+  }
+  const videoHud = document.querySelector('.viewport-pane > .video-hud');
+  if (videoHud) {
+    videoHud.style.display = 'flex';
+  }
+  if (streamVitalsBar) {
+    streamVitalsBar.style.display = 'flex';
   }
 }
 
@@ -1721,6 +1739,69 @@ if (streamParams.mode && mediaModeSelect) {
 if (streamParams.controlPin && autoControlPinInput) {
   autoControlPinInput.value = streamParams.controlPin;
 }
+function syncOverlayInputs() {
+  const overlayRoom = document.getElementById('overlayRoomId');
+  const overlayPin = document.getElementById('overlayAccessPin');
+  const btnOverlayJoin = document.getElementById('btnOverlayJoin');
+
+  if (overlayRoom && roomIdInput) {
+    overlayRoom.value = roomIdInput.value;
+    overlayRoom.addEventListener('input', () => {
+      roomIdInput.value = overlayRoom.value;
+    });
+    roomIdInput.addEventListener('input', () => {
+      overlayRoom.value = roomIdInput.value;
+    });
+  }
+  if (overlayPin && accessPinInput) {
+    overlayPin.value = accessPinInput.value;
+    overlayPin.addEventListener('input', () => {
+      accessPinInput.value = overlayPin.value;
+    });
+    accessPinInput.addEventListener('input', () => {
+      overlayPin.value = accessPinInput.value;
+    });
+  }
+  if (btnOverlayJoin && btnJoin) {
+    btnOverlayJoin.addEventListener('click', () => {
+      btnJoin.click();
+    });
+  }
+  setupPasswordToggle('btnToggleOverlayPin', 'overlayAccessPin');
+}
+
+function setupDevModeGating() {
+  const devToolsSection = document.getElementById('devToolsSection');
+  const btnToggleDevMode = document.getElementById('btnToggleDevMode');
+  const isDevUrl = window.location.search.includes('dev=1') || window.location.search.includes('dev=true');
+  let isDevStored = false;
+  try {
+    isDevStored = localStorage.getItem('lancam_dev_mode') === 'true';
+  } catch (_) {}
+
+  const isDev = isDevUrl || isDevStored;
+  if (devToolsSection && isDev) {
+    devToolsSection.style.display = 'block';
+    if (btnToggleDevMode) {
+      btnToggleDevMode.textContent = '⚙ Hide Developer Diagnostics';
+    }
+  }
+
+  if (btnToggleDevMode && devToolsSection) {
+    btnToggleDevMode.addEventListener('click', () => {
+      const isCurrentlyShown = devToolsSection.style.display !== 'none';
+      devToolsSection.style.display = isCurrentlyShown ? 'none' : 'block';
+      btnToggleDevMode.textContent = isCurrentlyShown ? '⚙ Developer Diagnostics' : '⚙ Hide Developer Diagnostics';
+      try {
+        localStorage.setItem('lancam_dev_mode', isCurrentlyShown ? 'false' : 'true');
+      } catch (_) {}
+    });
+  }
+}
+
+syncOverlayInputs();
+setupDevModeGating();
+
 if (streamParams.autostart && initRoom) {
   logDiagnostic(`[AutoStart] Autostart query parameter detected. Automatically joining room "${initRoom}"...`, 'INFO');
   setTimeout(() => {

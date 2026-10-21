@@ -287,3 +287,19 @@ Tasks:
 - [x] Fix duplicate lightning bolt charging icon in `src/public/js/viewer.js` line 732.
 - [x] Update layout test in `tests/viewer-layout-reconnect.test.js` to assert `.video-hud` is inside `.viewport-pane` and not `#videoWrapper`.
 - [x] Automated Test Coverage: 237 tests passing across 25 test suites.
+
+## Phase 22 — User Experience Streamlining & Progressive Disclosure (ADR-044) [Completed]
+
+**Objective:** Address high-priority UX audit findings by providing reachable LAN pairing on localhost, 1-click viewer sharing with PIN handoff, centered inactive join form on the video canvas, progressive disclosure for sender setup, reactive mDNS guidance on true connection failure, and eliminating console 403 errors with local static backgrounds.
+
+Tasks:
+- [x] Implement `/api/lan-info` and update `index.html` to generate reachable LAN QR pairing on localhost.
+- [x] Add 1-click viewer link generation with prefilled PIN and credentials row in sender share card.
+- [x] Embed centered inactive join form inside `#videoOverlay` on viewer page, eliminating eye travel.
+- [x] Apply progressive disclosure to sender setup form, isolating secondary controls and remote desktop.
+- [x] Suppress premature mDNS warning banner on initial load; show concise warning only on connection failure.
+- [x] Rename vitals to FPS, Resolution, Connection and hide until streaming is live.
+- [x] Hide chat button until connected to a room; gate diagnostics behind Developer Mode.
+- [x] Prevent title truncation at 390px mobile header; add subtle scroll affordance to vitals strip.
+- [x] Use local static background by default in wallpaper system, eliminating external 403 network errors.
+- [x] Automated Test Coverage: 247 tests passing across 26 test suites (`tests/ux-improvements.test.js`).

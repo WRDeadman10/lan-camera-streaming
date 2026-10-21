@@ -136,6 +136,37 @@ export function createServer(config, logger) {
     });
   });
 
+  // Reachable LAN IPv4 addresses and pairing URL for mobile devices on the same Wi-Fi
+  app.get('/api/lan-info', (req, res) => {
+    const interfaces = os.networkInterfaces();
+    const lanIps = [];
+    const privateRegex = /^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)/;
+
+    for (const ifaceName of Object.keys(interfaces)) {
+      const list = interfaces[ifaceName];
+      if (!Array.isArray(list)) {
+        continue;
+      }
+      for (const entry of list) {
+        if (entry.family === 'IPv4' && !entry.internal && privateRegex.test(entry.address)) {
+          lanIps.push(entry.address);
+        }
+      }
+    }
+
+    const protocol = config.useHttps ? 'https' : 'http';
+    const primaryLanIp = lanIps.length > 0 ? lanIps[0] : null;
+    const lanUrl = primaryLanIp ? `${protocol}://${primaryLanIp}:${config.port}` : null;
+
+    res.status(200).json({
+      protocol,
+      port: config.port,
+      lanIps,
+      primaryLanIp,
+      lanUrl
+    });
+  });
+
   // Zero-conf / LAN auto-discovery endpoint
   app.get('/api/discover', (req, res) => {
     res.status(200).json({

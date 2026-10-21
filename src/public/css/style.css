@@ -1085,6 +1085,13 @@ input:focus, select:focus {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    min-width: 0;
+    flex-shrink: 1;
+  }
+
+  /* Hide version badge in mobile header to eliminate title truncation at 390px */
+  .app-header .brand-version {
+    display: none !important;
   }
 
   .header-status {
@@ -1128,21 +1135,28 @@ input:focus, select:focus {
     flex: none;
   }
 
-  /* Mobile Swipeable Vitals Strip with Zero Wrapping */
+  /* Mobile Swipeable Vitals Strip with Subtle Scroll Affordance */
   .vitals-bar {
     display: flex;
     overflow-x: auto;
     overflow-y: hidden;
     justify-content: flex-start;
-    padding: 6px 10px;
+    padding: 6px 10px 8px 10px;
     gap: 14px;
     white-space: nowrap;
     -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
   }
 
   .vitals-bar::-webkit-scrollbar {
-    display: none;
+    display: block;
+    height: 3px;
+  }
+
+  .vitals-bar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.25);
+    border-radius: 3px;
   }
 
   .vital-item {
@@ -3141,4 +3155,23 @@ body.chat-drawer-open {
 .mobile-control-toolbar,
 .mobile-modifier-bar {
   touch-action: manipulation;
+}
+
+/* Inactive Video Viewport Join Form */
+.overlay-join-form {
+  position: relative;
+  z-index: 10;
+  pointer-events: auto;
+  user-select: auto;
+}
+
+.overlay-join-form input {
+  color-scheme: dark;
+}
+
+@media (max-width: 480px) {
+  .overlay-join-form {
+    max-width: 90% !important;
+    padding: 12px 14px !important;
+  }
 }

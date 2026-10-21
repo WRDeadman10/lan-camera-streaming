@@ -1859,26 +1859,8 @@ if (viewerPeers.size > 0) {
     getChatManager().setRoom(roomId, role);
     broadcastBatteryToViewers();
 
-    // Display Share QR Code for Viewer
-    const viewerUrl = `${window.location.origin}/viewer?room=${encodeURIComponent(roomId)}`;
-    if (viewerQrLink) {
-      viewerQrLink.href = viewerUrl;
-      viewerQrLink.textContent = viewerUrl;
-    }
-    if (viewerQrLinkInput) {
-      viewerQrLinkInput.value = viewerUrl;
-    }
-    if (shareQrCard) {
-      shareQrCard.style.display = 'flex';
-    }
-    fetch(`/api/qr?text=${encodeURIComponent(viewerUrl)}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (viewerQrImg && data.dataUrl) {
-          viewerQrImg.src = data.dataUrl;
-        }
-      })
-      .catch(() => {});
+    // Display Share Card with credentials and 1-click access link for Viewer
+    updateViewerShareCard(roomId, pin);
 
     showLocalViewerLink(roomId);
 
@@ -2993,3 +2975,89 @@ if (streamParams.autostart) {
 
 ensureSocket();
 logDiagnostic('Sender client ready. Click "Start Streaming" to begin.');
+
+
+function updateViewerShareCard(targetRoomId, targetPin) {
+  const shareRoomCode = document.getElementById('shareRoomCode');
+  const sharePinCode = document.getElementById('sharePinCode');
+  const chkIncludePin = document.getElementById('chkIncludePinInLink');
+  const shareLinkModeLabel = document.getElementById('shareLinkModeLabel');
+
+  if (shareRoomCode) {
+    shareRoomCode.textContent = targetRoomId || '------';
+  }
+  if (sharePinCode) {
+    sharePinCode.textContent = targetPin || '123456';
+  }
+
+  const includePin = chkIncludePin ? chkIncludePin.checked : true;
+  let viewerUrl = '';
+  if (includePin) {
+    viewerUrl = `${window.location.origin}/viewer?room=${encodeURIComponent(targetRoomId)}&pin=${encodeURIComponent(targetPin || '')}&autostart=1`;
+    if (shareLinkModeLabel) {
+      shareLinkModeLabel.textContent = 'Auto-joins directly';
+      shareLinkModeLabel.style.color = 'var(--accent-emerald)';
+    }
+  } else {
+    viewerUrl = `${window.location.origin}/viewer?room=${encodeURIComponent(targetRoomId)}`;
+    if (shareLinkModeLabel) {
+      shareLinkModeLabel.textContent = 'Room only — send PIN separately';
+      shareLinkModeLabel.style.color = 'var(--accent-amber)';
+    }
+  }
+
+  if (viewerQrLink) {
+    viewerQrLink.href = viewerUrl;
+    viewerQrLink.textContent = viewerUrl;
+  }
+  if (viewerQrLinkInput) {
+    viewerQrLinkInput.value = viewerUrl;
+  }
+  if (shareQrCard) {
+    shareQrCard.style.display = 'flex';
+  }
+
+  fetch(`/api/qr?text=${encodeURIComponent(viewerUrl)}`)
+    .then((res) => res.json())
+    .then((data) => {
+      if (viewerQrImg && data.dataUrl) {
+        viewerQrImg.src = data.dataUrl;
+      }
+    })
+    .catch(() => {});
+}
+
+const chkIncludePin = document.getElementById('chkIncludePinInLink');
+if (chkIncludePin) {
+  chkIncludePin.addEventListener('change', () => {
+    if (hasJoinedRoom && currentRoomId) {
+      updateViewerShareCard(currentRoomId, currentAccessPin);
+    }
+  });
+}
+
+// Gated Developer Mode Diagnostics for Sender
+const devToolsSection = document.getElementById('devToolsSection');
+const btnToggleDevMode = document.getElementById('btnToggleDevMode');
+const isDevUrl = window.location.search.includes('dev=1') || window.location.search.includes('dev=true');
+let isDevStored = false;
+try {
+  isDevStored = localStorage.getItem('lancam_dev_mode') === 'true';
+} catch (_) {}
+
+if (devToolsSection && (isDevUrl || isDevStored)) {
+  devToolsSection.style.display = 'block';
+  if (btnToggleDevMode) {
+    btnToggleDevMode.textContent = '⚙ Hide Developer Diagnostics';
+  }
+}
+if (btnToggleDevMode && devToolsSection) {
+  btnToggleDevMode.addEventListener('click', () => {
+    const isCurrentlyShown = devToolsSection.style.display !== 'none';
+    devToolsSection.style.display = isCurrentlyShown ? 'none' : 'block';
+    btnToggleDevMode.textContent = isCurrentlyShown ? '⚙ Developer Diagnostics' : '⚙ Hide Developer Diagnostics';
+    try {
+      localStorage.setItem('lancam_dev_mode', isCurrentlyShown ? 'false' : 'true');
+    } catch (_) {}
+  });
+}

@@ -40,9 +40,10 @@ The project is feature-complete across all 16 proposed ecosystem phases and veri
 | Ubuntu 24.04 & POSIX Linux Hosting Supervisor (`start.sh`, ADR-039) | **Delivered**: `start.sh` mirroring `start.ps1` with bash shebang, strict LF line endings, `--local-only` / `-LocalOnly` / `-l` flags, Ubuntu network discovery (`hostname -I`, `ip -4 addr`), safe `.env` loading, zrok tunnel management, terminal QR codes, and process cleanup traps |
 | Mobile Viewport Gesture Isolation & Feed Panning (ADR-040) | **Delivered**: CSS `touch-action: none` on `.video-container`, `#videoWrapper`, `#remoteVideo`, and `#remoteCanvas`; active gesture listeners (`{ passive: false }`); `e.preventDefault()` on 2-finger pinch and drag; single-finger feed panning when `scale > 1.0`; touchpad pointer drag isolation; Safari gesture suppression |
 | WebRTC mDNS Local IP Concealment Detection & Multi-Browser Guidance (ADR-041) | **Delivered**: Automatic detection of Windows mDNS local IP concealment; browser vendor & flag scheme detection (Comet, Edge, Brave, Opera, Vivaldi, Arc, Chrome); dismissible warning banner; interactive guidance modal with copyable flag URL & live retest; 233/233 tests passing |
+| UX Streamlining & Progressive Disclosure (ADR-044) | **Delivered**: Reachable LAN pairing on localhost (`/api/lan-info`); 1-click viewer sharing with PIN handoff; centered inactive viewport join form; progressive disclosure for sender setup; reactive mDNS guidance; FPS/Resolution/Connection vitals; gated dev diagnostics; 247/247 tests passing |
 | Viewport Controls Ribbon & Mobile Swipe Ribbon (ADR-043) | **Delivered**: Relocated `.video-hud` outside video wrapper to eliminate obstruction of Windows window controls; horizontal touch-scrollable ribbon on mobile (`overflow-x: auto; flex-shrink: 0`); eliminated duplicate charging icon (`⚡ 100%`); 237/237 tests passing |
 | Mobile Touchpad Edge Auto-Pan & Gesture Disambiguation (ADR-042) | **Delivered**: Zoom-aware edge auto-pan ("push-to-pan") dragging viewport when cursor reaches screen boundary until host screen edges are reached; single-tap click in mouse mode without coordinate jumping; two-finger parallel vertical scroll isolated from pinch-to-zoom; browser double-tap viewport zoom suppression; 237/237 tests passing |
-| Automated tests | 237/237 pass (`node --test`) |
+| Automated tests | 247/247 pass (`node --test`) |
 
 Version: `package.json` is 1.0.36.
 
@@ -97,13 +98,21 @@ Version: `package.json` is 1.0.36.
 
 ## Modified files (last iteration, 2026-10-21)
 
-- `src/public/viewer.html`: Moved `.video-hud` outside `#videoWrapper` into `.viewport-pane` so remote desktop top-right controls (Minimize, Maximize, Close) are completely unobstructed.
-- `src/public/css/style.css`: Added responsive horizontal ribbon styling for `.viewport-pane > .video-hud` with touch-scrolling (`overflow-x: auto; -webkit-overflow-scrolling: touch`), non-shrinking action buttons, and mobile padding.
-- `src/public/js/viewer.js`: Fixed duplicate charging lightning bolt symbol in `socket.on('sender:battery')`.
-- `tests/viewer-layout-reconnect.test.js`: Updated layout test to assert `.video-hud` is in `.viewport-pane` as a direct child and strictly absent from `#videoWrapper`.
-- `docs/decisions.md`: Documented ADR-043.
-- `docs/tasks.md`: Added and marked P4.17 complete.
-- `docs/roadmap.md`: Added Phase 21.
-- `docs/architecture.md`: Added Section 21 detailing Viewport Controls Ribbon architecture.
-- `docs/project-overview.md`: Added Viewport Controls Ribbon and Mobile Swipe Action Bar overview.
-- `docs/ai_handoff.md`: Updated current status and modified files log.
+- `src/server/server.js`: Added `/api/lan-info` endpoint exposing private LAN IPv4 addresses and reachable pairing URL.
+- `src/public/index.html`: Updated mobile pairing flow to use reachable LAN IP when running on localhost, with fallback warning if disconnected.
+- `src/public/sender.html`: Restructured setup with progressive disclosure (core setup vs advanced controls), added credentials row and 1-click PIN toggle to share card, renamed vitals to FPS/Resolution/Connection, and made mDNS warning concise.
+- `src/public/js/sender.js`: Implemented `updateViewerShareCard` supporting 1-click join links with PIN, dynamic vitals bar toggling, and gated developer diagnostics.
+- `src/public/viewer.html`: Embedded centered `#overlayJoinForm` inside `#videoOverlay`, hid `.video-hud` and vitals while inactive, renamed vitals, and gated developer diagnostics.
+- `src/public/js/viewer.js`: Synchronized centered overlay join form inputs with sidebar, toggled HUD and vitals on live state, and added developer mode gating.
+- `src/public/js/chat.js`: Hid floating action button until a room is actively joined (`setRoom`).
+- `src/public/js/mdns-detector.js`: Suppressed premature mDNS warning banner on initial load; exposed `showBanner()` on connection failure.
+- `src/public/js/wallpaper.js`: Defaulted to local static background, eliminating external Unsplash 403 API errors.
+- `src/public/js/ui-utils.js`: Auto-toggled `#streamVitalsBar` based on live streaming metrics in `updateVitals`.
+- `src/public/css/style.css`: Added mobile header rules hiding version metadata at 390px, added 3px vitals scroll affordance, and styled centered overlay join form.
+- `tests/ux-improvements.test.js`: Added comprehensive 10-test suite verifying all UX audit enhancements.
+- `docs/decisions.md`: Documented ADR-044.
+- `docs/tasks.md`: Added and marked complete P4.18.
+- `docs/roadmap.md`: Added Phase 22 [Completed].
+- `docs/architecture.md`: Added Section 22 detailing UX architecture and progressive disclosure.
+- `docs/project-overview.md`: Added UX streamlining and progressive disclosure summary.
+- `docs/ai_handoff.md`: Updated test count (247/247) and handoff log.

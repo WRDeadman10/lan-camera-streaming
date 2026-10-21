@@ -180,6 +180,13 @@ export async function initWallpaper(options = {}) {
   const initialFallback = (cached && cached.url) || lastValid || defaultFallbackUrl;
   applyWallpaperImage(imageLayer, initialFallback, false);
 
+  // By default, use local static background to avoid 403 errors and external network requests.
+  // Only attempt external Unsplash fetch if explicitly opted in or if a custom client ID is configured.
+  const shouldFetchOnline = Boolean(options.enableOnline || options.clientId || (typeof localStorage !== 'undefined' && localStorage.getItem('lancam_enable_online_wallpaper') === 'true'));
+  if (!shouldFetchOnline) {
+    return;
+  }
+
   // Fetch new wallpaper for today from Unsplash
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 6000);

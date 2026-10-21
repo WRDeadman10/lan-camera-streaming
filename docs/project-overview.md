@@ -100,3 +100,11 @@ Browser camera access generally requires a secure context. `localhost` is treate
 
 ### Viewport Controls Ribbon & Mobile Swipe Action Bar (ADR-043)
 The viewer viewport features a dedicated non-intrusive stream controls ribbon situated directly below the video canvas (outside the video container). This completely unblocks the top-right corner of the video feed so Windows desktop controls (Close, Minimize, Maximize) are fully visible and clickable during remote control. On mobile devices, the ribbon provides smooth inertia horizontal scrolling with zero wrapping or off-screen clipping.
+
+### UX Streamlining, Reachable LAN Pairing & Progressive Disclosure (ADR-044)
+The user experience is designed for immediate, friction-free operation across both desktop and mobile devices:
+- **Reachable LAN Pairing:** Localhost pairing automatically discovers host Wi-Fi/LAN IP addresses, ensuring mobile phone camera pairing works out of the box without loopback failures.
+- **One-Click Viewer Sharing:** Generated share links and QR codes pre-fill the room and PIN for instant 1-click joining.
+- **Centered Viewport Join Form:** Inactive desktop viewers can enter credentials and connect directly within the central video canvas, eliminating eye travel to the sidebar.
+- **Progressive Disclosure:** First-time senders see only the 4 essential setup fields, with advanced video, transport, and remote-control options neatly organized in expandable settings.
+- **Distraction-Free Backgrounds:** Clean local dark space styling eliminates failing 403 API calls on local networks.

@@ -618,3 +618,19 @@ With up to 10 action buttons (flip horizontal/vertical, rotate, grid, torch, zoo
 
 ### 21.3 Single Charging Symbol Normalization
 In `src/public/js/viewer.js`, `socket.on('sender:battery')` previously appended `${chargingIcon}` to `hudBatteryText` while `#hudBatteryIcon` also rendered `⚡`. This produced duplicate lightning symbols (`⚡ 100% ⚡`). Removing redundant symbol appending ensures clean single-icon rendering (`⚡ 100%`).
+
+## 22. User Experience Architecture & Progressive Disclosure (ADR-044)
+
+### 22.1 Reachable LAN Discovery & Pairing Engine
+When a host machine opens `index.html` over `localhost` or `127.0.0.1`, a phone scanning the QR code cannot access `localhost`. The server provides `/api/lan-info`, which dynamically inspects active network interfaces via `os.networkInterfaces()` and returns private RFC 1918 IPv4 addresses (`10.x`, `192.168.x`, `172.16-31.x`). `index.html` binds the QR code to `http://<lan-ip>:<port>/sender`, annotates the UI with `LAN: <ip>`, and displays an informative fallback if the computer has no network interfaces.
+
+### 22.2 One-Click Viewer Sharing & Credential Handoff
+When a sender joins a room, `updateViewerShareCard` renders both the Room ID and Access PIN prominently. By default, the generated share link and QR code encode `?room=...&pin=...&autostart=1`, enabling seamless 1-click joining without requiring manual PIN entry. A toggle checkbox permits generating a room-only link explicitly labeled "Room only — send PIN separately".
+
+### 22.3 Centered Inactive Viewport Join Form
+To eliminate eye travel between the empty video viewport and the distant right sidebar on desktop, `viewer.html` embeds `#overlayJoinForm` directly inside `#videoOverlay`. Inputs synchronize bidirectionally with `#roomId` and `#accessPin` in the sidebar. When the stream goes live, `#videoOverlay` hides automatically to reveal the live feed.
+
+### 22.4 Progressive Disclosure & Reactive Guidance
+- **Sender Setup:** The initial setup card is reduced to core essentials (Source, Camera, Room ID, PIN, Start Streaming, and Flip Camera). Secondary settings (Resolution, Focus, Audio, Transport, and Remote Desktop Control) are organized inside an expandable `<details id="advancedSettingsSection">`.
+- **Reactive mDNS Guidance:** The technical mDNS warning banner is suppressed on startup and only surfaces when a direct LAN connection actually fails (`state === 'failed'`).
+- **Metrics & Tools:** Vitals are labeled FPS, Resolution, and Connection, remaining hidden until live. HUD buttons are hidden while inactive. Chat is hidden until connected, and diagnostics are gated behind Developer Mode.

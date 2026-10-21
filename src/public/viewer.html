@@ -62,13 +62,32 @@
             </button>
           </div>
 
-          <!-- Status & Message Overlay -->
+          <!-- Status & Message Overlay with Inactive Viewport Join Form -->
           <div id="videoOverlay" class="video-overlay-msg">
             <svg class="overlay-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
               <polygon points="5 3 19 12 5 21 5 3"/>
             </svg>
-            <div class="overlay-title" id="overlayTitle">Stream Inactive</div>
-            <div class="overlay-subtitle" id="overlaySubtitle">Enter the Room ID and click Join Stream to watch live</div>
+            <div class="overlay-title" id="overlayTitle">Ready to Connect</div>
+            <div class="overlay-subtitle" id="overlaySubtitle">Join an active LAN camera broadcast or desktop stream</div>
+
+            <!-- Direct Viewport Join Form (Eliminates eye travel to distant sidebar) -->
+            <div id="overlayJoinForm" class="overlay-join-form" style="margin-top: 16px; width: 100%; max-width: 320px; text-align: left; background: rgba(15, 23, 42, 0.85); padding: 16px 18px; border-radius: var(--radius-md); border: 1px solid var(--border-medium); box-shadow: 0 10px 25px rgba(0,0,0,0.5); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);">
+              <div class="form-group" style="margin-bottom: 10px;">
+                <label for="overlayRoomId" style="font-size: 0.78rem; font-weight: 500; color: var(--text-secondary); margin-bottom: 4px; display: block;">Room ID</label>
+                <input type="text" id="overlayRoomId" placeholder="Enter Room ID" style="width: 100%; padding: 8px 10px; font-size: 0.9rem; background: rgba(0,0,0,0.5); border: 1px solid var(--border-medium); border-radius: var(--radius-sm); color: var(--text-primary); box-sizing: border-box;">
+              </div>
+              <div class="form-group" style="margin-bottom: 14px;">
+                <label for="overlayAccessPin" style="font-size: 0.78rem; font-weight: 500; color: var(--text-secondary); margin-bottom: 4px; display: block;">Access PIN</label>
+                <div class="input-action-group" style="display: flex;">
+                  <input type="text" id="overlayAccessPin" value="123456" class="pin-masked" style="flex: 1; padding: 8px 10px; font-size: 0.9rem; background: rgba(0,0,0,0.5); border: 1px solid var(--border-medium); border-radius: var(--radius-sm) 0 0 var(--radius-sm); color: var(--text-primary); box-sizing: border-box;">
+                  <button type="button" id="btnToggleOverlayPin" class="btn-action-inline" style="padding: 8px 12px; border-radius: 0 var(--radius-sm) var(--radius-sm) 0;">Show</button>
+                </div>
+              </div>
+              <button type="button" id="btnOverlayJoin" class="btn btn-primary btn-block btn-lg" style="width: 100%; font-weight: 600; padding: 10px; font-size: 0.95rem;">
+                ▶ Join Stream
+              </button>
+            </div>
+
             <div style="margin-top: 12px;">
               <button type="button" id="btnOverlayReconnect" class="btn btn-primary btn-sm" style="display: none;">Reconnect Stream</button>
             </div>
@@ -91,7 +110,7 @@
 
         <!-- Viewport Controls Ribbon (Outside Video Feed) -->
           <!-- Floating Viewport HUD Controls -->
-          <div class="video-hud">
+          <div class="video-hud" style="display: none;">
             <button type="button" id="btnHudFlipH" class="hud-btn" title="Mirror View Horizontally">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3"/>
@@ -172,17 +191,17 @@
         </div>
 
         <!-- Real-time Stream Vitals / Metrics Strip -->
-        <div class="vitals-bar" id="streamVitalsBar">
+        <div class="vitals-bar" id="streamVitalsBar" style="display: none;">
           <div class="vital-item">
-            <span class="vital-label">Flow</span>
+            <span class="vital-label">FPS</span>
             <span class="vital-value" id="vitalFps">--</span>
           </div>
           <div class="vital-item">
-            <span class="vital-label">Acuity</span>
+            <span class="vital-label">Resolution</span>
             <span class="vital-value" id="vitalRes">--</span>
           </div>
           <div class="vital-item">
-            <span class="vital-label">Path</span>
+            <span class="vital-label">Connection</span>
             <span class="vital-value" id="vitalPath">--</span>
           </div>
           <div class="vital-item">
@@ -329,8 +348,8 @@
           </div>
         </div>
 
-        <!-- Developer Tools & Integrations (Collapsed by default) -->
-        <details class="collapsible-section card-collapsible" id="devToolsSection">
+        <!-- Developer Tools & Integrations (Gated behind Developer Mode) -->
+        <details class="collapsible-section card-collapsible" id="devToolsSection" style="display: none;">
           <summary class="collapsible-summary">Developer Tools & Diagnostics</summary>
           <div class="collapsible-body">
             <!-- Direct Python Inference -->
@@ -356,6 +375,13 @@
             </div>
           </div>
         </details>
+
+        <!-- Subtle Developer Mode Access Trigger -->
+        <div style="text-align: center; margin-top: 12px; margin-bottom: 6px;">
+          <button type="button" id="btnToggleDevMode" class="btn-ghost-xs" style="font-size: 0.72rem; color: var(--text-muted); opacity: 0.7; cursor: pointer;">
+            ⚙ Developer Diagnostics
+          </button>
+        </div>
       </aside>
     </main>
   </div>

@@ -281,6 +281,12 @@ export function updateVitals({ fps, resolution, path, viewers, rtt } = {}) {
   if (latencyEl && rtt !== undefined) {
     latencyEl.textContent = rtt || '--';
   }
+
+  const vitalsBar = document.getElementById('streamVitalsBar');
+  if (vitalsBar) {
+    const hasLiveMetrics = Boolean(fps || resolution || path || (typeof viewers === 'number' && viewers > 0));
+    vitalsBar.style.display = hasLiveMetrics ? 'flex' : 'none';
+  }
 }
 
 export function captureFrameSnapshot(mediaElement, baseFilename = 'stream-snapshot') {

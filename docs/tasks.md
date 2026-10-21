@@ -586,3 +586,22 @@ Decision: **ADR-025**.
 - [x] Rebuild embedded fallback assets via `node scripts/build-embedded-assets.js`.
 - [x] Verify full automated test suite (237/237 tests passing across all 25 suites).
 - [x] Update all 6 documentation files (`project-overview.md`, `architecture.md`, `decisions.md`, `roadmap.md`, `tasks.md`, `ai_handoff.md`).
+
+## P4.18 — UX Audit: Reachable LAN Pairing, Progressive Disclosure & Centered Inactive Join Form (ADR-044)
+
+- [x] Implement `/api/lan-info` in `src/server/server.js` exposing private LAN IPv4 addresses and primary pairing URL.
+- [x] Update `src/public/index.html` to query `/api/lan-info` when loaded on localhost, advertising true reachable LAN IP for mobile QR code and displaying `#hubQrUnavailable` when offline.
+- [x] Implement 1-click viewer sharing with PIN (`buildShareUrl('/viewer', { roomId, pin, autostart: true })`), credentials row (`#shareRoomCode`, `#sharePinCode`), and PIN toggle with explicit "Room only — send PIN separately" labeling in `src/public/sender.html` and `src/public/js/sender.js`.
+- [x] Implement centered inactive join form (`#overlayJoinForm`) inside `#videoOverlay` on `src/public/viewer.html` and synchronize inputs with sidebar in `src/public/js/viewer.js`.
+- [x] Prevent premature mDNS warning banner on initial page load in `src/public/js/mdns-detector.js` and unhide concise connection failure banner only when direct LAN streaming fails.
+- [x] Apply progressive disclosure to `#sessionSetupCard` in `src/public/sender.html`: core setup shows Source, Camera, Room ID, PIN, Start Streaming, and Flip Camera; secondary controls (Resolution, Focus, Audio, Transport, Remote Control) placed in `<details id="advancedSettingsSection">`.
+- [x] Rename vitals labels from Flow/Acuity/Path to FPS/Resolution/Connection in `sender.html` and `viewer.html`; hide vitals bar until streaming is live.
+- [x] Hide nonessential HUD buttons while inactive; display `.video-hud` when stream is live in `src/public/js/viewer.js`.
+- [x] Hide chat floating action button (`#chatFloatingBtn`) until actively joined to a room in `src/public/js/chat.js`.
+- [x] Gate developer diagnostics behind `#btnToggleDevMode` (`display: none` by default, revealed via button or `?dev=1`).
+- [x] Resolve mobile header title truncation at 390px by hiding version metadata on mobile in `src/public/css/style.css`.
+- [x] Add subtle 3px horizontal scrollbar affordance to `.vitals-bar` on mobile in `src/public/css/style.css`.
+- [x] Default to local static wallpaper in `src/public/js/wallpaper.js`, eliminating failing Unsplash 403 requests on startup.
+- [x] Author comprehensive automated test suite `tests/ux-improvements.test.js` (10/10 tests passing, 247/247 total project tests passing across all 26 suites).
+- [x] Rebuild embedded fallback assets via `node scripts/build-embedded-assets.js`.
+- [x] Update all 6 documentation files (`project-overview.md`, `architecture.md`, `decisions.md`, `roadmap.md`, `tasks.md`, `ai_handoff.md`).

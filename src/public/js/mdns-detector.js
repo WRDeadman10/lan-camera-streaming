@@ -304,9 +304,16 @@ export function setupMdnsWarningAndGuidance(elements = {}) {
     modalRetest.addEventListener('click', retest);
   }
 
-  // Automatic evaluation if on Windows
+  // Proactive background evaluation (without interrupting the user on initial load)
   const isWindows = isWindowsPlatform();
+  let isHidingMdns = false;
   if (isWindows) {
+    probeMdnsLocalIpHiding().then((probe) => {
+      isHidingMdns = Boolean(probe && probe.isHiding);
+    }).catch(() => {});
+  }
+
+  const showBanner = () => {
     const isDismissed = (() => {
       try {
         return sessionStorage.getItem('lancam_mdns_banner_dismissed') === 'true';
@@ -314,17 +321,23 @@ export function setupMdnsWarningAndGuidance(elements = {}) {
         return false;
       }
     })();
+    if (!isDismissed && banner) {
+      banner.style.display = 'block';
+    }
+  };
 
-    probeMdnsLocalIpHiding().then((probe) => {
-      if (probe.isHiding && !isDismissed && banner) {
-        banner.style.display = 'block';
-      }
-    }).catch(() => {});
-  }
+  const hideBanner = () => {
+    if (banner) {
+      banner.style.display = 'none';
+    }
+  };
 
   return {
     browserInfo,
     isWindows,
+    isHidingMdns: () => isHidingMdns,
+    showBanner,
+    hideBanner,
     openModal,
     closeModal,
     retest
