@@ -605,3 +605,56 @@ Decision: **ADR-025**.
 - [x] Author comprehensive automated test suite `tests/ux-improvements.test.js` (10/10 tests passing, 247/247 total project tests passing across all 26 suites).
 - [x] Rebuild embedded fallback assets via `node scripts/build-embedded-assets.js`.
 - [x] Update all 6 documentation files (`project-overview.md`, `architecture.md`, `decisions.md`, `roadmap.md`, `tasks.md`, `ai_handoff.md`).
+
+
+## P4.19 — Comprehensive Security & Architectural Audit Resolution (ADR-045)
+
+- [x] **P0.1 — Remote-Control DataChannel Lease Authorization:**
+  - [x] Track `activeControllerId` accurately on `sender.js` from `control:controller-joined`, `control:controller-left`, `control:controller-disconnected`, and `control:state`.
+  - [x] Validate on DataChannel message reception (`onControlInput`) that `controlToggle.checked` is true and incoming `viewerId === activeControllerId`.
+  - [x] Drop and log diagnostic warning for any unauthorized input from non-leaseholder peers.
+- [x] **P0.2 — Remote-Control Lifecycle & Membership Enforcement on Room Leave:**
+  - [x] Clean up control leases, release held inputs (`controlBridge.releaseAll()`), and notify counterparts (`control:controller-left` or `control:revoked`) when `room:leave` is called.
+  - [x] Enforce room membership check in `control:input` (`membership.roomId === roomId && membership.role === 'viewer'`).
+- [x] **P0.3 — Native Helper HTTP Input Authentication & Restricted CORS Origin:**
+  - [x] In `remote-control-helper/src/LoopbackServer.cpp`, enforce token check on `POST /input` (`Authorization: Bearer <token>`, `X-Auth-Token: <token>`, or JSON `token`). Return HTTP 401 Unauthorized when unauthenticated.
+  - [x] Restrict CORS Origin in `LoopbackServer.cpp` to loopback origins (`localhost`, `127.0.0.1`, `[::1]`) instead of wildcard `*` with PNA.
+  - [x] In `main.cpp`, auto-generate 32-char hex token when `--require-auth` is specified without token.
+- [x] **P1.4 — Single Active Sender Protection & Cryptographic Sender Tokens:**
+  - [x] Generate and store `room.senderToken` in `RoomManager` upon initial sender join.
+  - [x] Require matching `senderToken` on reconnect before evicting a stale sender socket; reject unauthorized evictions.
+  - [x] Update `sender.js` to send `reconnect: false` on initial join and pass `senderToken` on auto-reconnection.
+- [x] **P1.5 — WebRTC SDP Answer & ICE Candidate Relay Scoping:**
+  - [x] In `signaling.js` (`webrtc:answer` and `webrtc:ice-candidate`), verify that viewer-provided `targetSenderId` belongs to `room.senderSocketId` or `room.senderSocketIds`.
+  - [x] Drop and log any signaling messages targeted at sockets outside the authorized room.
+- [x] **P1.6 — VCAM Frame Bridge Authentication:**
+  - [x] Require `accessPin` matching on `POST /api/vcam/bridge-frame` in `src/server/server.js`.
+  - [x] Update `viewer.js` `pumpVcamFrame` to append `&pin=${encodeURIComponent(pin)}`.
+- [x] **P1.7 — State Leakage Cleanup on Explicit Room Leave & Frame Freshness Gating:**
+  - [x] Call `remoteControlManager.cleanRoom(roomId)`, `mjpegStreamer.clearRoom(roomId)`, and clear chat histories when sender leaves via `room:leave`.
+  - [x] In `mjpeg-streamer.js`, gate initial frame delivery on frame age `<= 5000ms`, serving standby slate if frame is stale.
+- [x] **P1.8 — Compound IP + RoomId PIN Attempt Throttling:**
+  - [x] Key `failedAttempts` by `${clientIp}:${roomId}` where `clientIp` is extracted with `trustProxy` support.
+  - [x] Retain throttling state across socket disconnections to prevent brute force bypass via reconnects.
+- [x] **P1.9 — RTSP 1.0 Endpoint Authentication & Room Validation:**
+  - [x] Wire `accessPin` and `roomManager` to `RtspServer`.
+  - [x] Verify PIN via URL query or Basic Auth header on non-OPTIONS requests; return HTTP 401 Unauthorized with `WWW-Authenticate: Basic realm="LAN Camera RTSP"`.
+  - [x] Validate room existence; return HTTP 404 Room Not Found if room does not exist.
+- [x] **P1.10 — Multi-Camera Studio Switcher Renegotiation:**
+  - [x] In `signaling.js`, emit `studio:activate` to target studio camera upon `studio:switch`.
+  - [x] In `sender.js`, initiate WebRtc connection to viewer upon receiving `studio:activate`.
+  - [x] In `viewer.js`, reset `webrtcPeer` upon `studio:switched` to cleanly negotiate with newly active camera.
+- [x] **P2.11 — MJPEG RFC 2046 Boundary & Backpressure Drain Handling:**
+  - [x] Declare `boundary=frame` in `Content-Type` matching body delimiter `--frame`.
+  - [x] Check `res.writableNeedDrain || res.destroyed` in `broadcastFrame` to drop frames under backpressure.
+- [x] **P2.12 — Dynamic SOF0 JPEG Dimension Parsing & RFC 2435 RTP/JPEG:**
+  - [x] Implement `parseJpegDimensions(buffer)` extracting width/height from SOF0/SOF2 markers.
+  - [x] Set RFC 2435 Q=80 standard table index, eliminating invalid non-standard headers.
+- [x] **P2.13 — Complete Environment Configuration Parsing:**
+  - [x] Parse `ENABLE_MDNS`, `ENABLE_RTSP`, `RTSP_PORT`, `RTSP_HOST`, `ENABLE_VCAM_SHM_BRIDGE`, `VCAM_SHM_PORT`, `VCAM_SHM_HOST`, `CONTROL_HELPER_HOST`, `CONTROL_HELPER_PORT`, `CONTROL_HELPER_TOKEN` in `loadConfig`.
+- [x] **Verification & Regression Testing:**
+  - [x] Authored comprehensive security test suite `tests/security-audit-fixes.test.js` (5/5 tests passing).
+  - [x] Verified full project test suite: 252/252 tests passing across 26 suites with 0 failures.
+  - [x] Verified native helper builds and tests pass (100%).
+  - [x] Rebuilt embedded assets via `node scripts/build-embedded-assets.js`.
+  - [x] Updated all 6 documentation files.

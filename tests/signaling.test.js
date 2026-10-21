@@ -395,9 +395,16 @@ test('Sender auto-reconnection with reconnect: true evicts orphaned sender socke
     assert.equal(s2Refused.success, false);
     assert.equal(s2Refused.error, 'Room already has an active sender.');
 
-    // With reconnect: true (auto-reconnect), the new sender socket takes over and evicts the stale sender
-    const s2Rejoined = await new Promise((res) => {
+    // With reconnect: true but without senderToken, eviction is rejected
+    const s2NoToken = await new Promise((res) => {
       sender2.emit('room:join', { roomId: 'autoreconnect-room', role: 'sender', pin: 'testpass', reconnect: true }, res);
+    });
+    assert.equal(s2NoToken.success, false);
+    assert.match(s2NoToken.error, /Unauthorized sender eviction/);
+
+    // With reconnect: true and matching senderToken (auto-reconnect), the new sender socket takes over and evicts the stale sender
+    const s2Rejoined = await new Promise((res) => {
+      sender2.emit('room:join', { roomId: 'autoreconnect-room', role: 'sender', pin: 'testpass', reconnect: true, senderToken: s1Join.senderToken }, res);
     });
     assert.equal(s2Rejoined.success, true);
     assert.equal(s2Rejoined.hasPeer, true);
@@ -444,7 +451,7 @@ test('Evicted sender is notified with sender:evicted so it can stop instead of l
     const evictedEvent = new Promise((res) => sender1.on('sender:evicted', res));
 
     const s2Join = await new Promise((res) => {
-      sender2.emit('room:join', { roomId: 'evict-notify-room', role: 'sender', pin: 'testpass', reconnect: true }, res);
+      sender2.emit('room:join', { roomId: 'evict-notify-room', role: 'sender', pin: 'testpass', reconnect: true, senderToken: s1Join.senderToken }, res);
     });
     assert.equal(s2Join.success, true);
 

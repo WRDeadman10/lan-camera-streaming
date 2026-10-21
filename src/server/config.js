@@ -195,6 +195,16 @@ export function loadConfig(env = process.env) {
   }
 
   const iceServers = parseIceServers(env);
+  const enableMdns = parseBool(env.ENABLE_MDNS, true);
+  const enableRtsp = parseBool(env.ENABLE_RTSP, true);
+  const rtspPort = parseInteger(env.RTSP_PORT, 8554, 1, 65535);
+  const rtspHost = parseString(env.RTSP_HOST, '0.0.0.0');
+  const enableVcamShmBridge = parseBool(env.ENABLE_VCAM_SHM_BRIDGE, false);
+  const vcamShmPort = parseInteger(env.VCAM_SHM_PORT, 7779, 1, 65535);
+  const vcamShmHost = parseString(env.VCAM_SHM_HOST, '127.0.0.1');
+  const controlHelperHost = parseString(env.CONTROL_HELPER_HOST, '127.0.0.1');
+  const controlHelperPort = parseInteger(env.CONTROL_HELPER_PORT, 8765, 1, 65535);
+  const controlHelperToken = parseString(env.CONTROL_HELPER_TOKEN, '');
 
   return {
     port,
@@ -207,6 +217,16 @@ export function loadConfig(env = process.env) {
     zrokToken,
     httpsCertPath,
     httpsKeyPath,
-    useHttps: httpsCertPath !== ''
+    useHttps: httpsCertPath !== '',
+    enableMdns,
+    enableRtsp,
+    rtspPort,
+    rtspHost,
+    enableVcamShmBridge,
+    vcamShmPort,
+    vcamShmHost,
+    controlHelperHost,
+    controlHelperPort,
+    controlHelperToken
   };
 }

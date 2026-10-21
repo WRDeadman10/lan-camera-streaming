@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 /**
  * @file room-manager.js
  * In-memory room manager enforcing 1-sender and 1-viewer capacity,
@@ -94,6 +95,12 @@ export class RoomManager {
       } else {
         if (room.senderSocketId && room.senderSocketId !== socketId) {
           if (options && options.reconnect) {
+            if (room.senderToken && options.senderToken && options.senderToken !== room.senderToken) {
+              return { success: false, error: 'Unauthorized sender eviction: invalid sender token.' };
+            }
+            if (room.senderToken && !options.senderToken) {
+              return { success: false, error: 'Unauthorized sender eviction: senderToken required.' };
+            }
             evictedSenderId = room.senderSocketId;
             room.senderSocketIds.delete(evictedSenderId);
             this.socketToRoom.delete(evictedSenderId);
@@ -105,6 +112,9 @@ export class RoomManager {
         } else {
           room.senderSocketId = socketId;
           room.senderSocketIds.add(socketId);
+          if (!room.senderToken) {
+            room.senderToken = (options && options.senderToken) || crypto.randomUUID();
+          }
         }
       }
     } else {
@@ -136,7 +146,8 @@ export class RoomManager {
       hasPeer,
       peerSocketId,
       peerSocketIds,
-      evictedSenderId
+      evictedSenderId,
+      senderToken: room.senderToken || null
     };
   }
 

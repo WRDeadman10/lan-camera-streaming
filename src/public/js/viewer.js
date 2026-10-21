@@ -225,7 +225,8 @@ function pumpVcamFrame() {
     }
 
     const roomId = currentRoomId || (roomIdInput && roomIdInput.value.trim());
-    fetch(`/api/vcam/bridge-frame?room=${encodeURIComponent(roomId)}&w=${w}&h=${h}`, {
+    const pin = (accessPinInput && accessPinInput.value.trim()) || rememberedPin || '123456';
+    fetch(`/api/vcam/bridge-frame?room=${encodeURIComponent(roomId)}&pin=${encodeURIComponent(pin)}&w=${w}&h=${h}`, {
       method: 'POST',
       headers: { 'Content-Type': 'image/jpeg' },
       body: blob
@@ -521,6 +522,7 @@ function setupSocketListeners() {
   });
 
   socket.on('studio:switched', ({ activeCameraId }) => {
+    const prevCameraId = activeStudioCameraId;
     activeStudioCameraId = activeCameraId;
     if (studioCamerasList) {
       const allBtns = studioCamerasList.querySelectorAll('.studio-cam-btn');
@@ -529,6 +531,12 @@ function setupSocketListeners() {
       });
     }
     logDiagnostic(`[Studio] Active studio camera changed to ${activeCameraId}`, 'INFO');
+    if (prevCameraId && prevCameraId !== activeCameraId && webrtcPeer) {
+      logDiagnostic(`[Studio] Resetting WebRTC connection to switch to camera ${activeCameraId}...`, 'INFO');
+      webrtcPeer.close();
+      webrtcPeer = null;
+      updateStatus('connecting', 'Switching camera...');
+    }
   });
 
   socket.on('control:state', (data) => {

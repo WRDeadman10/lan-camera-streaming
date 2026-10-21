@@ -37,4 +37,4 @@ coverage/
 dist/
 src/server/embedded-assets.js
 
-.playwright-mcp/page-2026-10-14T10-29-10-699Z.yml
+.playwright-mcp/

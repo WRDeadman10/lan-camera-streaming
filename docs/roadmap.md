@@ -303,3 +303,23 @@ Tasks:
 - [x] Prevent title truncation at 390px mobile header; add subtle scroll affordance to vitals strip.
 - [x] Use local static background by default in wallpaper system, eliminating external 403 network errors.
 - [x] Automated Test Coverage: 247 tests passing across 26 test suites (`tests/ux-improvements.test.js`).
+
+## Phase 23 — Security Hardening, Transport Compliance & Audit Resolution (ADR-045) [Completed]
+
+**Objective:** Systematically resolve all 13 security and architectural audit findings across signaling, remote control, RTSP, MJPEG, and the native input helper without regressions.
+
+Tasks:
+- [x] P0.1: Enforce controller lease verification and master control toggle check for all WebRTC DataChannel `lancam-control` input messages in `src/public/js/sender.js`.
+- [x] P0.2: Enforce room membership in `control:input`; release controller lease, dispatch `control:controller-left`, and release held inputs (`releaseAll()`) on `room:leave` and `disconnect` in `src/server/signaling.js`.
+- [x] P0.3: Enforce token authentication on `POST /input` and restrict CORS origins strictly to loopback (`localhost`, `127.0.0.1`, `[::1]`) in `remote-control-helper/src/LoopbackServer.cpp`.
+- [x] P1.4: Implement cryptographic `senderToken` in `RoomManager` and require matching token for sender reconnection / eviction.
+- [x] P1.5: Validate WebRTC SDP answer and ICE candidate targets against room sender IDs in `src/server/signaling.js`.
+- [x] P1.6: Protect `POST /api/vcam/bridge-frame` with access PIN verification (`?pin=...` or `x-access-pin`).
+- [x] P1.7: Teardown room control state, MJPEG cache, and chat history on room departure; enforce 5-second frame freshness in `mjpeg-streamer.js`.
+- [x] P1.8: Implement compound `${clientIp}:${roomId}` PIN throttling in `src/server/signaling.js` with proxy awareness to prevent socket cycling bypass.
+- [x] P1.9: Mandate PIN authentication (query or HTTP Basic Auth) and room existence checks in `src/server/rtsp-server.js`.
+- [x] P1.10: Emit `studio:activate` on studio camera switch and renegotiate WebRTC peer connection on viewer in `sender.js` and `viewer.js`.
+- [x] P2.11: Standardize MJPEG RFC 2046 MIME boundary header (`boundary=frame`) and handle socket backpressure in `mjpeg-streamer.js`.
+- [x] P2.12: Parse JPEG SOF dimensions dynamically and set standard RFC 2435 table `Q=80` in `rtsp-server.js`.
+- [x] P2.13: Add missing configuration parsing for MDNS, RTSP, VCAM SHM, and remote control helper in `src/server/config.js`.
+- [x] Automated Test Coverage: 252 tests passing across 26 test suites (`tests/security-audit-fixes.test.js`).

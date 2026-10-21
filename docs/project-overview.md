@@ -108,3 +108,10 @@ The user experience is designed for immediate, friction-free operation across bo
 - **Centered Viewport Join Form:** Inactive desktop viewers can enter credentials and connect directly within the central video canvas, eliminating eye travel to the sidebar.
 - **Progressive Disclosure:** First-time senders see only the 4 essential setup fields, with advanced video, transport, and remote-control options neatly organized in expandable settings.
 - **Distraction-Free Backgrounds:** Clean local dark space styling eliminates failing 403 API calls on local networks.
+
+### Security Hardening, Transport Compliance & Authorization Architecture (ADR-045)
+Comprehensive hardening across the signaling server, media pipelines, and native helper ensures zero unauthorized access and strict RFC compliance:
+- **Zero-Trust Remote Control:** WebRTC DataChannel control messages enforce sender-side controller lease verification; departing controllers automatically release all held keys and mouse buttons.
+- **Protected Native Helper:** The native loopback helper mandates authentication token validation for `POST /input` and restricts CORS strictly to loopback origins (`localhost`, `127.0.0.1`, `[::1]`).
+- **Sender Eviction Guard:** Senders receive a cryptographic `senderToken` upon room creation; rogue or duplicate senders cannot evict an active streamer without matching credentials.
+- **Boundary & Header Hardening:** RTSP streams require PIN authentication or Basic Auth; `/api/vcam/bridge-frame` enforces PIN verification; SDP/ICE signaling targets are strictly validated within the room; MJPEG adheres to RFC 2046 MIME boundaries with TCP backpressure management.

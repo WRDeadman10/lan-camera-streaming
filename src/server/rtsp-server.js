@@ -7,8 +7,37 @@
 
 import net from 'node:net';
 
+export function parseJpegDimensions(buffer) {
+  if (!buffer || buffer.length < 4 || buffer[0] !== 0xFF || buffer[1] !== 0xD8) {
+    return { width: 1280, height: 720 };
+  }
+  let pos = 2;
+  while (pos < buffer.length - 8) {
+    if (buffer[pos] !== 0xFF) {
+      pos++;
+      continue;
+    }
+    const marker = buffer[pos + 1];
+    if (marker === 0xC0 || marker === 0xC1 || marker === 0xC2) {
+      const height = buffer.readUInt16BE(pos + 5);
+      const width = buffer.readUInt16BE(pos + 7);
+      if (width > 0 && height > 0) {
+        return { width, height };
+      }
+    }
+    if (marker === 0xDA || marker === 0xD9) {
+      break;
+    }
+    const len = buffer.readUInt16BE(pos + 2);
+    pos += 2 + len;
+  }
+  return { width: 1280, height: 720 };
+}
+
 export class RtspServer {
-  constructor(port = 8554, host = '0.0.0.0', logger = console) {
+  constructor(port = 8554, host = '0.0.0.0', logger = console, accessPin = '', roomManager = null) {
+    this.accessPin = accessPin || '';
+    this.roomManager = roomManager || null;
     this.port = port;
     this.host = host;
     this.logger = logger;
@@ -99,11 +128,45 @@ export class RtspServer {
 
     const cseq = headers['cseq'] || '1';
 
-    // Extract roomId from URL (e.g., rtsp://host:port/live/room123 or /live/room123/trackID=0)
+    // Extract roomId and pin from URL (e.g., rtsp://host:port/live/room123 or /live/room123?pin=123456)
+    let candidatePin = null;
     if (url) {
       const match = url.match(/\/live\/([a-zA-Z0-9_-]+)/);
       if (match) {
         session.roomId = match[1];
+      }
+      const pinMatch = url.match(/[?&]pin=([a-zA-Z0-9_-]+)/);
+      if (pinMatch) {
+        candidatePin = pinMatch[1];
+      }
+    }
+
+    if (!candidatePin && headers['authorization']) {
+      const authHeader = headers['authorization'];
+      if (authHeader.startsWith('Basic ')) {
+        try {
+          const creds = Buffer.from(authHeader.slice(6).trim(), 'base64').toString('utf8');
+          const colonIdx = creds.indexOf(':');
+          candidatePin = colonIdx !== -1 ? creds.slice(colonIdx + 1) : creds;
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    if (this.accessPin && method !== 'OPTIONS') {
+      if (!candidatePin || candidatePin !== this.accessPin) {
+        const res = `RTSP/1.0 401 Unauthorized\r\nCSeq: ${cseq}\r\nWWW-Authenticate: Basic realm="LAN Camera RTSP"\r\n\r\n`;
+        socket.write(res);
+        return;
+      }
+    }
+
+    if (this.roomManager && session.roomId && method !== 'OPTIONS' && method !== 'TEARDOWN') {
+      if (!this.roomManager.getRoom(session.roomId)) {
+        const res = `RTSP/1.0 404 Room Not Found\r\nCSeq: ${cseq}\r\n\r\n`;
+        socket.write(res);
+        return;
       }
     }
 
@@ -189,6 +252,7 @@ export class RtspServer {
 
     const maxPayload = 32000;
     const totalLen = jpegBuffer.length;
+    const dims = parseJpegDimensions(jpegBuffer);
     let offset = 0;
 
     for (const session of this.sessions.values()) {
@@ -219,9 +283,9 @@ export class RtspServer {
         jpegHeader[2] = (offset >> 8) & 0xFF;
         jpegHeader[3] = offset & 0xFF;
         jpegHeader[4] = 1; // Type (4:2:2)
-        jpegHeader[5] = 255; // Q
-        jpegHeader[6] = Math.min(255, Math.floor(1280 / 8)); // Width / 8
-        jpegHeader[7] = Math.min(255, Math.floor(720 / 8));  // Height / 8
+        jpegHeader[5] = 80; // Q=80 (RFC 2435 standard table)
+        jpegHeader[6] = Math.min(255, Math.floor(dims.width / 8)); // Width / 8
+        jpegHeader[7] = Math.min(255, Math.floor(dims.height / 8));  // Height / 8
 
         const chunkData = jpegBuffer.subarray(offset, offset + chunkSize);
         const rtpPacketLen = rtpHeader.length + jpegHeader.length + chunkData.length;

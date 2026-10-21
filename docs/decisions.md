@@ -980,6 +980,66 @@ Following a comprehensive user experience audit across desktop and mobile device
 **Consequences:**
 Mobile pairing works effortlessly on local Wi-Fi, 1-click viewer links eliminate manual PIN entry friction, the desktop viewer presents an intuitive centered join flow, technical warnings appear only upon actual failures, initial setup is clean and focused, and console errors are completely eradicated. 247 automated unit tests pass across 26 suites.
 
+
+## ADR-045: Comprehensive Security and Architectural Audit Resolution
+
+**Status:** Accepted (2026-10-21)
+
+**Context:**
+A full security and architecture audit across the core streaming application and the native `remote-control-helper` submodule revealed 13 critical vulnerabilities and architectural oversights across three severity tiers:
+- **P0.1 DataChannel Lease Authorization Bypass:** The `lancam-control` DataChannel on `sender.js` forwarded received messages directly to the native input helper without verifying that the sending viewer currently held the active controller lease.
+- **P0.2 Lease Survival Across Explicit Room Leave:** When a controller viewer explicitly emitted `room:leave`, the lease and membership were not revoked, allowing departed sockets to continue issuing input via the signaling fallback.
+- **P0.3 Native Helper Unauthenticated HTTP Input & Wildcard CORS:** `LoopbackServer.cpp` unconditionally marked `POST /input` as authenticated (`bool auth = true`), ignoring `--require-auth`, and returned `Access-Control-Allow-Origin: *` with Private Network Access (PNA).
+- **P1.4 Sender Eviction Hijack:** The sender client sent `reconnect: true` on initial join; `RoomManager` unconditionally evicted active senders whenever `reconnect: true` was presented by any newcomer knowing the room PIN.
+- **P1.5 Unscoped WebRTC Answer & Candidate Relay:** When a viewer answered or sent ICE candidates, the target ID was emitted to `io.to(targetSenderId)` without verifying that the target was an active sender in that specific room.
+- **P1.6 Unauthenticated Frame Bridge:** `/api/vcam/bridge-frame` accepted raw frame uploads without checking the access PIN.
+- **P1.7 State Leaks on Explicit Leave & Stale Frame Replay:** `room:leave` bypassed cleanup in `remoteControlManager`, `mjpegStreamer`, and chat; `MjpegStreamer` served arbitrarily old cached frames to new subscribers without age verification.
+- **P1.8 PIN Throttling Bypass on Socket Disconnect:** `failedAttempts` was keyed only by `socket.id` and deleted on disconnect, allowing brute force PIN guessing across reconnects.
+- **P1.9 Unauthenticated RTSP Server:** `RtspServer` accepted connections without checking PIN credentials or validating room existence.
+- **P1.10 Incomplete Studio Switcher:** Switching studio cameras only highlighted a UI button and updated a server ID without renegotiating media tracks.
+- **P2.11 MJPEG Boundary Header RFC 2046 Violation & Backpressure:** `MjpegStreamer` declared `boundary=--frame` while writing `--frame\r\n`, desyncing RFC 2046 parsers; it also ignored `res.writableNeedDrain` backpressure.
+- **P2.12 Invalid RTSP JPEG Packetization:** `RtspServer` hardcoded 1280x720, lacked SOF dimension parsing, and emitted Q=255 without dynamic quantization tables.
+- **P2.13 Missing Ecosystem Configuration in loadConfig:** `loadConfig` failed to parse `ENABLE_MDNS`, `ENABLE_RTSP`, `RTSP_PORT`, `ENABLE_VCAM_SHM_BRIDGE`, `CONTROL_HELPER_*`.
+
+**Decision:**
+1. **Remote-Control Lease Enforcement (`sender.js`, `signaling.js`):**
+   - Store `activeControllerId` in `sender.js` synchronized from `control:controller-joined`, `control:controller-left`, and `control:state`.
+   - In DataChannel `onControlInput`, verify `controlToggle.checked` is true and `viewerId === activeControllerId`. Reject and log unauthorized inputs.
+   - In `control:input` (signaling relay), enforce active room membership check: `membership && membership.roomId === roomId && membership.role === 'viewer' && remoteControlManager.isController(roomId, socket.id)`.
+2. **Explicit Leave Cleanup (`signaling.js`, `remote-control-manager.js`):**
+   - In `room:leave`, immediately release controller leases (`releaseLease`), release held inputs (`controlBridge.releaseAll()`), notify host (`control:controller-left`), clean room state in `remoteControlManager` and `mjpegStreamer`, and purge chat history when empty.
+   - In `remote-control-manager.js`, enforce that sockets in disconnect grace are not considered active controllers for input.
+3. **Native Helper Authentication & CORS Isolation (`LoopbackServer.cpp`, `main.cpp`):**
+   - In `LoopbackServer.cpp`, check `m_requireAuth` on `POST /input` (`Authorization: Bearer <token>`, `X-Auth-Token: <token>`, or JSON `token`). Return HTTP 401 Unauthorized when unauthenticated.
+   - Restrict CORS Origin strictly to loopback origins (`localhost`, `127.0.0.1`, `[::1]`) rather than wildcard `*`.
+   - In `main.cpp`, auto-generate 32-character cryptographic hex token when `--require-auth` is enabled without token.
+4. **Single Active Sender Protection via Cryptographic Tokens (`room-manager.js`, `sender.js`):**
+   - Generate and assign `room.senderToken` on initial sender join.
+   - Require matching `senderToken` for sender eviction on reconnect; reject unauthorized attempts with `Unauthorized sender eviction: invalid sender token.`.
+   - Send `reconnect: false` on initial join and supply `senderToken` on auto-reconnection.
+5. **Relay Isolation (`signaling.js`):**
+   - In `webrtc:answer` and `webrtc:ice-candidate`, verify that viewer-provided `targetSenderId` belongs to `room.senderSocketId` or `room.senderSocketIds`.
+6. **VCAM Frame Bridge Authentication (`server.js`, `viewer.js`):**
+   - Require `accessPin` on `POST /api/vcam/bridge-frame`; return 401 Unauthorized if invalid.
+   - Append `&pin=${encodeURIComponent(pin)}` in viewer frame pump.
+7. **Compound IP + RoomId PIN Throttling (`signaling.js`):**
+   - Key `failedAttempts` by `${clientIp}:${roomId}` where `clientIp` is extracted with `trustProxy` support. Retain throttling across socket disconnects.
+8. **RTSP 1.0 Authentication & Dynamic SOF0 Parsing (`rtsp-server.js`, `server.js`):**
+   - Check PIN via URL query or Basic Auth header on RTSP non-OPTIONS requests; validate room existence.
+   - Implement `parseJpegDimensions(buffer)` extracting true width and height from SOF0/SOF2 markers.
+   - Set RFC 2435 Q=80 standard quantization table index.
+9. **Multi-Camera Studio Switcher Renegotiation (`signaling.js`, `sender.js`, `viewer.js`):**
+   - On `studio:switch`, emit `studio:activate` to target camera; target camera initiates WebRTC offer to viewer; viewer resets peer connection and accepts new video track.
+10. **MJPEG RFC 2046 Compliance & Backpressure (`mjpeg-streamer.js`):**
+    - Set `boundary=frame` matching body delimiter `--frame\r\n`.
+    - Check `res.writableNeedDrain || res.destroyed` to drop frames under backpressure.
+    - Deliver cached frames only if received within 5000ms; otherwise serve standby slate.
+11. **Ecosystem Environment Parsing (`config.js`):**
+    - Fully wired `ENABLE_MDNS`, `ENABLE_RTSP`, `RTSP_PORT`, `RTSP_HOST`, `ENABLE_VCAM_SHM_BRIDGE`, `VCAM_SHM_PORT`, `VCAM_SHM_HOST`, `CONTROL_HELPER_*` into `loadConfig`.
+
+**Consequences:**
+All 13 security and architectural vulnerabilities are completely resolved. The remote desktop control pipeline is cryptographically secured, unauthorized sender evictions and signaling leaks are prevented, RTSP and VCAM streams require authentication, MJPEG streams conform to RFC 2046 without memory leaks, and multi-camera studio feeds switch seamlessly. 252 automated unit tests pass across 26 suites with 0 regressions.
+
 ## Open decisions to revisit after the first working stream
 
 - Whether to code-sign the installer and executables (ADR-024).

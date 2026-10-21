@@ -634,3 +634,28 @@ To eliminate eye travel between the empty video viewport and the distant right s
 - **Sender Setup:** The initial setup card is reduced to core essentials (Source, Camera, Room ID, PIN, Start Streaming, and Flip Camera). Secondary settings (Resolution, Focus, Audio, Transport, and Remote Desktop Control) are organized inside an expandable `<details id="advancedSettingsSection">`.
 - **Reactive mDNS Guidance:** The technical mDNS warning banner is suppressed on startup and only surfaces when a direct LAN connection actually fails (`state === 'failed'`).
 - **Metrics & Tools:** Vitals are labeled FPS, Resolution, and Connection, remaining hidden until live. HUD buttons are hidden while inactive. Chat is hidden until connected, and diagnostics are gated behind Developer Mode.
+
+## 23. Security Hardening, Transport Compliance & Authorization Architecture (ADR-045)
+
+### 23.1 Remote Control Zero-Trust Lease Enforcement
+- **DataChannel Controller Verification:** In `src/public/js/sender.js`, every incoming WebRTC DataChannel control message is validated against the active controller lease holder (`viewerId === activeControllerId`) and verified that the remote control master toggle is enabled. Unauthenticated or non-leaseholder input packets are immediately discarded and logged.
+- **Immediate Input Release on Disconnect/Leave:** When an active controller leaves the room (`room:leave`) or disconnects, `src/server/signaling.js` releases the controller lease in `remoteControlManager`, dispatches `control:controller-left` to the sender, issues `controlBridge.releaseAll()` to release all held modifier keys and mouse buttons, and clears active controller references.
+
+### 23.2 Native Helper Authentication & Origin Isolation
+- **Loopback Token Authentication:** In `remote-control-helper/src/LoopbackServer.cpp`, `POST /input` mandates token validation when `m_requireAuth` is enabled. Requests must provide a valid token via `Authorization: Bearer <token>`, `X-Auth-Token: <token>`, or JSON `{ "token": "..." }`. Unauthorized requests receive HTTP `401 Unauthorized`.
+- **CORS Origin Restriction:** `LoopbackServer` restricts `Access-Control-Allow-Origin` strictly to loopback origins (`localhost`, `127.0.0.1`, `[::1]`) rather than wildcard `*`, preventing external websites from injecting local input via Private Network Access (PNA).
+
+### 23.3 Cryptographic Sender Reconnection Guard
+- **Sender Token Authority:** Upon first sender join, `RoomManager` generates a cryptographically random `senderToken` (`crypto.randomBytes(24).toString('hex')`).
+- **Anti-Eviction Protection:** When a sender connects with `reconnect: true`, `joinRoom` enforces `options.senderToken === room.senderToken`. Unauthorized reconnect attempts without a valid token are rejected with `Unauthorized sender eviction: invalid sender token.`, preventing rogue clients from hijacking active camera or screen streams.
+
+### 23.4 Endpoint Protection & Signaling Scope Isolation
+- **Virtual Camera Bridge Authentication:** `POST /api/vcam/bridge-frame` enforces access PIN verification (`req.query.pin` or `req.headers['x-access-pin']`), blocking unauthenticated frame injection into the virtual webcam pipeline.
+- **RTSP 1.0 Server Authentication:** `src/server/rtsp-server.js` mandates room validation and PIN authorization (`?pin=...` or HTTP Basic Auth) for `DESCRIBE`, `SETUP`, `PLAY`, and `TEARDOWN`, returning `401 Unauthorized` with `WWW-Authenticate: Basic realm="LAN Camera Streaming"` when credentials are missing or invalid.
+- **WebRTC Signaling Validation:** In `webrtc:answer` and `webrtc:ice-candidate`, `signaling.js` verifies that viewer-targeted sender IDs strictly belong to the room's registered sender (`room.senderSocketId` or `room.senderSocketIds`), preventing message injection across disparate sockets.
+- **Compound IP + Room Rate-Limiting:** PIN failure rate-limiting is keyed by compound `${clientIp}:${roomId}` with proxy awareness (`X-Forwarded-For`), persisting across socket disconnects to prevent brute-force attacks via socket cycling.
+
+### 23.5 Protocol RFC Compliance & Stream Quality
+- **MJPEG RFC 2046 Compliance:** Multipart MIME boundary in `mjpeg-streamer.js` is standardized to `boundary=frame`, correctly pairing with `--frame\r\n` boundary delimiters in payload bodies. Backpressure checks (`res.writableNeedDrain || res.destroyed`) drop frames to prevent heap exhaustion.
+- **RTP JPEG RFC 2435 Standard Quantization:** `rtsp-server.js` dynamically extracts frame dimensions from JPEG SOF markers and adopts standard RFC 2435 table index `Q=80`, eliminating decoder failures and dropped frames in VLC, OBS, and ffmpeg.
+- **Centralized Environment Configuration:** `src/server/config.js` provides comprehensive parsing with type validation and defaults for `ENABLE_MDNS`, `ENABLE_RTSP`, `RTSP_PORT`, `RTSP_HOST`, `ENABLE_VCAM_SHM_BRIDGE`, `VCAM_SHM_PORT`, `VCAM_SHM_HOST`, `CONTROL_HELPER_HOST`, `CONTROL_HELPER_PORT`, and `CONTROL_HELPER_TOKEN`.

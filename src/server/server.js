@@ -236,7 +236,7 @@ export function createServer(config, logger) {
   }
   config.vcamShmBridge = vcamShmBridge;
 
-  const rtspServer = new RtspServer(config.rtspPort || 8554, '0.0.0.0', logger);
+  const rtspServer = new RtspServer(config.rtspPort || 8554, config.rtspHost || '0.0.0.0', logger, config.accessPin);
   if (config.enableRtsp) {
     rtspServer.start().catch((err) => {
       logger.warn(`Failed to start RTSP server: ${err.message}`);
@@ -257,6 +257,11 @@ export function createServer(config, logger) {
   });
 
   app.post('/api/vcam/bridge-frame', express.raw({ type: ['image/jpeg', 'application/octet-stream'], limit: '5mb' }), (req, res) => {
+    const pin = req.query.pin || req.headers['x-access-pin'];
+    if (config.accessPin && pin !== config.accessPin) {
+      res.status(401).send('Unauthorized: Invalid PIN');
+      return;
+    }
     const roomId = req.query.room;
     const body = req.body;
     const format = req.query.format;

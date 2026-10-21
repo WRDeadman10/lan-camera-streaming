@@ -43,6 +43,8 @@ let watchdogInterval = null;
 let activeRoomId = null;
 let activePin = null;
 let isStudioSender = false;
+let activeSenderToken = null;
+let activeControllerId = null;
 
 // Per-viewer choice of what stays constant: 'fps' (default), 'resolution' or 'both'. Bitrate ceilings live in sdp-bitrate.js.
 const DefaultQualityMode = 'fps';
@@ -1842,7 +1844,8 @@ if (viewerPeers.size > 0) {
   logDiagnostic(`Joining room "${roomId}" as ${role} [mode: ${currentMediaMode}]...`);
   updateStatus('connecting', 'Joining Room...');
 
-  socket.emit('room:join', { roomId, role, pin, mediaMode: currentMediaMode, reconnect: true }, async (response) => {
+  const isAutoRejoining = Boolean(isRejoining);
+  socket.emit('room:join', { roomId, role, pin, mediaMode: currentMediaMode, reconnect: isAutoRejoining, senderToken: activeSenderToken }, async (response) => {
     if (!response || !response.success) {
       const errMsg = response ? response.error : 'Connection to room failed';
       showError(errMsg);
@@ -1853,6 +1856,9 @@ if (viewerPeers.size > 0) {
     }
 
     hasJoinedRoom = true;
+    if (response.senderToken) {
+      activeSenderToken = response.senderToken;
+    }
     seedViewerQuality(response);
     logDiagnostic(`Joined room "${roomId}" as ${role} [mode: ${response.mediaMode}].`);
     getChatManager().setSocket(socket);
@@ -1963,7 +1969,8 @@ async function rejoinRoomAsSender() {
     role,
     pin: activePin,
     mediaMode: currentMediaMode,
-    reconnect: true
+    reconnect: true,
+    senderToken: activeSenderToken
   };
 
   socket.emit('room:join', joinPayload, async (response) => {
@@ -1982,6 +1989,9 @@ async function rejoinRoomAsSender() {
     }
 
     hasJoinedRoom = true;
+    if (response.senderToken) {
+      activeSenderToken = response.senderToken;
+    }
     seedViewerQuality(response);
     logDiagnostic(`[AutoReconnect] Successfully rejoined room "${activeRoomId}" as ${role} [mode: ${response.mediaMode}].`, 'INFO');
     getChatManager().setSocket(socket);
@@ -2196,6 +2206,13 @@ function createSenderPeerForViewer(viewerId, iceServers) {
       }
     },
     onControlInput: (inputEvent) => {
+      if (!controlToggle || !controlToggle.checked) {
+        return;
+      }
+      if (!activeControllerId || activeControllerId !== viewerId) {
+        logDiagnostic(`[CONTROL:${viewerId}] Blocked control input: viewer is not active controller lease holder (active=${activeControllerId}).`, 'WARN');
+        return;
+      }
       forwardInputToLocalHelper(inputEvent);
     },
     onControlChannelStateChange: (state) => {
@@ -2467,6 +2484,7 @@ function setupSocketListeners() {
 
   socket.on('control:controller-joined', (data) => {
     logDiagnostic(`[CONTROL] Controller joined: ${data.controllerId} (reconnected: ${Boolean(data.reconnected)})`, 'INFO');
+    activeControllerId = data.controllerId;
     updateControlUIState({
       hasController: true,
       controllerId: data.controllerId,
@@ -2477,6 +2495,9 @@ function setupSocketListeners() {
 
   socket.on('control:controller-left', (data) => {
     logDiagnostic(`[CONTROL] Controller left: ${data.controllerId} (${data.reason})`, 'INFO');
+    if (activeControllerId === data.controllerId) {
+      activeControllerId = null;
+    }
     updateControlUIState({
       hasController: false,
       controllerId: null,
@@ -2497,14 +2518,40 @@ function setupSocketListeners() {
     if (typeof data.enabled === 'boolean' && controlToggle) {
       controlToggle.checked = data.enabled;
     }
+    if (data.controllerId !== undefined) {
+      activeControllerId = data.controllerId;
+    } else if (data.hasController === false) {
+      activeControllerId = null;
+    }
     updateControlUIState(data);
     if (data.enabled) {
       probeControlHelper(true);
     }
   });
 
-  socket.on('control:input', (event) => {
-    forwardInputToLocalHelper(event);
+  socket.on('control:input', (data) => {
+    const inputEvent = data && data.event ? data.event : data;
+    const controllerId = data && data.controllerId ? data.controllerId : null;
+    if (!controlToggle || !controlToggle.checked) {
+      return;
+    }
+    if (controllerId && controllerId !== activeControllerId) {
+      logDiagnostic(`[CONTROL] Blocked signaling input from non-leaseholder ${controllerId}.`, 'WARN');
+      return;
+    }
+    if (!activeControllerId) {
+      logDiagnostic('[CONTROL] Blocked signaling input: no active controller lease.', 'WARN');
+      return;
+    }
+    forwardInputToLocalHelper(inputEvent);
+  });
+
+  socket.on('studio:activate', (data) => {
+    const viewerId = data && data.viewerId;
+    if (viewerId) {
+      logDiagnostic(`[Studio] Activated as primary broadcast camera. Connecting to viewer ${viewerId}...`, 'INFO');
+      initiateWebRtcConnectionForViewer(viewerId);
+    }
   });
 }
 

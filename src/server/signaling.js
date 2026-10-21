@@ -9,6 +9,14 @@ import { TunnelRelay } from './tunnel-relay.js';
 import { RemoteControlManager } from './remote-control-manager.js';
 import { ControlBridge } from './control-bridge.js';
 
+function getClientIp(socket, trustProxy) {
+  if (trustProxy && socket.handshake && socket.handshake.headers && socket.handshake.headers['x-forwarded-for']) {
+    const forwarded = socket.handshake.headers['x-forwarded-for'].split(',')[0].trim();
+    if (forwarded) return forwarded;
+  }
+  return (socket.handshake && socket.handshake.address) || (socket.conn && socket.conn.remoteAddress) || '127.0.0.1';
+}
+
 export function setupSignaling(httpServer, config, logger) {
   const roomManager = new RoomManager(config.accessPin);
   const tunnelRelay = new TunnelRelay({ maxFrameSizeBytes: 600000, maxFps: 30 });
@@ -83,6 +91,11 @@ export function setupSignaling(httpServer, config, logger) {
     };
   }
 
+  if (config.rtspServer) {
+    config.rtspServer.roomManager = roomManager;
+    config.rtspServer.accessPin = config.accessPin;
+  }
+
   io.on('connection', (socket) => {
     logger.debug(`Socket connected: ${socket.id}`);
 
@@ -90,22 +103,25 @@ export function setupSignaling(httpServer, config, logger) {
     socket.on('room:join', (payload, callback) => {
       try {
         const now = Date.now();
-        const record = failedAttempts.get(socket.id);
-        if (record && record.blockedUntil > now) {
-          const waitSecs = Math.ceil((record.blockedUntil - now) / 1000);
-          const err = `Too many failed attempts. Please wait ${waitSecs} seconds before retrying.`;
-          logger.warn(`Rate limited socket ${socket.id}`);
-          if (typeof callback === 'function') callback({ success: false, error: err });
-          return;
-        }
-
         if (!payload || typeof payload !== 'object') {
           const err = 'Invalid payload format.';
           if (typeof callback === 'function') callback({ success: false, error: err });
           return;
         }
 
-        const { roomId, role, pin, mediaMode, reconnect } = payload;
+        const { roomId, role, pin, mediaMode, reconnect, senderToken } = payload;
+        const clientIp = getClientIp(socket, config.trustProxy);
+        const targetRoom = typeof roomId === 'string' ? roomId.trim() : 'global';
+        const throttleKey = `${clientIp}:${targetRoom}`;
+        const record = failedAttempts.get(throttleKey);
+        if (record && record.blockedUntil > now) {
+          const waitSecs = Math.ceil((record.blockedUntil - now) / 1000);
+          const err = `Too many failed attempts. Please wait ${waitSecs} seconds before retrying.`;
+          logger.warn(`Rate limited ${throttleKey} (socket: ${socket.id})`);
+          if (typeof callback === 'function') callback({ success: false, error: err });
+          return;
+        }
+
         let shouldReconnect = Boolean(reconnect);
         const existingRoom = roomManager.getRoom(roomId);
         if (existingRoom && existingRoom.senderSocketId && existingRoom.senderSocketId !== socket.id) {
@@ -117,21 +133,22 @@ export function setupSignaling(httpServer, config, logger) {
 
         const result = roomManager.createOrJoinRoom(roomId, role, socket.id, pin, mediaMode, {
           reconnect: shouldReconnect,
-          studioMode: role === 'studio-sender'
+          studioMode: role === 'studio-sender',
+          senderToken
         });
 
         if (!result.success) {
           const count = (record ? record.count : 0) + 1;
           const blockedUntil = count >= 5 ? now + 30000 : 0; // block for 30s after 5 failures
-          failedAttempts.set(socket.id, { count, blockedUntil });
+          failedAttempts.set(throttleKey, { count, blockedUntil, lastAttemptAt: now });
 
-          logger.warn(`Join room failed: ${result.error} (socket: ${socket.id}, room: ${roomId})`);
+          logger.warn(`Join room failed: ${result.error} (socket: ${socket.id}, key: ${throttleKey})`);
           if (typeof callback === 'function') callback(result);
           return;
         }
 
         // Reset failures on success
-        failedAttempts.delete(socket.id);
+        failedAttempts.delete(throttleKey);
 
         if (result.evictedSenderId) {
           logger.info(`Evicting stale sender socket ${result.evictedSenderId} in room "${roomId}" for reconnected sender ${socket.id}`);
@@ -287,13 +304,16 @@ export function setupSignaling(httpServer, config, logger) {
       if (membership.role === 'viewer') {
         // Viewer answering sender
         const targetSenderId = payload.targetId || payload.senderId || room.senderSocketId;
-        if (targetSenderId) {
+        const isRoomSender = Boolean(targetSenderId && (targetSenderId === room.senderSocketId || (room.senderSocketIds && room.senderSocketIds.has(targetSenderId))));
+        if (isRoomSender) {
           logger.debug(`Relaying SDP answer from viewer ${socket.id} to sender ${targetSenderId}`);
           io.to(targetSenderId).emit('webrtc:answer', {
             sdp: payload.sdp,
             type: payload.type,
             senderId: socket.id
           });
+        } else {
+          logger.warn(`Blocked SDP answer from viewer ${socket.id}: target ${targetSenderId} is not a sender in room ${membership.roomId}`);
         }
       } else {
         // Sender answering external receiver offer
@@ -349,13 +369,16 @@ export function setupSignaling(httpServer, config, logger) {
       } else {
         // Viewer sending ICE candidate to sender
         const targetSenderId = payload.targetId || payload.senderId || room.senderSocketId;
-        if (targetSenderId) {
+        const isRoomSender = Boolean(targetSenderId && (targetSenderId === room.senderSocketId || (room.senderSocketIds && room.senderSocketIds.has(targetSenderId))));
+        if (isRoomSender) {
           io.to(targetSenderId).emit('webrtc:ice-candidate', {
             candidate: payload.candidate,
             sdpMid: payload.sdpMid,
             sdpMLineIndex: payload.sdpMLineIndex,
             senderId: socket.id
           });
+        } else {
+          logger.warn(`Blocked ICE candidate from viewer ${socket.id}: target ${targetSenderId} is not a sender in room ${membership.roomId}`);
         }
       }
     });
@@ -498,6 +521,45 @@ export function setupSignaling(httpServer, config, logger) {
     // Leave room
     socket.on('room:leave', () => {
       forgetViewerQuality(socket.id);
+
+      const membership = roomManager.getMembership(socket.id);
+      if (membership && membership.role === 'viewer') {
+        const releaseRes = remoteControlManager.releaseLease(membership.roomId, socket.id);
+        if (releaseRes.success) {
+          controlBridge.releaseAll();
+          const roomObj = roomManager.getRoom(membership.roomId);
+          if (roomObj && roomObj.senderSocketId) {
+            io.to(roomObj.senderSocketId).emit('control:controller-left', {
+              controllerId: socket.id,
+              reason: 'left_room'
+            });
+          }
+          io.to(membership.roomId).emit('control:state', {
+            enabled: remoteControlManager.isControlEnabled(membership.roomId),
+            hasController: false
+          });
+        }
+      }
+
+      const ctrlEvents = remoteControlManager.handleSocketDisconnect(socket.id);
+      for (const ev of ctrlEvents) {
+        if (ev.wasController) {
+          controlBridge.releaseAll();
+          const roomObj = roomManager.getRoom(ev.roomId);
+          if (roomObj && roomObj.senderSocketId) {
+            io.to(roomObj.senderSocketId).emit('control:controller-disconnected', {
+              controllerId: socket.id,
+              inGrace: ev.inGrace
+            });
+          }
+        } else if (ev.wasSender) {
+          controlBridge.releaseAll();
+          if (ev.revokedControllerId) {
+            io.to(ev.revokedControllerId).emit('control:revoked', { reason: 'sender_disconnected' });
+          }
+        }
+      }
+
       const leaveResult = roomManager.leave(socket.id);
       if (leaveResult) {
         socket.leave(leaveResult.roomId);
@@ -507,6 +569,10 @@ export function setupSignaling(httpServer, config, logger) {
             io.to(vId).emit('peer:left', { role: leaveResult.role, peerId: socket.id });
           }
           tunnelRelay.cleanRoom(leaveResult.roomId);
+          remoteControlManager.cleanRoom(leaveResult.roomId);
+          if (config.mjpegStreamer) {
+            config.mjpegStreamer.clearRoom(leaveResult.roomId);
+          }
         } else {
           if (leaveResult.peerSocketId) {
             io.to(leaveResult.peerSocketId).emit('peer:left', { role: leaveResult.role, peerId: socket.id });
@@ -519,6 +585,13 @@ export function setupSignaling(httpServer, config, logger) {
             label: `Camera ${idx + 1}`
           })) : [];
           io.to(leaveResult.roomId).emit('studio:cameras', { cameras });
+        }
+        if (!roomManager.getRoom(leaveResult.roomId)) {
+          roomChatHistories.delete(leaveResult.roomId);
+          remoteControlManager.cleanRoom(leaveResult.roomId);
+          if (config.mjpegStreamer) {
+            config.mjpegStreamer.clearRoom(leaveResult.roomId);
+          }
         }
       }
     });
@@ -829,21 +902,28 @@ export function setupSignaling(httpServer, config, logger) {
         }
         const { roomId, event } = payload;
         const membership = roomManager.getMembership(socket.id);
-        const isDirectController = remoteControlManager.isController(roomId, socket.id);
-        const activeControllerId = remoteControlManager.getActiveController(roomId);
-        const isHostForwarding = Boolean(membership && membership.role === 'sender' && activeControllerId);
+        if (!membership || membership.roomId !== roomId) {
+          return;
+        }
+
+        const isDirectController = membership.role === 'viewer' && remoteControlManager.isController(roomId, socket.id);
+        const activeController = remoteControlManager.getActiveController(roomId);
+        const activeControllerId = activeController ? activeController.socketId : null;
+        const isHostForwarding = Boolean(membership.role === 'sender' && activeControllerId);
 
         if (!isDirectController && !isHostForwarding) {
           return;
         }
 
         const effectiveControllerId = isDirectController ? socket.id : activeControllerId;
-        remoteControlManager.touchController(roomId, effectiveControllerId);
+        if (effectiveControllerId) {
+          remoteControlManager.touchController(roomId, effectiveControllerId);
+        }
         controlBridge.sendInput(event);
 
         const room = roomManager.getRoom(roomId);
         if (room && room.senderSocketId && isDirectController) {
-          io.to(room.senderSocketId).emit('control:input', event);
+          io.to(room.senderSocketId).emit('control:input', { event, controllerId: socket.id });
         }
       } catch (err) {
         logger.error(`Error in control:input: ${err.message}`);
@@ -865,6 +945,9 @@ export function setupSignaling(httpServer, config, logger) {
         room.senderSocketId = targetCameraId;
         io.to(membership.roomId).emit('studio:switched', {
           activeCameraId: targetCameraId
+        });
+        io.to(targetCameraId).emit('studio:activate', {
+          viewerId: socket.id
         });
       }
     });
@@ -1012,7 +1095,6 @@ export function setupSignaling(httpServer, config, logger) {
     // Disconnect handler
     socket.on('disconnect', (reason) => {
       logger.debug(`Socket disconnected: ${socket.id} (${reason})`);
-      failedAttempts.delete(socket.id);
       forgetViewerQuality(socket.id);
 
       const ctrlEvents = remoteControlManager.handleSocketDisconnect(socket.id);
@@ -1044,6 +1126,9 @@ export function setupSignaling(httpServer, config, logger) {
           }
           tunnelRelay.cleanRoom(leaveResult.roomId);
           remoteControlManager.cleanRoom(leaveResult.roomId);
+          if (config.mjpegStreamer) {
+            config.mjpegStreamer.clearRoom(leaveResult.roomId);
+          }
         } else {
           if (leaveResult.peerSocketId) {
             io.to(leaveResult.peerSocketId).emit('peer:left', { role: leaveResult.role, peerId: socket.id });

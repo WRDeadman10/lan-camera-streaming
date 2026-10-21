@@ -39,7 +39,7 @@ export class MjpegStreamer {
 
     // Set multipart HTTP headers
     res.writeHead(200, {
-      'Content-Type': 'multipart/x-mixed-replace; boundary=--frame',
+      'Content-Type': 'multipart/x-mixed-replace; boundary=frame',
       'Cache-Control': 'no-cache, no-store, must-revalidate',
       'Pragma': 'no-cache',
       'Expires': '0',
@@ -50,9 +50,11 @@ export class MjpegStreamer {
       res.flushHeaders();
     }
 
-    // Send latest frame immediately if available, otherwise deliver initial standby slate
+    // Send latest frame immediately if fresh (<5s), otherwise deliver initial standby slate
     const latest = this.latestFrames.get(roomId);
-    if (latest) {
+    const frameTime = this.latestFrameTimes.get(roomId) || 0;
+    const isFresh = Boolean(latest && (Date.now() - frameTime <= 5000));
+    if (isFresh) {
       this._writeFrame(res, latest);
     } else {
       this._writeFrame(res, getStandbySlateBuffer());
@@ -90,6 +92,9 @@ export class MjpegStreamer {
 
     for (const res of subs) {
       try {
+        if (res.writableNeedDrain || res.destroyed) {
+          continue;
+        }
         this._writeFrame(res, frameBuffer);
       } catch (err) {
         subs.delete(res);

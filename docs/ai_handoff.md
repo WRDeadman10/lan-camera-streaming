@@ -43,7 +43,8 @@ The project is feature-complete across all 16 proposed ecosystem phases and veri
 | UX Streamlining & Progressive Disclosure (ADR-044) | **Delivered**: Reachable LAN pairing on localhost (`/api/lan-info`); 1-click viewer sharing with PIN handoff; centered inactive viewport join form; progressive disclosure for sender setup; reactive mDNS guidance; FPS/Resolution/Connection vitals; gated dev diagnostics; 247/247 tests passing |
 | Viewport Controls Ribbon & Mobile Swipe Ribbon (ADR-043) | **Delivered**: Relocated `.video-hud` outside video wrapper to eliminate obstruction of Windows window controls; horizontal touch-scrollable ribbon on mobile (`overflow-x: auto; flex-shrink: 0`); eliminated duplicate charging icon (`⚡ 100%`); 237/237 tests passing |
 | Mobile Touchpad Edge Auto-Pan & Gesture Disambiguation (ADR-042) | **Delivered**: Zoom-aware edge auto-pan ("push-to-pan") dragging viewport when cursor reaches screen boundary until host screen edges are reached; single-tap click in mouse mode without coordinate jumping; two-finger parallel vertical scroll isolated from pinch-to-zoom; browser double-tap viewport zoom suppression; 237/237 tests passing |
-| Automated tests | 247/247 pass (`node --test`) |
+| Security Hardening & Transport Protocol Compliance (ADR-045) | **Delivered**: All 13 audit findings resolved (3 P0, 7 P1, 3 P2); DataChannel lease verification; `senderToken` anti-eviction; helper `POST /input` auth & loopback CORS; RTSP & VCAM PIN auth; IP+room PIN rate-limiting; RFC 2046 MJPEG & RFC 2435 RTSP Q=80; 252/252 tests passing |
+| Automated tests | 252/252 pass (`node --test`) |
 
 Version: `package.json` is 1.0.36.
 
@@ -98,21 +99,20 @@ Version: `package.json` is 1.0.36.
 
 ## Modified files (last iteration, 2026-10-21)
 
-- `src/server/server.js`: Added `/api/lan-info` endpoint exposing private LAN IPv4 addresses and reachable pairing URL.
-- `src/public/index.html`: Updated mobile pairing flow to use reachable LAN IP when running on localhost, with fallback warning if disconnected.
-- `src/public/sender.html`: Restructured setup with progressive disclosure (core setup vs advanced controls), added credentials row and 1-click PIN toggle to share card, renamed vitals to FPS/Resolution/Connection, and made mDNS warning concise.
-- `src/public/js/sender.js`: Implemented `updateViewerShareCard` supporting 1-click join links with PIN, dynamic vitals bar toggling, and gated developer diagnostics.
-- `src/public/viewer.html`: Embedded centered `#overlayJoinForm` inside `#videoOverlay`, hid `.video-hud` and vitals while inactive, renamed vitals, and gated developer diagnostics.
-- `src/public/js/viewer.js`: Synchronized centered overlay join form inputs with sidebar, toggled HUD and vitals on live state, and added developer mode gating.
-- `src/public/js/chat.js`: Hid floating action button until a room is actively joined (`setRoom`).
-- `src/public/js/mdns-detector.js`: Suppressed premature mDNS warning banner on initial load; exposed `showBanner()` on connection failure.
-- `src/public/js/wallpaper.js`: Defaulted to local static background, eliminating external Unsplash 403 API errors.
-- `src/public/js/ui-utils.js`: Auto-toggled `#streamVitalsBar` based on live streaming metrics in `updateVitals`.
-- `src/public/css/style.css`: Added mobile header rules hiding version metadata at 390px, added 3px vitals scroll affordance, and styled centered overlay join form.
-- `tests/ux-improvements.test.js`: Added comprehensive 10-test suite verifying all UX audit enhancements.
-- `docs/decisions.md`: Documented ADR-044.
-- `docs/tasks.md`: Added and marked complete P4.18.
-- `docs/roadmap.md`: Added Phase 22 [Completed].
-- `docs/architecture.md`: Added Section 22 detailing UX architecture and progressive disclosure.
-- `docs/project-overview.md`: Added UX streamlining and progressive disclosure summary.
-- `docs/ai_handoff.md`: Updated test count (247/247) and handoff log.
+- `src/server/config.js`: Added parsing and defaults for `ENABLE_MDNS`, `ENABLE_RTSP`, `RTSP_PORT`, `RTSP_HOST`, `ENABLE_VCAM_SHM_BRIDGE`, `VCAM_SHM_PORT`, `VCAM_SHM_HOST`, `CONTROL_HELPER_HOST`, `CONTROL_HELPER_PORT`, `CONTROL_HELPER_TOKEN`.
+- `src/server/server.js`: Enforced PIN authorization on `POST /api/vcam/bridge-frame`.
+- `src/server/signaling.js`: Enforced controller lease on `control:input`; released lease, notified host, and released held inputs (`releaseAll()`) on `room:leave` and `disconnect`; cleaned empty room control/mjpeg/chat state; validated SDP/ICE sender target IDs; implemented persistent IP+room PIN throttling; emitted `studio:activate` on camera switch.
+- `src/server/room-manager.js`: Generated cryptographic `room.senderToken`; enforced token check on reconnect eviction.
+- `src/server/mjpeg-streamer.js`: Corrected RFC 2046 MIME boundary header (`boundary=frame`); handled TCP backpressure; enforced 5-second frame freshness.
+- `src/server/rtsp-server.js`: Added room validation and PIN authentication (query or Basic Auth); dynamic JPEG SOF dimension extraction; standard RFC 2435 Q=80 tables.
+- `src/public/js/sender.js`: Enforced active controller lease verification and master toggle on DataChannel input; stored `senderToken` for auto-reconnect; handled `studio:activate`.
+- `src/public/js/viewer.js`: Passed PIN in `pumpVcamFrame`; reset `webrtcPeer` on `studio:switched`.
+- `remote-control-helper/src/LoopbackServer.cpp`: Enforced authentication token check on `POST /input`; restricted CORS origin to loopback.
+- `tests/security-audit-fixes.test.js`: Added comprehensive test suite verifying all 13 fixes.
+- `tests/signaling.test.js`: Updated reconnect eviction test to verify sender token enforcement.
+- `docs/decisions.md`: Added ADR-045.
+- `docs/tasks.md`: Added and marked complete P4.19.
+- `docs/roadmap.md`: Added Phase 23 [Completed].
+- `docs/architecture.md`: Added Section 23.
+- `docs/project-overview.md`: Added Security Hardening summary.
+- `docs/ai_handoff.md`: Updated test count (252/252) and handoff log.
