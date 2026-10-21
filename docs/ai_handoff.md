@@ -91,21 +91,25 @@ Version: `package.json` is 1.0.36.
 
 ## Modified files (last iteration, 2026-10-21)
 
-- Frontend Modules: `src/public/js/zoom-controller.js` (universal pinch-to-zoom 1x-4x, pan constraints, midpoint zoom center, Fit Screen reset), `src/public/js/control-coords.js` (zoom-scale & pan-offset aware coordinate translation and round-trip normalized-to-screen projection).
-- Tests: `tests/zoom-and-coords.test.js` (letterbox/pillarbox calculation, zoom/pan coordinate inverse, round-trip fidelity, zoom controller state & CSS transform verification).
-- Documentation: `docs/project-overview.md`, `docs/architecture.md` (§18), `docs/decisions.md` (ADR-038), `docs/roadmap.md` (§Phase 16), `docs/tasks.md` (§P4.12), `docs/ai_handoff.md`.
+- Submodule `remote-control-helper` (`e60c978`): `include/InputInjector.h`, `src/InputInjector.cpp` (`InjectText`, `InjectMouseMoveRelative`), `src/KeycodeMapper.cpp` (`PrintScreen` -> `VK_SNAPSHOT`), `src/LoopbackServer.cpp` (`text`, `mouse_move_relative`), `tests/test_main.cpp`.
+- Documentation: `docs/tasks.md`, `docs/ai_handoff.md`.
 
 ## Next recommended task
 
-1. Phase 2: Extend native remote-control helper (`remote-control-helper`) with Unicode text injection (`KEYEVENTF_UNICODE`), `PrintScreen` keycode mapping (`VK_SNAPSHOT`), and native unit tests.
-2. Phase 3: Implement adaptive cursor overlay, touchpad Mouse mode and direct Touch mode in viewer.
+1. Phase 3: Implement adaptive cursor overlay, touchpad Mouse mode (relative drag, tap left-click, long-press right-click, 2-finger scroll, double-tap & drag) and direct Touch mode in viewer.
+2. Phase 4: Implement TeamViewer-style mobile remote-control toolbar and drawers.
 
 ## Commands run and results (latest)
 
-- `node --test tests/zoom-and-coords.test.js`: 5/5 tests passed in 83ms.
+- `.\remote-control-helper\build\Release\helper-tests.exe`: 6/6 native tests passed.
 - `npm test`: 213/213 tests passed across 22 suites in 3.65s.
 
 ## Change log (newest first)
+
+- **2026-10-21 — Native Helper Unicode Text Entry, Relative Movement & PrintScreen (ADR-038, Phase 2).**
+  - Problem & Requirements: Virtual keyboard typing on phones produced arbitrary strings and Unicode text that could not be mapped to single physical scancodes. Shortcuts panel needed `PrintScreen`. Touchpad mode required relative pointer movements.
+  - Solution: (1) Added `InjectText(const std::wstring& text)` in `InputInjector.cpp` using `SendInput` with `KEYEVENTF_UNICODE`, safely typing any Unicode character directly into the focused Windows target; (2) Added `InjectMouseMoveRelative(int dx, int dy)` using `MOUSEEVENTF_MOVE`; (3) Added `PrintScreen` mapped to `VK_SNAPSHOT` in `KeycodeMapper.cpp`; (4) Added `text` and `mouse_move_relative` command handling in `LoopbackServer.cpp`; (5) Added native unit tests in `test_main.cpp`.
+  - Verification: MSBuild compilation of `helper-tests.exe` and `remote-control-helper.exe` succeeded with 0 errors. All 6 native unit tests passing. Submodule committed as `e60c978`.
 
 - **2026-10-21 — Universal Pinch-to-Zoom, Pan Engine & Zoom-Aware Coordinate Mapping (ADR-038, Phase 1).**
   - Problem & Requirements: Mobile viewers watching streams or desktop shares could not zoom or inspect small details. In addition, existing coordinate translation (`control-coords.js`) assumed unzoomed 1:1 viewports, which would cause remote clicks to land on completely wrong desktop coordinates when zoomed or panned.

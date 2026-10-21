@@ -495,12 +495,12 @@ Decision: **ADR-025**.
 - [x] Implement `ZoomController` in `src/public/js/zoom-controller.js` supporting two-finger pinch-to-zoom (1x-4x) centered on pinch midpoint, pan boundary constraints, Fit Screen reset, and floating `+`/`-` buttons.
 - [x] Extend coordinate mapping in `src/public/js/control-coords.js` to support zoom scale and pan translation offsets in `translateScreenCoordinates` and add `getScreenCoordinatesFromNormalized`.
 - [x] Add unit tests in `tests/zoom-and-coords.test.js` validating zoom/pan coordinate transformation round-trips and aspect ratio handling.
-- [ ] Extend `remote-control-helper` native C++ daemon:
-  - [ ] Add `PrintScreen` -> `VK_SNAPSHOT` in `KeycodeMapper`.
-  - [ ] Add `InjectText(const std::wstring& text)` with `KEYEVENTF_UNICODE` in `InputInjector`.
-  - [ ] Add `text` message handling in `LoopbackServer`.
-  - [ ] Add native unit tests in `remote-control-helper/tests/test_main.cpp`.
-  - [ ] Build and verify `remote-control-helper`.
+- [x] Extend `remote-control-helper` native C++ daemon:
+  - [x] Add `PrintScreen` -> `VK_SNAPSHOT` in `KeycodeMapper`.
+  - [x] Add `InjectText(const std::wstring& text)` with `KEYEVENTF_UNICODE` in `InputInjector`.
+  - [x] Add `text` message handling in `LoopbackServer`.
+  - [x] Add native unit tests in `remote-control-helper/tests/test_main.cpp`.
+  - [x] Build and verify `remote-control-helper`.
 - [ ] Implement adaptive cursor overlay (`#remoteCursorOverlay`) with stable CSS pixel sizing and accurate host hotspot positioning.
 - [ ] Implement Mouse Mode (touchpad relative movement, tap left click, long-press right click, two-finger scroll, double-tap & drag) and Touch Mode (direct screen tap) with gesture disambiguation.
 - [ ] Implement mobile remote-control toolbar:
