@@ -323,3 +323,15 @@ Tasks:
 - [x] P2.12: Parse JPEG SOF dimensions dynamically and set standard RFC 2435 table `Q=80` in `rtsp-server.js`.
 - [x] P2.13: Add missing configuration parsing for MDNS, RTSP, VCAM SHM, and remote control helper in `src/server/config.js`.
 - [x] Automated Test Coverage: 252 tests passing across 26 test suites (`tests/security-audit-fixes.test.js`).
+
+## Phase 24 — UX Refinement: Single Shared Join Form, Inactive HUD Suppression & Flip Camera Dedup (ADR-046) [Completed]
+
+**Objective:** Eliminate dual simultaneous join forms on viewer, hide inactive icon controls on sender until capture begins, and eliminate duplication of Flip Camera between setup and HUD.
+
+Tasks:
+- [x] P1: Consolidate viewer join experience to centered inline form (`#overlayJoinForm`); hide sidebar join card (`joinCard`) and `viewerSidebarPane` while inactive.
+- [x] P1: Dynamically display `viewerSidebarPane` only after joining live stream; cleanly hide on leave.
+- [x] P1: Embed inline error alert (`#overlayErrorAlert`) and advanced settings (transport, quality priority, auto-control PIN) in `#overlayJoinForm` with bidirectional sync.
+- [x] P2: Suppress 9 inactive icon controls on sender by hiding `#senderVideoHud` until capture starts.
+- [x] P2: Eliminate Flip Camera duplication by keeping labelled setup button before capture and HUD button while live.
+- [x] Automated Test Coverage: 254 tests passing across 26 test suites (`tests/ux-improvements.test.js`).

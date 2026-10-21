@@ -115,6 +115,50 @@ describe('UX Audit Improvements & Progressive Disclosure Verification', () => {
     assert.ok(btnOverlayJoin, 'btnOverlayJoin must exist');
   });
 
+  test('P1: viewer.html isolates join form to overlayJoinForm while inactive and hides sidebar joinCard', () => {
+    const dom = new JSDOM(viewerHtml, { url: 'http://localhost/' });
+    const doc = dom.window.document;
+
+    const overlayJoinForm = doc.getElementById('overlayJoinForm');
+    assert.ok(overlayJoinForm, 'overlayJoinForm must exist in videoOverlay');
+
+    const overlayErrorAlert = doc.getElementById('overlayErrorAlert');
+    assert.ok(overlayErrorAlert, 'overlayErrorAlert must exist in overlayJoinForm');
+
+    const overlayAdvancedSection = doc.getElementById('overlayAdvancedSection');
+    assert.ok(overlayAdvancedSection, 'overlayAdvancedSection must exist in overlayJoinForm');
+    assert.ok(overlayAdvancedSection.contains(doc.getElementById('overlayMediaMode')));
+    assert.ok(overlayAdvancedSection.contains(doc.getElementById('overlayQualityPriority')));
+    assert.ok(overlayAdvancedSection.contains(doc.getElementById('overlayAutoControlPinInput')));
+
+    const viewerSidebarPane = doc.getElementById('viewerSidebarPane');
+    assert.ok(viewerSidebarPane, 'viewerSidebarPane must exist');
+    assert.strictEqual(viewerSidebarPane.style.display, 'none', 'viewerSidebarPane must be hidden while inactive');
+
+    const joinCard = doc.getElementById('joinCard');
+    assert.ok(joinCard, 'joinCard must exist');
+    assert.strictEqual(joinCard.style.display, 'none', 'joinCard must be hidden while inactive so users only see overlayJoinForm');
+  });
+
+  test('P2: sender.html hides .video-hud icon row while inactive and avoids duplicating Flip Camera', () => {
+    const dom = new JSDOM(senderHtml, { url: 'http://localhost/' });
+    const doc = dom.window.document;
+
+    const senderVideoHud = doc.getElementById('senderVideoHud');
+    assert.ok(senderVideoHud, 'senderVideoHud must exist');
+    assert.strictEqual(senderVideoHud.style.display, 'none', 'senderVideoHud must be hidden before capture starts to suppress inactive icon controls');
+
+    // Labelled Flip Camera in setup form must be visible before streaming
+    const btnToggleFacing = doc.getElementById('btnToggleFacing');
+    assert.ok(btnToggleFacing, 'btnToggleFacing must exist in setup form');
+    assert.notStrictEqual(btnToggleFacing.style.display, 'none', 'btnToggleFacing must be visible in setup form');
+
+    // HUD icon button must be inside the hidden video HUD
+    const btnHudFacing = doc.getElementById('btnHudFacing');
+    assert.ok(btnHudFacing, 'btnHudFacing must exist');
+    assert.ok(senderVideoHud.contains(btnHudFacing), 'btnHudFacing must be inside senderVideoHud');
+  });
+
   test('Sender Setup progressive disclosure isolates secondary settings and remote control', () => {
     const dom = new JSDOM(senderHtml, { url: 'http://localhost/' });
     const doc = dom.window.document;

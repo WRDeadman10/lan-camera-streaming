@@ -115,3 +115,9 @@ Comprehensive hardening across the signaling server, media pipelines, and native
 - **Protected Native Helper:** The native loopback helper mandates authentication token validation for `POST /input` and restricts CORS strictly to loopback origins (`localhost`, `127.0.0.1`, `[::1]`).
 - **Sender Eviction Guard:** Senders receive a cryptographic `senderToken` upon room creation; rogue or duplicate senders cannot evict an active streamer without matching credentials.
 - **Boundary & Header Hardening:** RTSP streams require PIN authentication or Basic Auth; `/api/vcam/bridge-frame` enforces PIN verification; SDP/ICE signaling targets are strictly validated within the room; MJPEG adheres to RFC 2046 MIME boundaries with TCP backpressure management.
+
+### Single Shared Join Form & Inactive Control Gating (ADR-046)
+The application eliminates duplicate input controls and inactive button clutter:
+- **Single Viewer Join Form:** Inactive viewers are presented with a single centered join form in the video canvas, hiding the sidebar until the stream connects.
+- **Clean Inactive Camera Screen:** The sender hides floating HUD icon controls until video capture begins.
+- **Normalized Flip Camera:** Flip Camera is presented as a labelled setup button before streaming, transitioning to a floating HUD control only when live.

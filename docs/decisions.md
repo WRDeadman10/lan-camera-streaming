@@ -1040,6 +1040,36 @@ A full security and architecture audit across the core streaming application and
 **Consequences:**
 All 13 security and architectural vulnerabilities are completely resolved. The remote desktop control pipeline is cryptographically secured, unauthorized sender evictions and signaling leaks are prevented, RTSP and VCAM streams require authentication, MJPEG streams conform to RFC 2046 without memory leaks, and multi-camera studio feeds switch seamlessly. 252 automated unit tests pass across 26 suites with 0 regressions.
 
+## ADR-046: Viewer Single Shared Join Form, Inactive Sender HUD Suppression & Flip Camera Dedup
+
+**Status:** Accepted (2026-10-21)
+
+**Context:**
+A UX audit revealed three visual clarity and interaction issues:
+1. **P1 — Viewer Dual Simultaneous Join Stream Forms:** Inactive viewers saw both the centered inline join form inside `#videoOverlay` and the right sidebar `#joinCard`. Users could enter divergent values into either form, creating ambiguity over which form is primary, while mobile viewers experienced unnecessary vertical scrolling through redundant form cards.
+2. **P2 — Inactive Sender Action Row Clutter:** The inactive camera screen presented 9 icon-only action buttons before streaming commenced. On mobile and touch devices, icon buttons lack tooltips and affordances before video capture starts.
+3. **P2 — Flip Camera Duplication:** Flip Camera was presented simultaneously as an icon button in the inactive HUD (`#btnHudFacing`) and as a labelled setup button (`#btnToggleFacing`) in the setup form.
+
+**Decision:**
+1. **Viewer Single Inline Join Form & Deferred Sidebar Presentation:**
+   - In `viewer.html`, `#joinCard` and `.sidebar-pane` (`#viewerSidebarPane`) are hidden by default (`style="display: none;"`) while inactive.
+   - The centered `#overlayJoinForm` in `#videoOverlay` serves as the sole, authoritative join form before streaming starts.
+   - `#overlayJoinForm` is equipped with `#overlayErrorAlert` (displaying validation and connection errors inline) and an expandable `#overlayAdvancedSection` containing `#overlayMediaMode` (WebRTC vs Tunnel Relay), `#overlayQualityPriority` (FPS vs Resolution vs Both), and `#overlayAutoControlPinInput` (Control PIN/Password).
+   - All fields in `#overlayJoinForm` synchronize bidirectionally with the sidebar inputs in `viewer.js` via `syncOverlayInputs()`.
+   - When a viewer connects and the stream goes live, `#videoOverlay` is hidden and `#viewerSidebarPane` is displayed (`style.display = 'flex'`) revealing `#viewerSessionActivePanel` (Virtual Webcam, Remote Control, Share Link, Leave Stream).
+   - When the viewer leaves or disconnects, `#viewerSidebarPane` is hidden again and `#videoOverlay` re-appears with `#overlayJoinForm`.
+2. **Inactive Sender HUD Suppression:**
+   - In `sender.html`, `.video-hud` (`#senderVideoHud`) is hidden by default (`style="display: none;"`).
+   - When capture starts successfully in `sender.js` (`startSession`), `#senderVideoHud` is displayed (`style.display = 'flex'`).
+   - When capture stops or fails (`stopSession`), `#senderVideoHud` is hidden again (`style.display = 'none'`).
+3. **Flip Camera Deduplication:**
+   - Before streaming, only the labelled button `#btnToggleFacing` ("Flip Camera") is visible in the setup card.
+   - While streaming is live, `#btnToggleFacing` in the setup card is hidden (`style.display = 'none'`) and the HUD control `#btnHudFacing` is shown in the live HUD.
+   - When streaming ends, `#btnToggleFacing` is restored to `inline-flex` and the HUD is hidden.
+
+**Consequences:**
+Inactive screens on both sender and viewer are clean, focused, and free of redundant inputs or unlabeled icon clutter. The viewer has exactly one primary join stream form with zero eye travel. Flip Camera is presented as a clear labelled button before capture and as a convenient floating HUD button while live. 254 unit tests pass across 26 test suites with 0 regressions.
+
 ## Open decisions to revisit after the first working stream
 
 - Whether to code-sign the installer and executables (ADR-024).

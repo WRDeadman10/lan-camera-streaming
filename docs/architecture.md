@@ -659,3 +659,16 @@ To eliminate eye travel between the empty video viewport and the distant right s
 - **MJPEG RFC 2046 Compliance:** Multipart MIME boundary in `mjpeg-streamer.js` is standardized to `boundary=frame`, correctly pairing with `--frame\r\n` boundary delimiters in payload bodies. Backpressure checks (`res.writableNeedDrain || res.destroyed`) drop frames to prevent heap exhaustion.
 - **RTP JPEG RFC 2435 Standard Quantization:** `rtsp-server.js` dynamically extracts frame dimensions from JPEG SOF markers and adopts standard RFC 2435 table index `Q=80`, eliminating decoder failures and dropped frames in VLC, OBS, and ffmpeg.
 - **Centralized Environment Configuration:** `src/server/config.js` provides comprehensive parsing with type validation and defaults for `ENABLE_MDNS`, `ENABLE_RTSP`, `RTSP_PORT`, `RTSP_HOST`, `ENABLE_VCAM_SHM_BRIDGE`, `VCAM_SHM_PORT`, `VCAM_SHM_HOST`, `CONTROL_HELPER_HOST`, `CONTROL_HELPER_PORT`, and `CONTROL_HELPER_TOKEN`.
+
+## 24. UX Architecture: Single Shared Join Form & Inactive HUD Gating (ADR-046)
+
+### 24.1 Viewer Single Authoritative Join Form Lifecycle
+To eliminate user confusion from simultaneous inline and sidebar join forms, the viewer adopts a two-phase layout lifecycle:
+1. **Inactive State:** The right sidebar (`#viewerSidebarPane`) and sidebar join card (`#joinCard`) are hidden (`display: none;`). The centered `#overlayJoinForm` inside `#videoOverlay` serves as the sole, authoritative form for room entry. It includes inline error messaging (`#overlayErrorAlert`) and collapsible advanced settings (`#overlayMediaMode`, `#overlayQualityPriority`, `#overlayAutoControlPinInput`) synchronized bidirectionally via `syncOverlayInputs()`.
+2. **Active Streaming State:** When `room:join` succeeds, `#videoOverlay` hides and `#viewerSidebarPane` is revealed (`style.display = 'flex'`), displaying `#viewerSessionActivePanel` (virtual webcam driver, remote desktop control panel, share links, and leave stream button).
+3. **Disconnect / Leave State:** Upon `leaveRoom()`, the sidebar is hidden again and the inline join form re-appears.
+
+### 24.2 Inactive Sender HUD & Flip Camera State Machine
+Before streaming starts, the camera preview remains clean and uncluttered:
+1. **HUD Gating:** `#senderVideoHud` is hidden by default (`style.display = 'none'`), suppressing all 9 unlabeled action buttons until capture begins.
+2. **Flip Camera Normalization:** Flip camera is exposed before capture as a clearly labelled button (`#btnToggleFacing`) within the setup card. Once capture starts, `#btnToggleFacing` is hidden and the floating HUD icon button (`#btnHudFacing`) becomes active in `#senderVideoHud`, eliminating UI duplication across all viewports.

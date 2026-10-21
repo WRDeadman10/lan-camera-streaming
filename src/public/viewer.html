@@ -72,17 +72,45 @@
 
             <!-- Direct Viewport Join Form (Eliminates eye travel to distant sidebar) -->
             <div id="overlayJoinForm" class="overlay-join-form" style="margin-top: 16px; width: 100%; max-width: 320px; text-align: left; background: rgba(15, 23, 42, 0.85); padding: 16px 18px; border-radius: var(--radius-md); border: 1px solid var(--border-medium); box-shadow: 0 10px 25px rgba(0,0,0,0.5); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);">
+              <div id="overlayErrorAlert" class="alert alert-danger" role="alert" style="display: none; margin-bottom: 12px; font-size: 0.82rem; padding: 8px 10px; border-radius: var(--radius-sm);"></div>
               <div class="form-group" style="margin-bottom: 10px;">
                 <label for="overlayRoomId" style="font-size: 0.78rem; font-weight: 500; color: var(--text-secondary); margin-bottom: 4px; display: block;">Room ID</label>
                 <input type="text" id="overlayRoomId" placeholder="Enter Room ID" style="width: 100%; padding: 8px 10px; font-size: 0.9rem; background: rgba(0,0,0,0.5); border: 1px solid var(--border-medium); border-radius: var(--radius-sm); color: var(--text-primary); box-sizing: border-box;">
               </div>
-              <div class="form-group" style="margin-bottom: 14px;">
+              <div class="form-group" style="margin-bottom: 12px;">
                 <label for="overlayAccessPin" style="font-size: 0.78rem; font-weight: 500; color: var(--text-secondary); margin-bottom: 4px; display: block;">Access PIN</label>
                 <div class="input-action-group" style="display: flex;">
                   <input type="text" id="overlayAccessPin" value="123456" class="pin-masked" style="flex: 1; padding: 8px 10px; font-size: 0.9rem; background: rgba(0,0,0,0.5); border: 1px solid var(--border-medium); border-radius: var(--radius-sm) 0 0 var(--radius-sm); color: var(--text-primary); box-sizing: border-box;">
                   <button type="button" id="btnToggleOverlayPin" class="btn-action-inline" style="padding: 8px 12px; border-radius: 0 var(--radius-sm) var(--radius-sm) 0;">Show</button>
                 </div>
               </div>
+
+              <!-- Expandable Transport & Quality Settings in Overlay Form -->
+              <details class="collapsible-section" id="overlayAdvancedSection" style="margin-bottom: 14px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);">
+                <summary class="collapsible-summary" style="font-size: 0.8rem; padding: 6px 10px; cursor: pointer; color: var(--text-muted);">Advanced Settings</summary>
+                <div class="collapsible-body" style="padding: 10px; display: flex; flex-direction: column; gap: 8px;">
+                  <div class="form-group" style="margin-bottom: 6px;">
+                    <label for="overlayMediaMode" style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 3px; display: block;">Transport Mode</label>
+                    <select id="overlayMediaMode" style="width: 100%; padding: 6px 8px; font-size: 0.82rem; background: rgba(0,0,0,0.5); border: 1px solid var(--border-medium); border-radius: var(--radius-sm); color: var(--text-primary);">
+                      <option value="webrtc" selected>WebRTC — Direct/ICE media (Low Latency P2P)</option>
+                      <option value="tunnel-relay">Fallback — Video through zrok (uses zrok quota)</option>
+                    </select>
+                  </div>
+                  <div class="form-group" style="margin-bottom: 6px;">
+                    <label for="overlayQualityPriority" style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 3px; display: block;">Quality Priority</label>
+                    <select id="overlayQualityPriority" style="width: 100%; padding: 6px 8px; font-size: 0.82rem; background: rgba(0,0,0,0.5); border: 1px solid var(--border-medium); border-radius: var(--radius-sm); color: var(--text-primary);">
+                      <option value="fps" selected>Constant FPS — keep 30 FPS, resolution may drop</option>
+                      <option value="resolution">Constant Resolution — keep Full HD, FPS may drop</option>
+                      <option value="both">Both — Full HD + 30 FPS</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label for="overlayAutoControlPinInput" style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 3px; display: block;">Control PIN / Password (Optional)</label>
+                    <input type="password" id="overlayAutoControlPinInput" placeholder="Session PIN or password" autocomplete="off" class="form-input pin-masked" style="width: 100%; padding: 6px 8px; font-size: 0.82rem; background: rgba(0,0,0,0.5); border: 1px solid var(--border-medium); border-radius: var(--radius-sm); color: var(--text-primary); box-sizing: border-box;">
+                  </div>
+                </div>
+              </details>
+
               <button type="button" id="btnOverlayJoin" class="btn btn-primary btn-block btn-lg" style="width: 100%; font-weight: 600; padding: 10px; font-size: 0.95rem;">
                 ▶ Join Stream
               </button>
@@ -216,7 +244,7 @@
       </section>
 
       <!-- Right: Compact Controls Sidebar -->
-      <aside class="sidebar-pane" aria-label="Viewer Controls">
+      <aside class="sidebar-pane" id="viewerSidebarPane" aria-label="Viewer Controls" style="display: none;">
         <div id="errorAlert" class="alert alert-danger" role="alert"></div>
         <div id="infoAlert" class="alert alert-info" role="status"></div>
         <div id="localViewerHint" class="alert alert-info" role="status">
@@ -291,7 +319,7 @@
         </div>
 
         <!-- Join Session Card (Shown before joining) -->
-        <div class="card" id="joinCard">
+        <div class="card" id="joinCard" style="display: none;">
           <div class="card-header">
             <h2 class="card-title">Join Stream</h2>
             <span id="roomHintBadge" class="badge-hint" style="display: none;">Prefilled</span>

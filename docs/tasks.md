@@ -658,3 +658,10 @@ Decision: **ADR-025**.
   - [x] Verified native helper builds and tests pass (100%).
   - [x] Rebuilt embedded assets via `node scripts/build-embedded-assets.js`.
   - [x] Updated all 6 documentation files.
+
+### P4.20 — UX Polish: Single Shared Join Form, Inactive Sender HUD Suppression & Flip Camera Dedup (ADR-046)
+- [x] P1: Eliminate dual simultaneous Join Stream forms in viewer by hiding sidebar join card (`joinCard`) and `viewerSidebarPane` while inactive; present inline `#overlayJoinForm` as the sole primary join form with error alert and advanced settings.
+- [x] P1: Show `viewerSidebarPane` with `#viewerSessionActivePanel` only after stream joins, and hide it upon leaving or stream stop.
+- [x] P2: Hide `.video-hud` (`#senderVideoHud`) on sender while inactive, suppressing the 9 unlabeled icon controls before streaming begins.
+- [x] P2: Eliminate Flip Camera duplication before streaming by keeping the labelled button in the setup form and showing the HUD icon control only while live.
+- [x] Verification & Regression Testing: 254/254 tests passing across 26 suites (`tests/ux-improvements.test.js`).

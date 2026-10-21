@@ -1808,6 +1808,13 @@ if (viewerPeers.size > 0) {
     if (appWorkspace) {
       appWorkspace.classList.add('streaming-active');
     }
+    const senderVideoHud = document.getElementById('senderVideoHud');
+    if (senderVideoHud) {
+      senderVideoHud.style.display = 'flex';
+    }
+    if (btnToggleFacing) {
+      btnToggleFacing.style.display = 'none';
+    }
     btnStart.style.display = 'none';
     btnStop.style.display = 'inline-flex';
     btnStop.disabled = false;
@@ -1826,6 +1833,13 @@ if (viewerPeers.size > 0) {
     updateStatus('error', 'Camera Error');
     showError(err.message);
     logDiagnostic(`Camera capture failed: ${err.message}`, 'ERROR');
+    const senderVideoHudCatch = document.getElementById('senderVideoHud');
+    if (senderVideoHudCatch) {
+      senderVideoHudCatch.style.display = 'none';
+    }
+    if (btnToggleFacing) {
+      btnToggleFacing.style.display = 'inline-flex';
+    }
     btnStart.disabled = false;
     btnStart.style.display = 'inline-flex';
     btnStop.style.display = 'none';
@@ -2816,6 +2830,13 @@ function stopSession() {
   if (appWorkspace) {
     appWorkspace.classList.remove('streaming-active');
   }
+  const senderVideoHudStop = document.getElementById('senderVideoHud');
+  if (senderVideoHudStop) {
+    senderVideoHudStop.style.display = 'none';
+  }
+  if (btnToggleFacing) {
+    btnToggleFacing.style.display = 'inline-flex';
+  }
 
   if (setupFormBody) {
     setupFormBody.style.display = 'block';
@@ -3107,4 +3128,12 @@ if (btnToggleDevMode && devToolsSection) {
       localStorage.setItem('lancam_dev_mode', isCurrentlyShown ? 'false' : 'true');
     } catch (_) {}
   });
+}
+
+const initSenderVideoHud = document.getElementById('senderVideoHud');
+if (initSenderVideoHud) {
+  initSenderVideoHud.style.display = 'none';
+}
+if (btnToggleFacing) {
+  btnToggleFacing.style.display = 'inline-flex';
 }

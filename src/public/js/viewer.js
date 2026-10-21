@@ -149,6 +149,25 @@ if (qualityPrioritySelect) {
   });
 }
 
+
+function showViewerError(msg) {
+  showError(msg);
+  const overlayErr = document.getElementById('overlayErrorAlert');
+  if (overlayErr) {
+    overlayErr.textContent = msg;
+    overlayErr.style.display = 'block';
+  }
+}
+
+function clearViewerError() {
+  clearError();
+  const overlayErr = document.getElementById('overlayErrorAlert');
+  if (overlayErr) {
+    overlayErr.textContent = '';
+    overlayErr.style.display = 'none';
+  }
+}
+
 function showOverlay(title, subtitle, showReconnect = false) {
   if (!videoOverlay) {
     return;
@@ -173,6 +192,10 @@ function showOverlay(title, subtitle, showReconnect = false) {
   if (streamVitalsBar) {
     streamVitalsBar.style.display = 'none';
   }
+  const viewerSidebarPane = document.getElementById('viewerSidebarPane');
+  if (viewerSidebarPane && !isWebRtcConnected() && !isTunnelActive()) {
+    viewerSidebarPane.style.display = 'none';
+  }
   videoOverlay.style.display = 'flex';
 }
 
@@ -193,6 +216,10 @@ function hideOverlay() {
   }
   if (streamVitalsBar) {
     streamVitalsBar.style.display = 'flex';
+  }
+  const viewerSidebarPane = document.getElementById('viewerSidebarPane');
+  if (viewerSidebarPane) {
+    viewerSidebarPane.style.display = 'flex';
   }
 }
 
@@ -378,12 +405,13 @@ async function joinRoom() {
     }
   }
 
+  clearViewerError();
   if (!pin) {
-    showError('Please enter an Access PIN.');
+    showViewerError('Please enter an Access PIN.');
     return;
   }
   if (!roomId) {
-    showError('Please enter the Room ID.');
+    showViewerError('Please enter the Room ID.');
     return;
   }
 
@@ -401,7 +429,7 @@ async function joinRoom() {
   socket.emit('room:join', { roomId, role: 'viewer', pin, mediaMode: currentMediaMode }, async (response) => {
     if (!response || !response.success) {
       const errMsg = response ? response.error : 'Failed to join room';
-      showError(errMsg);
+      showViewerError(errMsg);
       logDiagnostic(`Join failed: ${errMsg}`);
       btnJoin.disabled = false;
       updateStatus('disconnected', 'Join Failed');
@@ -431,6 +459,10 @@ async function joinRoom() {
 
     if (appWorkspace) {
       appWorkspace.classList.add('streaming-active');
+    }
+    const viewerSidebar = document.getElementById('viewerSidebarPane');
+    if (viewerSidebar) {
+      viewerSidebar.style.display = 'flex';
     }
     if (joinCard) {
       joinCard.style.display = 'none';
@@ -1014,8 +1046,12 @@ function leaveRoom() {
   if (appWorkspace) {
     appWorkspace.classList.remove('streaming-active');
   }
+  const viewerSidebarLeave = document.getElementById('viewerSidebarPane');
+  if (viewerSidebarLeave) {
+    viewerSidebarLeave.style.display = 'none';
+  }
   if (joinCard) {
-    joinCard.style.display = 'block';
+    joinCard.style.display = 'none';
   }
   if (viewerSessionActivePanel) {
     viewerSessionActivePanel.style.display = 'none';
@@ -1750,11 +1786,15 @@ if (streamParams.controlPin && autoControlPinInput) {
 function syncOverlayInputs() {
   const overlayRoom = document.getElementById('overlayRoomId');
   const overlayPin = document.getElementById('overlayAccessPin');
+  const overlayMedia = document.getElementById('overlayMediaMode');
+  const overlayQuality = document.getElementById('overlayQualityPriority');
+  const overlayAutoControl = document.getElementById('overlayAutoControlPinInput');
   const btnOverlayJoin = document.getElementById('btnOverlayJoin');
 
   if (overlayRoom && roomIdInput) {
     overlayRoom.value = roomIdInput.value;
     overlayRoom.addEventListener('input', () => {
+      clearViewerError();
       roomIdInput.value = overlayRoom.value;
     });
     roomIdInput.addEventListener('input', () => {
@@ -1764,14 +1804,47 @@ function syncOverlayInputs() {
   if (overlayPin && accessPinInput) {
     overlayPin.value = accessPinInput.value;
     overlayPin.addEventListener('input', () => {
+      clearViewerError();
       accessPinInput.value = overlayPin.value;
     });
     accessPinInput.addEventListener('input', () => {
       overlayPin.value = accessPinInput.value;
     });
   }
+  if (overlayMedia && mediaModeSelect) {
+    overlayMedia.value = mediaModeSelect.value;
+    overlayMedia.addEventListener('change', () => {
+      mediaModeSelect.value = overlayMedia.value;
+    });
+    mediaModeSelect.addEventListener('change', () => {
+      overlayMedia.value = mediaModeSelect.value;
+    });
+  }
+  if (overlayQuality && qualityPrioritySelect) {
+    overlayQuality.value = qualityPrioritySelect.value;
+    overlayQuality.addEventListener('change', () => {
+      qualityPrioritySelect.value = overlayQuality.value;
+      try {
+        localStorage.setItem(QualityPriorityStorageKey, qualityPrioritySelect.value);
+      } catch (err) {}
+      sendQualityPriority();
+    });
+    qualityPrioritySelect.addEventListener('change', () => {
+      overlayQuality.value = qualityPrioritySelect.value;
+    });
+  }
+  if (overlayAutoControl && autoControlPinInput) {
+    overlayAutoControl.value = autoControlPinInput.value;
+    overlayAutoControl.addEventListener('input', () => {
+      autoControlPinInput.value = overlayAutoControl.value;
+    });
+    autoControlPinInput.addEventListener('input', () => {
+      overlayAutoControl.value = autoControlPinInput.value;
+    });
+  }
   if (btnOverlayJoin && btnJoin) {
     btnOverlayJoin.addEventListener('click', () => {
+      clearViewerError();
       btnJoin.click();
     });
   }
