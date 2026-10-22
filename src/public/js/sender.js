@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file sender.js
  * Sender client controller: handles camera capture, Socket.IO signaling,
  * and WebRTC peer connection to viewer.
@@ -2374,6 +2374,12 @@ function setupSocketListeners() {
         startTunnelFrameLoop();
       }
     } else {
+      if (isRejoining) {
+        // Rejoining is in progress; the rejoin callback will initiate the WebRTC connection
+        // after it completes. Initiating here would create a duplicate-offer race condition.
+        logDiagnostic('[ROOM] Viewer joined while rejoin is in progress; WebRTC will be initiated by the rejoin callback.', 'INFO');
+        return;
+      }
       updateStatus('connecting', 'Viewer Joined. Connecting WebRTC...');
       await initiateWebRtcConnectionForViewer(joinedId);
     }

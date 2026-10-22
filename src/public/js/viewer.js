@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file viewer.js
  * Viewer client controller: handles room join, Socket.IO signaling,
  * WebRTC answer creation, remote track rendering, and connection statistics.
@@ -201,6 +201,10 @@ function showOverlay(title, subtitle, showReconnect = false) {
 
 function isWebRtcConnected() {
   return Boolean(webrtcPeer && webrtcPeer.peerConnection && webrtcPeer.peerConnection.connectionState === 'connected');
+}
+
+function isTunnelActive() {
+  return currentMediaMode === 'tunnel-relay' && tunnelStartTime > 0;
 }
 
 function hideOverlay() {
@@ -1048,10 +1052,10 @@ function leaveRoom() {
   }
   const viewerSidebarLeave = document.getElementById('viewerSidebarPane');
   if (viewerSidebarLeave) {
-    viewerSidebarLeave.style.display = 'none';
+    viewerSidebarLeave.style.display = 'flex';
   }
   if (joinCard) {
-    joinCard.style.display = 'none';
+    joinCard.style.display = 'block';
   }
   if (viewerSessionActivePanel) {
     viewerSessionActivePanel.style.display = 'none';
