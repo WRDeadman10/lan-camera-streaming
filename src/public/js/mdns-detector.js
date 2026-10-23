@@ -268,6 +268,20 @@ export function setupMdnsWarningAndGuidance(elements = {}) {
   if (modalCancel) {
     modalCancel.addEventListener('click', closeModal);
   }
+  if (modal) {
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        closeModal();
+      }
+    });
+  }
+  if (typeof window !== 'undefined') {
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && modal && modal.style.display === 'flex') {
+        closeModal();
+      }
+    });
+  }
   if (btnDismiss) {
     btnDismiss.addEventListener('click', () => {
       if (banner) {

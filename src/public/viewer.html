@@ -116,6 +116,25 @@
               </button>
             </div>
 
+            <!-- Sender Disconnect Explanation Panel (shown on abrupt disconnect) -->
+            <div id="overlayDisconnectPanel" style="display: none; margin-top: 14px; width: 100%; max-width: 360px; text-align: left; background: rgba(15, 23, 42, 0.88); border: 1px solid rgba(239,68,68,0.35); border-radius: var(--radius-md); padding: 14px 16px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); box-shadow: 0 8px 24px rgba(0,0,0,0.5);">
+              <div style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 10px;">
+                <svg id="overlayDisconnectIcon" viewBox="0 0 24 24" fill="none" stroke="var(--accent-amber)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 20px; height: 20px; flex-shrink: 0; margin-top: 1px;">
+                  <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                <div>
+                  <div id="overlayDisconnectReason" style="font-size: 0.88rem; font-weight: 600; color: var(--text-primary); line-height: 1.4;"></div>
+                  <div id="overlayDisconnectHint" style="font-size: 0.79rem; color: var(--text-secondary); margin-top: 3px; line-height: 1.45;"></div>
+                </div>
+              </div>
+              <details class="collapsible-section" id="overlayDisconnectDetails" style="background: rgba(0,0,0,0.3); border-color: rgba(255,255,255,0.08);">
+                <summary class="collapsible-summary" style="font-size: 0.76rem; color: var(--text-muted); background: transparent;">▶ Technical Details</summary>
+                <div class="collapsible-body" style="background: transparent; padding: 8px 10px;">
+                  <ul id="overlayDisconnectTechList" style="margin: 0; padding-left: 16px; font-size: 0.76rem; color: var(--text-secondary); line-height: 1.6; list-style: disc;"></ul>
+                </div>
+              </details>
+            </div>
+
             <div style="margin-top: 12px;">
               <button type="button" id="btnOverlayReconnect" class="btn btn-primary btn-sm" style="display: none;">Reconnect Stream</button>
             </div>

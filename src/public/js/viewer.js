@@ -156,6 +156,14 @@ function showViewerError(msg) {
   if (overlayErr) {
     overlayErr.textContent = msg;
     overlayErr.style.display = 'block';
+    overlayErr.classList.remove('shake-alert');
+    void overlayErr.offsetWidth;
+    overlayErr.classList.add('shake-alert');
+  }
+  const btnOverlayJoin = document.getElementById('btnOverlayJoin');
+  if (btnOverlayJoin) {
+    btnOverlayJoin.disabled = false;
+    btnOverlayJoin.textContent = '▶ Join Stream';
   }
 }
 
@@ -184,6 +192,74 @@ function showOverlay(title, subtitle, showReconnect = false) {
   const overlayJoinForm = document.getElementById('overlayJoinForm');
   if (overlayJoinForm) {
     overlayJoinForm.style.display = showReconnect ? 'none' : 'block';
+  }
+  const disconnectPanel = document.getElementById('overlayDisconnectPanel');
+  if (disconnectPanel) {
+    disconnectPanel.style.display = 'none';
+  }
+  const videoHud = document.querySelector('.viewport-pane > .video-hud');
+  if (videoHud) {
+    videoHud.style.display = 'none';
+  }
+  if (streamVitalsBar) {
+    streamVitalsBar.style.display = 'none';
+  }
+  const viewerSidebarPane = document.getElementById('viewerSidebarPane');
+  if (viewerSidebarPane && !isWebRtcConnected() && !isTunnelActive()) {
+    viewerSidebarPane.style.display = 'none';
+  }
+  videoOverlay.style.display = 'flex';
+}
+
+function showDisconnectOverlay(title, disconnectInfo) {
+  if (!videoOverlay) {
+    return;
+  }
+  if (overlayTitle) {
+    overlayTitle.textContent = title;
+  }
+  if (overlaySubtitle) {
+    overlaySubtitle.textContent = '';
+  }
+  if (btnOverlayReconnect) {
+    btnOverlayReconnect.style.display = 'inline-flex';
+  }
+  const overlayJoinForm = document.getElementById('overlayJoinForm');
+  if (overlayJoinForm) {
+    overlayJoinForm.style.display = 'none';
+  }
+  const disconnectPanel = document.getElementById('overlayDisconnectPanel');
+  const disconnectIcon = document.getElementById('overlayDisconnectIcon');
+  const disconnectReason = document.getElementById('overlayDisconnectReason');
+  const disconnectHint = document.getElementById('overlayDisconnectHint');
+  const disconnectTechList = document.getElementById('overlayDisconnectTechList');
+  if (disconnectPanel) {
+    const severity = disconnectInfo.severity || 'warn';
+    const iconColor = severity === 'error' ? 'var(--accent-red)' : 'var(--accent-amber)';
+    const borderColor = severity === 'error' ? 'rgba(239,68,68,0.4)' : 'rgba(245,158,11,0.35)';
+    disconnectPanel.style.borderColor = borderColor;
+    if (disconnectIcon) {
+      disconnectIcon.setAttribute('stroke', iconColor);
+    }
+    if (disconnectReason) {
+      disconnectReason.textContent = disconnectInfo.reason || '';
+    }
+    if (disconnectHint) {
+      disconnectHint.textContent = disconnectInfo.hint || '';
+    }
+    if (disconnectTechList && Array.isArray(disconnectInfo.techPoints)) {
+      disconnectTechList.innerHTML = '';
+      disconnectInfo.techPoints.forEach((point) => {
+        const li = document.createElement('li');
+        li.textContent = point;
+        disconnectTechList.appendChild(li);
+      });
+    }
+    const detailsEl = document.getElementById('overlayDisconnectDetails');
+    if (detailsEl) {
+      detailsEl.removeAttribute('open');
+    }
+    disconnectPanel.style.display = 'block';
   }
   const videoHud = document.querySelector('.viewport-pane > .video-hud');
   if (videoHud) {
@@ -282,7 +358,7 @@ if (btnSetWebcam) {
     const port = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
 
     if (!roomId) {
-      showError('Please join or enter a Room ID first.');
+      showViewerError('Please join or enter a Room ID first.');
       return;
     }
 
@@ -420,6 +496,11 @@ async function joinRoom() {
   }
 
   btnJoin.disabled = true;
+  const overlayJoinBtn = document.getElementById('btnOverlayJoin');
+  if (overlayJoinBtn) {
+    overlayJoinBtn.disabled = true;
+    overlayJoinBtn.textContent = '⏳ Connecting...';
+  }
   currentMediaMode = mediaModeSelect ? mediaModeSelect.value : 'webrtc';
   updateStatus('connecting', 'Connecting to server...');
   logDiagnostic(`Connecting to signaling server for room "${roomId}" [mode: ${currentMediaMode}]...`);
@@ -436,6 +517,10 @@ async function joinRoom() {
       showViewerError(errMsg);
       logDiagnostic(`Join failed: ${errMsg}`);
       btnJoin.disabled = false;
+      if (overlayJoinBtn) {
+        overlayJoinBtn.disabled = false;
+        overlayJoinBtn.textContent = '▶ Join Stream';
+      }
       updateStatus('disconnected', 'Join Failed');
       return;
     }
@@ -448,6 +533,10 @@ async function joinRoom() {
     activeViewerPin = pin;
     btnLeave.disabled = false;
     logDiagnostic(`Joined room "${roomId}" successfully [mode: ${response.mediaMode}].`);
+    if (overlayJoinBtn) {
+      overlayJoinBtn.disabled = false;
+      overlayJoinBtn.textContent = '▶ Join Stream';
+    }
     getChatManager().setSocket(socket);
     getChatManager().setRoom(roomId, 'viewer');
     sendQualityPriority();
@@ -587,7 +676,7 @@ function setupSocketListeners() {
   socket.on('control:revoked', (data) => {
     if (isControlActive) {
       releaseControlLocally();
-      showError(data && data.reason ? data.reason : 'Remote desktop control revoked by host.');
+      showViewerError(data && data.reason ? data.reason : 'Remote desktop control revoked by host.');
       logDiagnostic(`[CONTROL] Control lease revoked: ${data && data.reason ? data.reason : 'Revoked by host'}`, 'WARN');
     }
   });
@@ -675,11 +764,35 @@ function createViewerPeer(iceServers) {
           remoteVideo.play().catch(() => {});
         }
       } else if (state === 'disconnected') {
-        updateStatus('disconnected', 'Sender Disconnected');
+        updateStatus('disconnected', 'Connection Interrupted');
         stopStatsPolling();
+        showDisconnectOverlay('Connection Interrupted', {
+          severity: 'warn',
+          reason: 'The media connection to the sender was interrupted.',
+          hint: 'The sender is still online but the direct video path dropped. This often heals automatically within a few seconds — wait before reconnecting.',
+          techPoints: [
+            'WebRTC peer connection state: disconnected',
+            'ICE keepalive packets stopped arriving — likely a transient network hiccup',
+            'Common causes: brief Wi-Fi interference, device sleep, NAT rebind, or VPN change',
+            'WebRTC may recover automatically; if not recovered in ~15 s, click Reconnect'
+          ]
+        });
       } else if (state === 'failed') {
         updateStatus('error', 'Connection Failed');
-        showOverlay('Connection Failed', 'Could not reach the sender directly. The sender and this device are probably on different networks (no TURN relay configured), or the network blocks the path.', true);
+        showDisconnectOverlay('Connection Failed', {
+          severity: 'error',
+          reason: 'Could not establish a direct video path to the sender.',
+          hint: 'The sender and this device cannot reach each other. Ensure both are on the same Wi-Fi, or configure a TURN relay server in .env.',
+          techPoints: [
+            'WebRTC peer connection state: failed',
+            'ICE negotiation exhausted all candidate pairs without finding a working path',
+            'Cause 1: Router AP/client isolation or guest network blocks direct device traffic',
+            'Cause 2: Windows Firewall on the sender PC blocks inbound UDP (Wi-Fi profile set to Public)',
+            'Cause 3: A VPN or virtual adapter on the sender hides its real LAN IP address',
+            'Cause 4: Sender and viewer are on different networks with no TURN relay (add TURN_SERVERS to .env)',
+            'Last resort: switch Media Transport Mode to Fallback (zrok) on both sides'
+          ]
+        });
         stopStatsPolling();
       }
     },
@@ -736,7 +849,7 @@ function createViewerPeer(iceServers) {
       logDiagnostic('[SDP] Sent WebRTC answer to sender.', 'INFO');
     } catch (err) {
       logDiagnostic(`[SDP] Error answering offer: ${err.message}`, 'ERROR');
-      showError(`Signaling error: ${err.message}`);
+      showViewerError(`Signaling error: ${err.message}`);
     }
   });
 
@@ -754,7 +867,16 @@ function createViewerPeer(iceServers) {
     logDiagnostic(`[ROOM] Stream state update: ${data.state}`, 'INFO');
     if (data.state === 'stopped') {
       updateStatus('stopped', 'Stream Stopped by Sender');
-      showOverlay('Stream Stopped', 'Sender stopped the stream.', true);
+      showDisconnectOverlay('Stream Stopped', {
+        severity: 'warn',
+        reason: 'The sender stopped the stream on purpose.',
+        hint: 'They clicked the Stop Streaming button. Wait for them to start again, or click Reconnect to re-join the room.',
+        techPoints: [
+          'Event: stream:state = stopped — sender emitted an explicit stop signal',
+          'The sender is still in the room and can restart without re-entering credentials',
+          'Use Reconnect Stream to re-join and wait for the next broadcast'
+        ]
+      });
     } else if (data.state === 'source-changed' || data.state === 'live') {
       // Signaling-only event: in WebRTC mode it must not claim "live" before the media connection is up.
       if (currentMediaMode === 'tunnel-relay' || isWebRtcConnected()) {
@@ -817,7 +939,17 @@ function createViewerPeer(iceServers) {
     }
     isHostControlEnabled = false;
     updateControlUIState();
-    showOverlay('Sender Disconnected', 'Sender left the room. Waiting for reconnection...', true);
+    showDisconnectOverlay('Sender Disconnected', {
+      severity: 'warn',
+      reason: 'The sender left or lost connection to the server.',
+      hint: 'This happens when the sender closes the page, reloads, changes network, or their internet drops. They may reconnect automatically within seconds.',
+      techPoints: [
+        'Event: peer:left — sender socket disconnected from signaling server',
+        'Possible causes: browser tab closed, page reload, network interface change, VPN connect/disconnect',
+        'If using screen share over RDC: closing or changing the VPN on the sender machine is a common cause',
+        'Sender has auto-rejoin; if streaming is still active on their side they should reconnect automatically'
+      ]
+    });
     stopStatsPolling();
     if (webrtcPeer) {
       webrtcPeer.close();
@@ -826,7 +958,7 @@ function createViewerPeer(iceServers) {
   });
 
   socket.on('room:error', (data) => {
-    showError(data.message);
+    showViewerError(data.message);
     logDiagnostic(`[ROOM] Signaling error: ${data.message}`, 'ERROR');
   });
 
@@ -1171,7 +1303,7 @@ if (btnPushToTalk) {
         btnPushToTalk.style.color = 'inherit';
       }, 1000);
     } else {
-      showError('Join a live room before sending intercom chime.');
+      showViewerError('Join a live room before sending intercom chime.');
     }
   });
 }
@@ -1223,7 +1355,7 @@ if (btnHudRecord && remoteVideo) {
       if (currentRoomId) {
         streamRecorder.start();
       } else {
-        showError('Join a live room before starting recording.');
+        showViewerError('Join a live room before starting recording.');
       }
     }
   });
@@ -1370,7 +1502,7 @@ function updateControlUIState() {
 
 function openControlModal() {
   if (!isViewerSessionActive || !currentRoomId) {
-    showError('Join a live room first to request remote desktop control.');
+    showViewerError('Join a live room first to request remote desktop control.');
     return;
   }
   if (controlModal) {
@@ -1521,6 +1653,18 @@ function setupRemoteControlHandlers() {
   if (btnCancelControlModal) {
     btnCancelControlModal.addEventListener('click', closeControlModal);
   }
+  if (controlModal) {
+    controlModal.addEventListener('click', (e) => {
+      if (e.target === controlModal) {
+        closeControlModal();
+      }
+    });
+  }
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && controlModal && controlModal.style.display === 'flex') {
+      closeControlModal();
+    }
+  });
 
   if (btnSubmitControl) {
     btnSubmitControl.addEventListener('click', () => submitControlRequest());
@@ -1851,6 +1995,22 @@ function syncOverlayInputs() {
       clearViewerError();
       btnJoin.click();
     });
+  }
+  const handleEnterJoin = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (btnOverlayJoin && !btnOverlayJoin.disabled) {
+        btnOverlayJoin.click();
+      }
+    }
+  };
+  if (overlayRoom) {
+    overlayRoom.addEventListener('keydown', handleEnterJoin);
+    overlayRoom.addEventListener('input', clearViewerError);
+  }
+  if (overlayPin) {
+    overlayPin.addEventListener('keydown', handleEnterJoin);
+    overlayPin.addEventListener('input', clearViewerError);
   }
   setupPasswordToggle('btnToggleOverlayPin', 'overlayAccessPin');
 }

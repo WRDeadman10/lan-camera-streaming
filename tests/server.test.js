@@ -94,7 +94,7 @@ test('createServer responds to /health and /api/config', async () => {
     assert.equal(healthRes.status, 200);
     const healthJson = await healthRes.json();
     assert.equal(healthJson.status, 'ok');
-    assert.equal(healthJson.version, '1.0.36');
+    assert.equal(healthJson.version, '1.0.37');
     assert.ok(typeof healthJson.uptime === 'number');
 
     // Check config endpoint
@@ -102,7 +102,7 @@ test('createServer responds to /health and /api/config', async () => {
     assert.equal(configRes.status, 200);
     const configJson = await configRes.json();
     assert.ok(Array.isArray(configJson.iceServers));
-    assert.equal(configJson.version, '1.0.36');
+    assert.equal(configJson.version, '1.0.37');
     // Verify ACCESS_PIN is not leaked
     assert.equal(configJson.accessPin, undefined);
 
@@ -110,7 +110,7 @@ test('createServer responds to /health and /api/config', async () => {
     const versionRes = await fetch(`${baseUrl}/api/version`);
     assert.equal(versionRes.status, 200);
     const versionJson = await versionRes.json();
-    assert.equal(versionJson.version, '1.0.36');
+    assert.equal(versionJson.version, '1.0.37');
   } finally {
     await new Promise((resolve) => httpServer.close(resolve));
   }

@@ -1070,6 +1070,64 @@ A UX audit revealed three visual clarity and interaction issues:
 **Consequences:**
 Inactive screens on both sender and viewer are clean, focused, and free of redundant inputs or unlabeled icon clutter. The viewer has exactly one primary join stream form with zero eye travel. Flip Camera is presented as a clear labelled button before capture and as a convenient floating HUD button while live. 254 unit tests pass across 26 test suites with 0 regressions.
 
+## ADR-047: Viewer Abrupt Disconnect Plain-English Overlay & Technical Diagnostics
+
+**Status:** Accepted (2026-10-23)
+
+**Context:**
+When a sender abruptly disconnected (e.g. closing an RDC window, toggling a VPN, navigating away, or experiencing a Wi-Fi drop), the viewer interface previously displayed vague one-liner strings ("Sender Disconnected" or "Connection Failed") without explaining what happened or what action to take. In addition, when leaving a room, the viewer UI did not cleanly reset the join form due to a missing helper reference (isTunnelActive), and rapid reconnect cycles triggered duplicate WebRTC offers.
+
+**Decision:**
+1. **Plain-English Explanation with Technical Progressive Disclosure (iewer.html, iewer.js):**
+   - Added #overlayDisconnectPanel to iewer.html containing:
+     - Dynamic warning/error icon (#overlayDisconnectIcon).
+     - Plain-English bold headline (#overlayDisconnectReason) describing what occurred in simple terms.
+     - Secondary actionable guidance (#overlayDisconnectHint) instructing what to do next.
+     - Collapsible <details> panel (#overlayDisconnectDetails) with bulleted technical details (#overlayDisconnectTechList) detailing signaling events, ICE states, and network causes.
+2. **showDisconnectOverlay API & State Routing (iewer.js):**
+   - Implemented showDisconnectOverlay(title, { severity, reason, hint, techPoints }) in iewer.js.
+   - Wired into four distinct disconnect lifecycle events:
+     - peer:left: Server socket disconnection (closing tab, page reload, VPN change on sender).
+     - stream:state === 'stopped': Explicit sender intentional stop.
+     - Peer connection state === 'disconnected': WebRTC keepalive interruption / transient network hiccup.
+     - Peer connection state === 'failed': Path exhaustion (NAT isolation, firewall, missing TURN).
+   - Upgraded showOverlay() to automatically hide #overlayDisconnectPanel so explanations never leak into standard join or idle states.
+3. **Leave Room & Rejoin Hardening:**
+   - Added isTunnelActive() helper so showOverlay() cleanly resets without ReferenceErrors.
+   - Restored #joinCard display to 'block' and sidebar to 'flex' on leaving room.
+   - Added isRejoining guard in sender.js peer:joined handler to eliminate duplicate WebRTC offer collisions during fast reconnects.
+
+**Consequences:**
+Viewers receive immediate, understandable explanations for stream drops without confusion. Technical users and network administrators can expand the details drawer to view the precise WebRTC/signaling cause. The leave room and reconnect workflows remain robust and fully functional. 254 unit tests pass across 26 test suites.
+
+
+## ADR-048: Comprehensive UX Audit & Micro-Interaction Polish
+
+**Status:** Accepted (2026-10-23)
+
+**Context:**
+A full 360-degree UX audit across Hub, Sender, and Viewer screens revealed 7 usability and feedback gaps:
+1. **Inactive Viewer Error Blind Spot:** When joining failed due to incorrect PIN or full room, `socket.on('room:error')` wrote into the hidden sidebar's `#errorAlert`, leaving the inactive viewer with zero feedback.
+2. **Missing Keyboard Submission:** Neither the viewer join form nor sender setup form submitted on Enter.
+3. **No Join/Start Loading States:** Buttons lacked visual loading indicators during asynchronous device enumeration and ICE negotiation.
+4. **Copy Feedback Gaps & Session PIN Bug:** Copying links and PINs lacked consistent toast feedback on touch devices, and Session PIN copy silently failed due to a missing parameter in `copyTextToClipboard`.
+5. **Snapshot Without Visual Confirmation:** Taking a still snapshot downloaded a PNG without any visual shutter response.
+6. **Modal Dismissal Inconvenience:** Modals required precise clicks on small close buttons, ignoring backdrop taps and the Escape key.
+7. **Accessibility & Touch Targets:** Focus outlines (`:focus-visible`) were missing for keyboard navigation, and small icon buttons on mobile were prone to mis-taps.
+
+**Decision:**
+1. **Dual Alert Routing & Shake Animation:** Upgraded `showViewerError()` to populate `#overlayErrorAlert`, apply a dynamic `.shake-alert` animation with reflow, and reset button states. Added auto-clear on user input.
+2. **Universal Keyboard Enter Handling:** Wired Enter key listeners to submit join and start streaming actions.
+3. **Active Button Loading States:** Displayed `⏳ Connecting...` and `⏳ Starting...` while disabling buttons to prevent double submissions.
+4. **Universal Toast Notifications:** Implemented lightweight `showToast()` in `ui-utils.js` with smooth hardware-accelerated transforms and toast variants (success, warn, error). Fixed `copyTextToClipboard` to make buttonElement optional.
+5. **Shutter Flash Animation:** Injected a 350ms white flash overlay upon capturing a snapshot accompanied by a success toast.
+6. **Accessible Modal Dismissal:** Attached backdrop click and Escape key listeners to `passwordModal`, `controlModal`, and `mdnsGuidanceModal`.
+7. **Accessibility & Responsive Polish:** Added high-contrast `:focus-visible` rings, increased mobile HUD touch buttons to 36x36px, and unified `index.html` clipboard handling.
+
+**Consequences:**
+The application is significantly more responsive, accessible, and delightful to use. Users receive instant visual confirmation on every action. 254 unit tests pass across 26 test suites.
+
+
 ## Open decisions to revisit after the first working stream
 
 - Whether to code-sign the installer and executables (ADR-024).

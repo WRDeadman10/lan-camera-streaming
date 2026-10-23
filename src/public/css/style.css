@@ -2178,6 +2178,7 @@ input:focus, select:focus {
   width: 380px;
   max-width: 100vw;
   height: 100vh;
+  height: 100dvh;
   background-color: #111b21;
   box-shadow: -8px 0 28px rgba(0, 0, 0, 0.65);
   z-index: 999;
@@ -3173,5 +3174,105 @@ body.chat-drawer-open {
   .overlay-join-form {
     max-width: 90% !important;
     padding: 12px 14px !important;
+  }
+}
+
+/* ==========================================================================
+   UX Polish: Universal Toast Notifications, Shutter Flash, & Focus Rings
+   ========================================================================== */
+.app-toast-container {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+  max-width: 90vw;
+}
+
+.app-toast {
+  pointer-events: auto;
+  padding: 8px 18px;
+  border-radius: var(--radius-pill);
+  font-size: 0.84rem;
+  font-weight: 500;
+  color: #ffffff;
+  background: rgba(15, 23, 42, 0.94);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transform: translateY(12px) scale(0.95);
+  transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1), transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.app-toast.visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.app-toast.toast-success {
+  border-color: rgba(34, 197, 94, 0.4);
+  color: #86efac;
+}
+
+.app-toast.toast-warn {
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #fde68a;
+}
+
+.app-toast.toast-error {
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+}
+
+/* Camera Shutter Flash Animation */
+.snapshot-flash-overlay {
+  position: absolute;
+  inset: 0;
+  background: #ffffff;
+  opacity: 0.75;
+  pointer-events: none;
+  z-index: 50;
+  transition: opacity 0.35s ease-out;
+}
+
+.snapshot-flash-overlay.fade-out {
+  opacity: 0;
+}
+
+/* Validation Input Shake Animation */
+@keyframes inputShake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-5px); }
+  40%, 80% { transform: translateX(5px); }
+}
+
+.shake-alert {
+  animation: inputShake 0.35s ease-in-out;
+}
+
+/* Accessible Keyboard Focus Indicators */
+:focus-visible {
+  outline: 2px solid var(--accent-cyan) !important;
+  outline-offset: 2px !important;
+}
+
+/* Mobile Touch Target Refinements */
+@media (max-width: 768px) {
+  .viewport-pane > .video-hud .hud-btn {
+    width: 36px;
+    height: 36px;
+  }
+  .btn-action-inline {
+    min-width: 44px;
+    height: 34px;
   }
 }

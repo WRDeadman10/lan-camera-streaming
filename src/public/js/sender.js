@@ -766,7 +766,7 @@ function setupRemoteControlHandlers() {
     btnCopyControlPin.addEventListener('click', async () => {
       const pin = controlPinDisplay.value;
       if (pin && pin !== '------') {
-        const ok = await copyTextToClipboard(pin);
+        const ok = await copyTextToClipboard(pin, btnCopyControlPin, '✓ Copied!');
         if (ok) {
           showInfo('Copied Session PIN to clipboard!');
           setTimeout(clearInfo, 2500);
@@ -828,6 +828,18 @@ function setupRemoteControlHandlers() {
   if (btnCancelPasswordModal) {
     btnCancelPasswordModal.addEventListener('click', closePassModal);
   }
+  if (passwordModal) {
+    passwordModal.addEventListener('click', (e) => {
+      if (e.target === passwordModal) {
+        closePassModal();
+      }
+    });
+  }
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && passwordModal && passwordModal.style.display === 'flex') {
+      closePassModal();
+    }
+  });
 
   if (btnSavePassword) {
     btnSavePassword.addEventListener('click', () => {
@@ -1724,6 +1736,7 @@ async function startSession() {
   isStudioSender = Boolean(streamParams.role === 'studio-sender' || streamParams.studio === '1');
 
   btnStart.disabled = true;
+  btnStart.textContent = '⏳ Starting...';
   updateStatus('connecting', 'Starting capture...');
   logDiagnostic('Requesting camera permissions...');
 
@@ -1841,6 +1854,7 @@ if (viewerPeers.size > 0) {
       btnToggleFacing.style.display = 'inline-flex';
     }
     btnStart.disabled = false;
+    btnStart.textContent = 'Start Streaming';
     btnStart.style.display = 'inline-flex';
     btnStop.style.display = 'none';
     return;
@@ -2900,6 +2914,7 @@ function stopSession() {
 
   if (btnStart) {
     btnStart.disabled = false;
+    btnStart.textContent = 'Start Streaming';
     btnStart.style.display = 'inline-flex';
   }
   if (btnStop) {
@@ -2912,6 +2927,20 @@ function stopSession() {
 
 if (btnStart) {
   btnStart.addEventListener('click', startSession);
+}
+const handleSenderEnter = (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    if (btnStart && !btnStart.disabled && btnStart.style.display !== 'none') {
+      btnStart.click();
+    }
+  }
+};
+if (roomIdInput) {
+  roomIdInput.addEventListener('keydown', handleSenderEnter);
+}
+if (accessPinInput) {
+  accessPinInput.addEventListener('keydown', handleSenderEnter);
 }
 if (btnStop) {
   btnStop.addEventListener('click', () => {

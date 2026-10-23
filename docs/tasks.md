@@ -665,3 +665,25 @@ Decision: **ADR-025**.
 - [x] P2: Hide `.video-hud` (`#senderVideoHud`) on sender while inactive, suppressing the 9 unlabeled icon controls before streaming begins.
 - [x] P2: Eliminate Flip Camera duplication before streaming by keeping the labelled button in the setup form and showing the HUD icon control only while live.
 - [x] Verification & Regression Testing: 254/254 tests passing across 26 suites (`tests/ux-improvements.test.js`).
+
+### P4.21 — Sender Abrupt Disconnect Plain-English Overlay & Technical Details (ADR-047)
+- [x] In iewer.html, add #overlayDisconnectPanel with dynamic SVG warning/error icon, plain-English bold reason #overlayDisconnectReason, secondary guidance #overlayDisconnectHint, and collapsible <details> panel #overlayDisconnectDetails with bullet list #overlayDisconnectTechList.
+- [x] In iewer.js, implement showDisconnectOverlay(title, disconnectInfo) accepting { severity, reason, hint, techPoints }.
+- [x] Update showOverlay to clean/hide #overlayDisconnectPanel so disconnect explanations do not leak into subsequent join/idle screens.
+- [x] Wire showDisconnectOverlay to peer:left, stream:state === 'stopped', peer connection state === 'disconnected', and peer connection state === 'failed'.
+- [x] Fix viewer leave room UI reset and missing isTunnelActive() reference.
+- [x] Fix duplicate WebRTC offer negotiation during rapid sender rejoining.
+- [x] Verification & Regression Testing: 254/254 tests passing across 26 suites.
+
+### P4.22 — Comprehensive UX Audit & Polish (ADR-048)
+- [x] In viewer.js, route all signaling and validation errors through showViewerError(), rendering in #overlayErrorAlert with dynamic .shake-alert animation when inactive.
+- [x] In viewer.js, update #btnOverlayJoin to display active loading state (⏳ Connecting...) and disable during join handshake.
+- [x] In sender.js, update #btnStart to display loading state (⏳ Starting...) and disable during device acquisition.
+- [x] Add keyboard Enter submission across Viewer join form (#overlayRoomId, #overlayAccessPin) and Sender setup form (#roomId, #accessPin).
+- [x] In ui-utils.js, implement universal floating toast notification system (showToast()), supporting success, warn, and error feedback across mobile and desktop.
+- [x] In ui-utils.js, fix copyTextToClipboard() parameter signature to support optional button elements, resolve silent failure on Session PIN copy, and trigger toast confirmations.
+- [x] In ui-utils.js, add camera shutter flash effect overlay and toast confirmation upon snapshot capture in captureFrameSnapshot().
+- [x] Add backdrop click dismissal and Escape key handlers to all modal overlays (passwordModal, controlModal, mdnsGuidanceModal).
+- [x] In style.css, add accessible :focus-visible outlines, toast styling, shutter flash animation, and refine mobile touch targets (36x36px).
+- [x] In index.html, migrate to ES module importing unified clipboard and version badge utilities from ui-utils.js.
+- [x] Verification & Regression Testing: 254/254 tests passing across 26 suites. Rebuilt embedded assets.

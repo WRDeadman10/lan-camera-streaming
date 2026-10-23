@@ -90,7 +90,7 @@ describe('Viewer Layout and Reconnect Memory Verification', () => {
     assert.match(onTrackBlock, /isWebRtcConnected\(\)/, 'onTrack must not hide the overlay before ICE connects');
 
     const failedBlock = viewerJs.slice(viewerJs.indexOf("state === 'failed'"), viewerJs.indexOf('onIceConnectionStateChange:'));
-    assert.match(failedBlock, /showOverlay\('Connection Failed'/, 'a failed peer connection must show an explanatory overlay');
+    assert.match(failedBlock, /show(?:Disconnect)?Overlay\('Connection Failed'/, 'a failed peer connection must show an explanatory overlay');
   });
 
   test('style.css and viewer.js hide top-right .video-hud in fullscreen mode', () => {
@@ -120,7 +120,7 @@ describe('Viewer Layout and Reconnect Memory Verification', () => {
     const { initializeVersionBadge } = await import('../src/public/js/ui-utils.js');
     const { getAppVersion } = await import('../src/server/version.js');
 
-    assert.equal(getAppVersion(), '1.0.36');
+    assert.equal(getAppVersion(), '1.0.37');
 
     const dom = new JSDOM('<!DOCTYPE html><html><body><span class="brand-version" id="appVersionBadge"></span></body></html>');
     global.window = dom.window;
@@ -131,18 +131,18 @@ describe('Viewer Layout and Reconnect Memory Verification', () => {
       if (url === '/api/version') {
         return {
           ok: true,
-          json: async () => ({ version: '1.0.36' })
+          json: async () => ({ version: '1.0.37' })
         };
       }
       return { ok: false };
     };
 
     const ver = await initializeVersionBadge();
-    assert.equal(ver, '1.0.36');
+    assert.equal(ver, '1.0.37');
 
     const badge = dom.window.document.getElementById('appVersionBadge');
-    assert.equal(badge.textContent, 'v1.0.36');
-    assert.equal(badge.getAttribute('title'), 'LAN Camera Streaming v1.0.36');
+    assert.equal(badge.textContent, 'v1.0.37');
+    assert.equal(badge.getAttribute('title'), 'LAN Camera Streaming v1.0.37');
   });
 });
 

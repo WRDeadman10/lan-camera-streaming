@@ -289,6 +289,36 @@ export function updateVitals({ fps, resolution, path, viewers, rtt } = {}) {
   }
 }
 
+export function showToast(message, type = 'info', durationMs = 2600) {
+  if (typeof document === 'undefined' || !document.body) {
+    return;
+  }
+  let container = document.getElementById('appToastContainer');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'appToastContainer';
+    container.className = 'app-toast-container';
+    document.body.appendChild(container);
+  }
+  const toast = document.createElement('div');
+  toast.className = `app-toast toast-${type}`;
+  toast.setAttribute('role', 'alert');
+  toast.textContent = message;
+  container.appendChild(toast);
+  const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (cb) => setTimeout(cb, 16);
+  raf(() => {
+    toast.classList.add('visible');
+  });
+  setTimeout(() => {
+    toast.classList.remove('visible');
+    setTimeout(() => {
+      if (toast.parentNode) {
+        toast.parentNode.removeChild(toast);
+      }
+    }, 300);
+  }, durationMs);
+}
+
 export function captureFrameSnapshot(mediaElement, baseFilename = 'stream-snapshot') {
   if (!mediaElement) {
     return false;
@@ -299,6 +329,21 @@ export function captureFrameSnapshot(mediaElement, baseFilename = 'stream-snapsh
 
   if (width === 0 || height === 0) {
     return false;
+  }
+
+  // Shutter flash effect on the parent container
+  if (typeof document !== 'undefined' && mediaElement.parentElement) {
+    const flash = document.createElement('div');
+    flash.className = 'snapshot-flash-overlay';
+    mediaElement.parentElement.appendChild(flash);
+    setTimeout(() => {
+      flash.classList.add('fade-out');
+      setTimeout(() => {
+        if (flash.parentNode) {
+          flash.parentNode.removeChild(flash);
+        }
+      }, 350);
+    }, 40);
   }
 
   const canvas = document.createElement('canvas');
@@ -328,30 +373,36 @@ export function captureFrameSnapshot(mediaElement, baseFilename = 'stream-snapsh
     setTimeout(() => {
       URL.revokeObjectURL(url);
     }, 1000);
+    showToast('📸 Snapshot saved to downloads', 'success');
   }, 'image/png');
 
   return true;
 }
 
-export async function copyTextToClipboard(text, buttonElement, feedbackLabel = '✓ Copied!') {
-  if (!text || !buttonElement) {
+export async function copyTextToClipboard(text, buttonElement = null, feedbackLabel = '✓ Copied!') {
+  if (!text) {
     return false;
   }
   try {
     const success = await copyToClipboard(text);
     if (success) {
-      const original = buttonElement.innerHTML;
-      buttonElement.innerHTML = feedbackLabel;
-      setTimeout(() => {
-        buttonElement.innerHTML = original;
-      }, 2000);
+      if (buttonElement) {
+        const original = buttonElement.innerHTML;
+        buttonElement.innerHTML = feedbackLabel;
+        setTimeout(() => {
+          buttonElement.innerHTML = original;
+        }, 2000);
+      }
+      showToast(feedbackLabel.includes('Copied') ? feedbackLabel : '✓ Copied to clipboard!', 'success');
       return true;
     } else {
       logDiagnostic('Copy failed: Clipboard copy not supported or permitted', 'WARN');
+      showToast('⚠️ Copy failed: clipboard not permitted', 'warn');
       return false;
     }
   } catch (err) {
     logDiagnostic(`Copy failed: ${err.message}`, 'WARN');
+    showToast(`⚠️ Copy failed: ${err.message}`, 'error');
     return false;
   }
 }
