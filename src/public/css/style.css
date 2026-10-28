@@ -3278,7 +3278,7 @@ body.chat-drawer-open {
 }
 
 /* Tablet Range (681px-1100px): keep the sidebar readable and let the share card wrap instead of clipping */
-@media (min-width: 681px) and (max-width: 1100px) {
+@media (orientation: landscape) and (min-width: 681px) and (max-width: 1100px) {
   .sidebar-pane {
     width: clamp(300px, 34vw, 340px);
     min-width: 300px;
@@ -3394,4 +3394,14 @@ body.chat-drawer-open {
   font-size: 0.78rem;
   color: var(--text-muted);
   padding: 6px 2px;
+}
+
+/* Portrait Tablet (681px+): sidebar spans the full width under the video instead of a 380px column */
+@media (orientation: portrait) and (min-width: 681px) {
+  .viewer-workspace .sidebar-pane,
+  .sidebar-pane {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+  }
 }
