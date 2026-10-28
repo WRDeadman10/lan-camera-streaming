@@ -3276,3 +3276,34 @@ body.chat-drawer-open {
     height: 34px;
   }
 }
+
+/* Tablet Range (681px-1100px): keep the sidebar readable and let the share card wrap instead of clipping */
+@media (min-width: 681px) and (max-width: 1100px) {
+  .sidebar-pane {
+    width: clamp(300px, 34vw, 340px);
+    min-width: 300px;
+  }
+
+  #shareQrCard .card-header {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  #shareCredentialsRow {
+    flex-wrap: wrap;
+    gap: 6px 16px !important;
+  }
+
+  .share-input-row {
+    flex-wrap: wrap;
+  }
+
+  .share-input-row input {
+    flex: 1 1 140px;
+  }
+
+  #shareQrCard > div[style*="justify-content: space-between"] {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+}

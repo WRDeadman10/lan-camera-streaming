@@ -107,7 +107,7 @@ export class RoomManager {
             room.senderSocketId = socketId;
             room.senderSocketIds.add(socketId);
           } else {
-            return { success: false, error: 'Room already has an active sender.' };
+            return { success: false, error: 'Room already has an active sender.', code: 'SENDER_BUSY' };
           }
         } else {
           room.senderSocketId = socketId;

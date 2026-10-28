@@ -1876,6 +1876,13 @@ if (viewerPeers.size > 0) {
   socket.emit('room:join', { roomId, role, pin, mediaMode: currentMediaMode, reconnect: isAutoRejoining, senderToken: activeSenderToken }, async (response) => {
     if (!response || !response.success) {
       const errMsg = response ? response.error : 'Connection to room failed';
+      if (response && response.code === 'SENDER_BUSY') {
+        // Another sender owns this room. Retrying cannot succeed, so release local capture and reset controls.
+        logDiagnostic(`Join refused: ${errMsg} Stopping local capture.`, 'WARN');
+        showError(`${errMsg} Change the Room ID or stop the other sender.`);
+        stopSession();
+        return;
+      }
       showError(errMsg);
       logDiagnostic(`Join failed: ${errMsg}. Will automatically retry in 3 seconds...`, 'WARN');
       updateStatus('connecting', `Join failed (${errMsg}) - Retrying...`);
