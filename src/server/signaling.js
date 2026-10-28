@@ -58,6 +58,36 @@ export function setupSignaling(httpServer, config, logger) {
 
   const roomChatHistories = new Map(); // roomId -> Array<ChatMessage>
   const MAX_CHAT_HISTORY = 50;
+  const participantNames = new Map(); // socketId -> display name shown in the room roster
+  const MAX_DISPLAY_NAME_LENGTH = 40;
+
+  function sanitizeDisplayName(value) {
+    return typeof value === 'string' ? value.trim().slice(0, MAX_DISPLAY_NAME_LENGTH) : '';
+  }
+
+  function buildParticipantsPayload(roomId) {
+    const room = roomManager.getRoom(roomId);
+    if (!room) {
+      return null;
+    }
+    const toEntry = (socketId, role) => ({
+      id: socketId,
+      role,
+      name: participantNames.get(socketId) || (role === 'sender' ? 'Streamer' : 'Viewer')
+    });
+    return {
+      roomId,
+      senders: Array.from(room.senderSocketIds || []).map((id) => toEntry(id, 'sender')),
+      viewers: Array.from(room.viewerSocketIds || []).map((id) => toEntry(id, 'viewer'))
+    };
+  }
+
+  function broadcastParticipants(roomId) {
+    const payload = buildParticipantsPayload(roomId);
+    if (payload) {
+      io.to(roomId).emit('room:participants', payload);
+    }
+  }
 
   function allowQualityEvent(socketId) {
     const now = Date.now();
@@ -120,6 +150,11 @@ export function setupSignaling(httpServer, config, logger) {
           logger.warn(`Rate limited ${throttleKey} (socket: ${socket.id})`);
           if (typeof callback === 'function') callback({ success: false, error: err });
           return;
+        }
+
+        const requestedName = sanitizeDisplayName(payload.displayName);
+        if (requestedName) {
+          participantNames.set(socket.id, requestedName);
         }
 
         let shouldReconnect = Boolean(reconnect);
@@ -214,6 +249,8 @@ export function setupSignaling(httpServer, config, logger) {
             });
           }
         }
+
+        broadcastParticipants(roomId);
 
         if (result.isStudio || roomManager.getRoom(roomId)?.isStudio) {
           const roomObj = roomManager.getRoom(roomId);
@@ -560,10 +597,12 @@ export function setupSignaling(httpServer, config, logger) {
         }
       }
 
+      participantNames.delete(socket.id);
       const leaveResult = roomManager.leave(socket.id);
       if (leaveResult) {
         socket.leave(leaveResult.roomId);
         logger.info(`Socket ${socket.id} left room "${leaveResult.roomId}"`);
+        broadcastParticipants(leaveResult.roomId);
         if (leaveResult.role === 'sender') {
           for (const vId of leaveResult.peerSocketIds) {
             io.to(vId).emit('peer:left', { role: leaveResult.role, peerId: socket.id });
@@ -1087,6 +1126,8 @@ export function setupSignaling(httpServer, config, logger) {
         }
 
         io.to(membership.roomId).emit('chat:system', sysMessage);
+        participantNames.set(socket.id, newName);
+        broadcastParticipants(membership.roomId);
       } catch (err) {
         logger.error(`Error in chat:name-change: ${err.message}`);
       }
@@ -1116,10 +1157,12 @@ export function setupSignaling(httpServer, config, logger) {
         }
       }
 
+      participantNames.delete(socket.id);
       const leaveResult = roomManager.leave(socket.id);
       if (leaveResult) {
         socket.leave(leaveResult.roomId);
         logger.info(`Socket ${socket.id} disconnected from room "${leaveResult.roomId}"`);
+        broadcastParticipants(leaveResult.roomId);
         if (leaveResult.role === 'sender') {
           for (const vId of leaveResult.peerSocketIds) {
             io.to(vId).emit('peer:left', { role: leaveResult.role, peerId: socket.id });

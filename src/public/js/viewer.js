@@ -10,6 +10,7 @@ import { calculateVideoRenderBox, translateScreenCoordinates } from './control-c
 import { ZoomController } from './zoom-controller.js';
 import { MobileRemoteController } from './mobile-control.js';
 import { getChatManager } from './chat.js';
+import { renderRoster } from './participants-roster.js';
 
 let webrtcPeer = null;
 let socket = null;
@@ -511,7 +512,7 @@ async function joinRoom() {
   }
   getChatManager().setSocket(socket);
 
-  socket.emit('room:join', { roomId, role: 'viewer', pin, mediaMode: currentMediaMode }, async (response) => {
+  socket.emit('room:join', { roomId, role: 'viewer', pin, mediaMode: currentMediaMode, displayName: getChatManager().username }, async (response) => {
     if (!response || !response.success) {
       const errMsg = response ? response.error : 'Failed to join room';
       showViewerError(errMsg);
@@ -610,6 +611,23 @@ async function joinRoom() {
 }
 
 function setupSocketListeners() {
+  socket.on('room:participants', (payload) => {
+    const rosterCard = document.getElementById('rosterCard');
+    const rosterList = document.getElementById('rosterList');
+    const rosterCount = document.getElementById('rosterCount');
+    const viewerCount = renderRoster(rosterList, payload, socket.id, 'viewer');
+    if (rosterCount) {
+      rosterCount.textContent = String(viewerCount);
+    }
+    if (rosterCard) {
+      rosterCard.style.display = 'block';
+    }
+    const viewerSidebarPane = document.getElementById('viewerSidebarPane');
+    if (viewerSidebarPane) {
+      viewerSidebarPane.style.display = '';
+    }
+  });
+
   socket.on('peer:joined', (data) => {
     logDiagnostic(`Sender joined (${data.peerId}) [mode: ${data.mediaMode || currentMediaMode}].`);
     if (currentMediaMode === 'tunnel-relay') {
@@ -967,7 +985,7 @@ function createViewerPeer(iceServers) {
     if (isViewerSessionActive && currentRoomId && activeViewerPin) {
       logDiagnostic(`[AutoReconnect] Viewer socket reconnected. Rejoining room "${currentRoomId}"...`, 'INFO');
       updateStatus('connecting', 'Rejoining room...');
-      socket.emit('room:join', { roomId: currentRoomId, role: 'viewer', pin: activeViewerPin, mediaMode: currentMediaMode }, (response) => {
+      socket.emit('room:join', { roomId: currentRoomId, role: 'viewer', pin: activeViewerPin, mediaMode: currentMediaMode, displayName: getChatManager().username }, (response) => {
         if (response && response.success) {
           logDiagnostic(`[AutoReconnect] Viewer rejoined room "${currentRoomId}" successfully.`, 'INFO');
           getChatManager().setSocket(socket);

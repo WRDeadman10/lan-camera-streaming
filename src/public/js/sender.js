@@ -13,6 +13,7 @@ import { getRecommendedBitrateHints, isQualityMode, readVideoBitrateParams } fro
 import { classifyEncoder } from './encoder-info.js';
 import { formatSenderStats } from './sender-stats.js';
 import { getChatManager } from './chat.js';
+import { renderRoster } from './participants-roster.js';
 import { setupMdnsWarningAndGuidance } from './mdns-detector.js';
 
 let mdnsController = null;
@@ -1873,7 +1874,7 @@ if (viewerPeers.size > 0) {
   updateStatus('connecting', 'Joining Room...');
 
   const isAutoRejoining = Boolean(isRejoining);
-  socket.emit('room:join', { roomId, role, pin, mediaMode: currentMediaMode, reconnect: isAutoRejoining, senderToken: activeSenderToken }, async (response) => {
+  socket.emit('room:join', { roomId, role, pin, mediaMode: currentMediaMode, reconnect: isAutoRejoining, senderToken: activeSenderToken, displayName: getChatManager().username }, async (response) => {
     if (!response || !response.success) {
       const errMsg = response ? response.error : 'Connection to room failed';
       if (response && response.code === 'SENDER_BUSY') {
@@ -2000,6 +2001,7 @@ async function rejoinRoomAsSender() {
 
   const role = isStudioSender ? 'studio-sender' : 'sender';
   const joinPayload = {
+    displayName: getChatManager().username,
     roomId: activeRoomId,
     role,
     pin: activePin,
@@ -2312,6 +2314,14 @@ async function initiateWebRtcConnectionForViewer(viewerId) {
   }
 }
 
+// Hides the viewer roster once this sender leaves the room.
+function resetViewersCard() {
+  const viewersCard = document.getElementById('viewersCard');
+  if (viewersCard) {
+    viewersCard.style.display = 'none';
+  }
+}
+
 function ensureSocket() {
   if (typeof io !== 'function') {
     return null;
@@ -2382,6 +2392,19 @@ function setupSocketListeners() {
     } else {
       logDiagnostic('[MJPEG] No Python/HTTP consumer - frame upload paused.', 'INFO');
       stopMjpegFrameLoop();
+    }
+  });
+
+  socket.on('room:participants', (payload) => {
+    const viewersCard = document.getElementById('viewersCard');
+    const viewersRoster = document.getElementById('viewersRoster');
+    const viewersCount = document.getElementById('viewersCount');
+    const viewerCount = renderRoster(viewersRoster, payload, socket.id, 'sender');
+    if (viewersCount) {
+      viewersCount.textContent = String(viewerCount);
+    }
+    if (viewersCard) {
+      viewersCard.style.display = 'block';
     }
   });
 
@@ -2893,6 +2916,7 @@ function stopSession() {
   if (socket) {
     socket.emit('stream:state', { state: 'stopped' });
     socket.emit('room:leave');
+    resetViewersCard();
   }
 
   for (const peer of viewerPeers.values()) {
